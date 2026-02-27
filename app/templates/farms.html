@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Farms | AgriTrack{% endblock %}
+{% block content %}
+<h1>Farms</h1>
+<form method="post" class="grid-form">
+  <label>Name<input name="name" required /></label>
+  <label>Timezone<input name="timezone" value="UTC" /></label>
+  <button type="submit">Create Farm</button>
+</form>
+
+<table>
+  <thead><tr><th>Name</th><th>Timezone</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for farm in farms %}
+    <tr>
+      <td><a href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">{{ farm.name }}</a></td>
+      <td>{{ farm.timezone }}</td>
+      <td>{{ 'Active' if farm.active else 'Inactive' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3">No farms yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

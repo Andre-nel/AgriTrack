@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | AgriTrack{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<div class="cards">
+  <article class="card"><h2>Farms</h2><p>{{ summary.farm_count }}</p></article>
+  <article class="card"><h2>Paddocks</h2><p>{{ summary.paddock_count }}</p></article>
+  <article class="card"><h2>Mobs</h2><p>{{ summary.mob_count }}</p></article>
+</div>
+
+<section>
+  <h2>Farm quick links</h2>
+  <ul>
+    {% for farm in farms %}
+    <li><a href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">{{ farm.name }}</a></li>
+    {% else %}
+    <li>No farms yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

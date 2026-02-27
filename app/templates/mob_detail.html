@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ mob.name }} | AgriTrack{% endblock %}
+{% block content %}
+<h1>{{ mob.name }}</h1>
+<p>Status: {{ mob.status }}</p>
+
+<section class="split">
+  <article>
+    <h2>Balances</h2>
+    <table>
+      <thead><tr><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
+      <tbody>
+        {% for b in mob.balances %}
+        <tr>
+          <td>{{ b.animal_group_type.species }}</td>
+          <td>{{ b.animal_group_type.breed }}</td>
+          <td>{{ b.animal_group_type.sex }}</td>
+          <td>{{ b.animal_group_type.age_class }}</td>
+          <td>{{ b.head_count }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">No stock balances yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <article>
+    <h2>Adjust Stock</h2>
+    <form method="post" action="{{ url_for('web.mob_adjust_form', mob_id=mob.id) }}" class="grid-form">
+      <label>Species<input name="species" value="cattle" /></label>
+      <label>Breed<input name="breed" value="mixed" /></label>
+      <label>Sex<input name="sex" value="mixed" /></label>
+      <label>Age class<input name="age_class" value="adult" /></label>
+      <label>Event type
+        <select name="event_type">
+          {% for e in stock_event_types %}
+          <option value="{{ e.value }}">{{ e.value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Quantity<input type="number" min="1" name="quantity" required /></label>
+      <label>Note<input name="note" /></label>
+      <button type="submit">Apply</button>
+    </form>
+  </article>
+</section>
+
+<section>
+  <h2>Move Mob</h2>
+  <form method="post" action="{{ url_for('web.mob_move_form', mob_id=mob.id) }}" class="grid-form">
+    <label>Paddock
+      <select name="paddock_id" required>
+        <option value="">Choose paddock</option>
+        {% for p in paddocks %}
+        <option value="{{ p.id }}">{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Move</button>
+  </form>
+</section>
+{% endblock %}

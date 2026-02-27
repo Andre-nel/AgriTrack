@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ paddock.name }} | AgriTrack{% endblock %}
+{% block content %}
+<h1>{{ paddock.name }}</h1>
+<p>Area: {{ paddock.area_ha }} ha | Grazeable: {{ paddock.grazeable_area_ha }} ha</p>
+
+<section>
+  <h2>Current Weighted Stock</h2>
+  <ul>
+    {% for group_id, total in stock.items() %}
+    <li>{{ group_id }}: {{ "%.2f"|format(total) }}</li>
+    {% else %}
+    <li>No active grazing allocations.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section>
+  <h2>Grazing History</h2>
+  <table>
+    <thead><tr><th>Mob</th><th>Start</th><th>End</th><th>Fraction</th></tr></thead>
+    <tbody>
+      {% for a in history %}
+      <tr>
+        <td><a href="{{ url_for('web.mob_detail', mob_id=a.grazing_session.mob_id) }}">{{ a.grazing_session.mob.name }}</a></td>
+        <td>{{ a.grazing_session.start_at }}</td>
+        <td>{{ a.grazing_session.end_at or 'Open' }}</td>
+        <td>{{ a.allocation_fraction }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No grazing history.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
