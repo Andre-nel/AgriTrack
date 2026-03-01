@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from collections import defaultdict
 
 from app.extensions import db
 from app.models import Mob, MovementEvent, MovementEventMob
@@ -10,6 +11,70 @@ from app.services.stock_service import StockService
 
 
 class MovementService:
+    @staticmethod
+    def _normalize_splits(source_mob: Mob, splits: list[dict]) -> list[dict]:
+        if not splits:
+            raise ValueError("At least two split mobs are required")
+
+        source_balances = {
+            str(balance.animal_group_type_id): int(balance.head_count)
+            for balance in source_mob.balances
+            if int(balance.head_count) > 0
+        }
+        if not source_balances:
+            raise ValueError("Source mob has no stock to split")
+
+        by_mob: dict[str, dict[str, int]] = defaultdict(dict)
+        allocated_totals = {group_id: 0 for group_id in source_balances}
+
+        for split in splits:
+            name = (split.get("name") or "").strip()
+            if not name:
+                raise ValueError("Each split requires a mob name")
+            if name.lower() == source_mob.name.lower():
+                raise ValueError("Split mob name cannot match the source mob name")
+
+            groups = split.get("groups", [])
+            if not groups:
+                raise ValueError(f"Split mob '{name}' must include at least one group allocation")
+
+            mob_group_totals = by_mob[name]
+            for group in groups:
+                group_id = str(group.get("animal_group_type_id") or "").strip()
+                if group_id not in source_balances:
+                    raise ValueError("Split contains an invalid animal group for this source mob")
+
+                try:
+                    qty = int(group.get("quantity", 0))
+                except (TypeError, ValueError):
+                    raise ValueError("Split quantities must be whole numbers")
+                if qty <= 0:
+                    raise ValueError("Split quantities must be greater than 0")
+
+                mob_group_totals[group_id] = mob_group_totals.get(group_id, 0) + qty
+                allocated_totals[group_id] += qty
+
+        normalized = []
+        for name, groups in by_mob.items():
+            normalized_groups = [
+                {"animal_group_type_id": group_id, "quantity": qty}
+                for group_id, qty in groups.items()
+            ]
+            normalized.append({"name": name, "groups": normalized_groups})
+
+        if len(normalized) < 2:
+            raise ValueError("Split must create at least two mobs")
+
+        for group_id, source_qty in source_balances.items():
+            allocated_qty = allocated_totals.get(group_id, 0)
+            if allocated_qty != source_qty:
+                raise ValueError(
+                    "Split allocations must fully allocate each source group "
+                    f"(group {group_id}: allocated {allocated_qty}, available {source_qty})"
+                )
+
+        return normalized
+
     @staticmethod
     def move_mob(mob: Mob, allocations: list[dict], when=None):
         when = when or datetime.now(timezone.utc)
@@ -37,6 +102,7 @@ class MovementService:
 
     @staticmethod
     def split_mob(source_mob: Mob, splits: list[dict], when=None):
+        splits = MovementService._normalize_splits(source_mob=source_mob, splits=splits)
         when = when or datetime.now(timezone.utc)
         event = MovementEvent(farm_id=source_mob.farm_id, event_time=when, event_kind=MovementEventKind.split)
         db.session.add(event)

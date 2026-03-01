@@ -11,6 +11,10 @@ class AnimalGroupType(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     age_class = db.Column(db.String(50), nullable=False)
 
     __table_args__ = (
+        db.CheckConstraint(
+            "species IN ('Cattle', 'Sheep', 'Goat')",
+            name="ck_animal_group_species_allowed",
+        ),
         db.UniqueConstraint("species", "breed", "sex", "age_class", name="uq_animal_group_type"),
     )
 

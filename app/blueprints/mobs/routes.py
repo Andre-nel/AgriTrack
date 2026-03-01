@@ -42,7 +42,12 @@ def update_mob(mob_id):
     payload = request.get_json() or {}
 
     mob.name = payload.get("name", mob.name)
-    mob.status = payload.get("status", mob.status)
+    requested_status = payload.get("status", mob.status)
+    if requested_status == "archived":
+        total_head_count = sum(int(balance.head_count) for balance in mob.balances)
+        if total_head_count > 0:
+            return jsonify({"error": "Mob cannot be deactivated while it still contains stock"}), 400
+    mob.status = requested_status
     mob.origin_note = payload.get("origin_note", mob.origin_note)
 
     db.session.commit()
@@ -53,13 +58,32 @@ def update_mob(mob_id):
 def adjust_mob_stock(mob_id):
     payload = request.get_json() or {}
     try:
-        event_type = StockEventType(payload["event_type"])
+        selected_event_type = StockEventType(payload["event_type"])
+        quantity = int(payload["quantity"])
+        event_type = selected_event_type
+        event_quantity = quantity
+        if selected_event_type == StockEventType.count:
+            current_balance = AnimalGroupBalance.query.filter_by(
+                mob_id=mob_id,
+                animal_group_type_id=payload["animal_group_type_id"],
+            ).first()
+            current_head_count = current_balance.head_count if current_balance else 0
+            delta = quantity - current_head_count
+            if delta == 0:
+                return jsonify({"message": "Count matches current balance. No stock adjustment posted."}), 200
+            if delta > 0:
+                event_type = StockEventType.adjustment_in
+                event_quantity = delta
+            else:
+                event_type = StockEventType.missing
+                event_quantity = -delta
+
         ledger = StockService.adjust_stock(
             mob_id=mob_id,
             farm_id=payload["farm_id"],
             animal_group_type_id=payload["animal_group_type_id"],
             event_type=event_type,
-            quantity=int(payload["quantity"]),
+            quantity=event_quantity,
             note=payload.get("note"),
         )
         db.session.commit()
@@ -98,6 +122,18 @@ def move_mob(mob_id):
         return jsonify({"error": str(exc)}), 400
 
     return jsonify({"grazing_session_id": str(session.id)}), 201
+
+
+@bp.post("/<mob_id>/deactivate")
+def deactivate_mob(mob_id):
+    mob = Mob.query.get_or_404(mob_id)
+    total_head_count = sum(int(balance.head_count) for balance in mob.balances)
+    if total_head_count > 0:
+        return jsonify({"error": "Mob cannot be deactivated while it still contains stock"}), 400
+
+    mob.status = "archived"
+    db.session.commit()
+    return jsonify({"id": str(mob.id), "status": mob.status}), 200
 
 
 @bp.post("/<mob_id>/split")

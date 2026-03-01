@@ -2,10 +2,10 @@
 {% block title %}{{ mob.name }} | AgriTrack{% endblock %}
 {% block content %}
 <h1>{{ mob.name }}</h1>
-<p>Status: {{ mob.status }}</p>
+<p class="muted">Status: {{ mob.status }}</p>
 
 <section class="split">
-  <article>
+  <article class="card">
     <h2>Balances</h2>
     <table>
       <thead><tr><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
@@ -25,39 +25,333 @@
     </table>
   </article>
 
-  <article>
+  <article class="card">
     <h2>Adjust Stock</h2>
     <form method="post" action="{{ url_for('web.mob_adjust_form', mob_id=mob.id) }}" class="grid-form">
-      <label>Species<input name="species" value="cattle" /></label>
-      <label>Breed<input name="breed" value="mixed" /></label>
-      <label>Sex<input name="sex" value="mixed" /></label>
-      <label>Age class<input name="age_class" value="adult" /></label>
-      <label>Event type
-        <select name="event_type">
-          {% for e in stock_event_types %}
-          <option value="{{ e.value }}">{{ e.value }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Quantity<input type="number" min="1" name="quantity" required /></label>
+      <div class="grid-two">
+        <label>Species
+          <select name="species" id="adjustSpecies" required>
+            <option value="Cattle" selected>Cattle</option>
+            <option value="Sheep">Sheep</option>
+            <option value="Goat">Goat</option>
+          </select>
+        </label>
+        <label>Breed<input name="breed" id="adjustBreed" value="Bonsmara" /></label>
+      </div>
+      <div class="grid-two">
+        <label>Sex
+          <select name="sex" id="adjustSex" required>
+            <option value="mixed" selected>mixed</option>
+            <option value="cow">cow</option>
+            <option value="bul">bul</option>
+            <option value="ox">ox</option>
+          </select>
+        </label>
+        <label>Age class
+          <select name="age_class" id="adjustAgeClass" required>
+            <option value="calf" selected>calf</option>
+            <option value="young">young</option>
+            <option value="adult">adult</option>
+            <option value="old">old</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Event type
+          <select name="event_type" id="adjustEventType">
+            {% for e in stock_event_types %}
+            <option value="{{ e.value }}" {% if e.value == "count" %}selected{% endif %}>{{ e.value }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Quantity<input type="number" min="1" name="quantity" required /></label>
+      </div>
       <label>Note<input name="note" /></label>
-      <button type="submit">Apply</button>
+      <button type="submit" class="btn">Apply Adjustment</button>
     </form>
   </article>
 </section>
 
-<section>
+<section class="card">
+  <h2>Current Paddock Allocation</h2>
+  <table>
+    <thead><tr><th>Paddock</th><th>Allocation %</th></tr></thead>
+    <tbody>
+      {% for allocation in current_allocations %}
+      <tr>
+        <td>{{ allocation.paddock_name }}</td>
+        <td>{{ "%.2f"|format(allocation.allocation_pct) }}%</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="2">No active paddock allocation.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Current total: {{ "%.2f"|format(allocation_total_pct) }}%</p>
+</section>
+
+<section class="card">
   <h2>Move Mob</h2>
+  {% if paddocks %}
   <form method="post" action="{{ url_for('web.mob_move_form', mob_id=mob.id) }}" class="grid-form">
-    <label>Paddock
-      <select name="paddock_id" required>
-        <option value="">Choose paddock</option>
-        {% for p in paddocks %}
-        <option value="{{ p.id }}">{{ p.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit">Move</button>
+    <div id="allocationRows">
+      <div class="allocation-row">
+        <label>Paddock
+          <select name="paddock_id" required>
+            <option value="">Choose paddock</option>
+            {% for p in paddocks %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Allocation %
+          <input type="number" name="allocation_pct" min="0.01" max="100" step="0.01" required />
+        </label>
+        <button type="button" class="btn btn-secondary row-remove">Remove</button>
+      </div>
+    </div>
+    <div class="row-actions">
+      <button type="button" id="addAllocationRow" class="btn btn-secondary">Add Allocation Row</button>
+      <span id="allocationTotal" class="muted">Total: 0.00%</span>
+    </div>
+    <button type="submit" class="btn">Move Mob</button>
+  </form>
+  <template id="allocationRowTemplate">
+    <div class="allocation-row">
+      <label>Paddock
+        <select name="paddock_id" required>
+          <option value="">Choose paddock</option>
+          {% for p in paddocks %}
+          <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Allocation %
+        <input type="number" name="allocation_pct" min="0.01" max="100" step="0.01" required />
+      </label>
+      <button type="button" class="btn btn-secondary row-remove">Remove</button>
+    </div>
+  </template>
+  {% else %}
+  <p>No paddocks available for this farm yet. Add paddocks first.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Deactivate Mob</h2>
+  <p class="muted">A mob can only be deactivated when total head count is zero.</p>
+  <form method="post" action="{{ url_for('web.mob_deactivate_form', mob_id=mob.id) }}">
+    <button type="submit" class="btn btn-secondary">Deactivate Mob</button>
   </form>
 </section>
+
+<section class="card">
+  <h2>Split Mob</h2>
+  {% if split_group_options %}
+  <p class="muted">Allocate all source stock into two or more new mobs.</p>
+  <form method="post" action="{{ url_for('web.mob_split_form', mob_id=mob.id) }}" class="grid-form">
+    <div id="splitRows">
+      <div class="split-row allocation-row">
+        <label>New Mob Name
+          <input name="split_mob_name" required />
+        </label>
+        <label>Group
+          <select name="split_group_id" required>
+            <option value="">Choose group</option>
+            {% for option in split_group_options %}
+            <option value="{{ option.id }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Quantity
+          <input type="number" min="1" name="split_quantity" required />
+        </label>
+        <button type="button" class="btn btn-secondary split-row-remove">Remove</button>
+      </div>
+    </div>
+    <div class="row-actions">
+      <button type="button" id="addSplitRow" class="btn btn-secondary">Add Split Row</button>
+    </div>
+    <button type="submit" class="btn">Split Mob</button>
+  </form>
+  <template id="splitRowTemplate">
+    <div class="split-row allocation-row">
+      <label>New Mob Name
+        <input name="split_mob_name" required />
+      </label>
+      <label>Group
+        <select name="split_group_id" required>
+          <option value="">Choose group</option>
+          {% for option in split_group_options %}
+          <option value="{{ option.id }}">{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Quantity
+        <input type="number" min="1" name="split_quantity" required />
+      </label>
+      <button type="button" class="btn btn-secondary split-row-remove">Remove</button>
+    </div>
+  </template>
+  <details>
+    <summary>Available Source Groups</summary>
+    <table>
+      <thead><tr><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Available</th></tr></thead>
+      <tbody>
+        {% for option in split_group_options %}
+        <tr>
+          <td>{{ option.species }}</td>
+          <td>{{ option.breed }}</td>
+          <td>{{ option.sex }}</td>
+          <td>{{ option.age_class }}</td>
+          <td>{{ option.head_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <p>No positive stock balances are available to split from this mob.</p>
+  {% endif %}
+</section>
+<script>
+  (function () {
+    const speciesDefaults = {
+      Cattle: {
+        breed: "Bonsmara",
+        sex: "mixed",
+        age_class: "calf",
+        sex_options: ["mixed", "cow", "bul", "ox"],
+        age_classes: ["calf", "young", "adult", "old"],
+      },
+      Sheep: {
+        breed: "Dohne",
+        sex: "mixed",
+        age_class: "lamb",
+        sex_options: ["mixed", "ewe", "ram", "wether"],
+        age_classes: ["lamb", "young", "adult", "old"],
+      },
+      Goat: {
+        breed: "Angora",
+        sex: "mixed",
+        age_class: "kid",
+        sex_options: ["mixed", "ewe", "ram", "wether"],
+        age_classes: ["kid", "young", "adult", "old"],
+      },
+    };
+    const speciesSelect = document.getElementById("adjustSpecies");
+    const breedInput = document.getElementById("adjustBreed");
+    const sexInput = document.getElementById("adjustSex");
+    const ageClassInput = document.getElementById("adjustAgeClass");
+    const eventTypeSelect = document.getElementById("adjustEventType");
+
+    function setAgeClassOptions(options, selectedValue) {
+      if (!ageClassInput) return;
+      ageClassInput.innerHTML = "";
+      options.forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        if (value === selectedValue) {
+          option.selected = true;
+        }
+        ageClassInput.appendChild(option);
+      });
+    }
+
+    function setSexOptions(options, selectedValue) {
+      if (!sexInput) return;
+      sexInput.innerHTML = "";
+      options.forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        if (value === selectedValue) {
+          option.selected = true;
+        }
+        sexInput.appendChild(option);
+      });
+    }
+
+    function applySpeciesDefaults() {
+      if (!speciesSelect || !breedInput || !sexInput || !ageClassInput || !eventTypeSelect) return;
+      const defaults = speciesDefaults[speciesSelect.value];
+      if (!defaults) return;
+      breedInput.value = defaults.breed;
+      setSexOptions(defaults.sex_options, defaults.sex);
+      setAgeClassOptions(defaults.age_classes, defaults.age_class);
+      eventTypeSelect.value = "count";
+    }
+
+    if (speciesSelect) {
+      speciesSelect.addEventListener("change", applySpeciesDefaults);
+      applySpeciesDefaults();
+    }
+
+    const rowsContainer = document.getElementById("allocationRows");
+    const addBtn = document.getElementById("addAllocationRow");
+    const totalEl = document.getElementById("allocationTotal");
+    const template = document.getElementById("allocationRowTemplate");
+    if (rowsContainer && addBtn && template && totalEl) {
+      function recalcTotal() {
+        let total = 0;
+        rowsContainer.querySelectorAll("input[name='allocation_pct']").forEach((input) => {
+          const n = Number(input.value || 0);
+          if (!Number.isNaN(n)) total += n;
+        });
+        totalEl.textContent = `Total: ${total.toFixed(2)}%`;
+        totalEl.classList.toggle("error-text", total !== 100);
+      }
+
+      function bindRow(row) {
+        const removeBtn = row.querySelector(".row-remove");
+        const pctInput = row.querySelector("input[name='allocation_pct']");
+        if (removeBtn) {
+          removeBtn.addEventListener("click", () => {
+            if (rowsContainer.children.length > 1) {
+              row.remove();
+              recalcTotal();
+            }
+          });
+        }
+        if (pctInput) {
+          pctInput.addEventListener("input", recalcTotal);
+        }
+      }
+
+      addBtn.addEventListener("click", () => {
+        const clone = template.content.firstElementChild.cloneNode(true);
+        rowsContainer.appendChild(clone);
+        bindRow(clone);
+      });
+
+      rowsContainer.querySelectorAll(".allocation-row").forEach(bindRow);
+      recalcTotal();
+    }
+
+    const splitRowsContainer = document.getElementById("splitRows");
+    const splitAddBtn = document.getElementById("addSplitRow");
+    const splitTemplate = document.getElementById("splitRowTemplate");
+    if (splitRowsContainer && splitAddBtn && splitTemplate) {
+      function bindSplitRow(row) {
+        const removeBtn = row.querySelector(".split-row-remove");
+        if (removeBtn) {
+          removeBtn.addEventListener("click", () => {
+            if (splitRowsContainer.children.length > 1) {
+              row.remove();
+            }
+          });
+        }
+      }
+
+      splitAddBtn.addEventListener("click", () => {
+        const clone = splitTemplate.content.firstElementChild.cloneNode(true);
+        splitRowsContainer.appendChild(clone);
+        bindSplitRow(clone);
+      });
+
+      splitRowsContainer.querySelectorAll(".split-row").forEach(bindSplitRow);
+    }
+  })();
+</script>
 {% endblock %}

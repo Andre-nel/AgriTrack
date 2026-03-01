@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+from decimal import Decimal, InvalidOperation
 
 from app.extensions import db
 from app.models import Paddock
@@ -19,6 +20,14 @@ def list_paddocks():
                 "area_ha": float(p.area_ha),
                 "grazeable_area_ha": float(p.grazeable_area_ha),
                 "status": p.status,
+                "stocking_rate_ha_per_lsu_override": (
+                    float(p.stocking_rate_ha_per_lsu_override)
+                    if p.stocking_rate_ha_per_lsu_override is not None
+                    else None
+                ),
+                "effective_stocking_rate_ha_per_lsu": float(
+                    p.stocking_rate_ha_per_lsu_override or p.farm.default_stocking_rate_ha_per_lsu
+                ),
             }
             for p in paddocks
         ]
@@ -31,6 +40,14 @@ def create_paddock():
     required = {"farm_id", "name"}
     if not required.issubset(payload):
         return jsonify({"error": "farm_id and name are required"}), 400
+    override = payload.get("stocking_rate_ha_per_lsu_override")
+    if override is not None:
+        try:
+            override = Decimal(str(override))
+            if override <= 0:
+                raise ValueError
+        except (InvalidOperation, ValueError):
+            return jsonify({"error": "stocking_rate_ha_per_lsu_override must be greater than 0"}), 400
 
     paddock = Paddock(
         farm_id=payload["farm_id"],
@@ -38,6 +55,7 @@ def create_paddock():
         area_ha=payload.get("area_ha", 0),
         grazeable_area_ha=payload.get("grazeable_area_ha", 0),
         status=payload.get("status", "active"),
+        stocking_rate_ha_per_lsu_override=override,
     )
     db.session.add(paddock)
     db.session.commit()
@@ -55,6 +73,14 @@ def get_paddock(paddock_id):
             "area_ha": float(paddock.area_ha),
             "grazeable_area_ha": float(paddock.grazeable_area_ha),
             "status": paddock.status,
+            "stocking_rate_ha_per_lsu_override": (
+                float(paddock.stocking_rate_ha_per_lsu_override)
+                if paddock.stocking_rate_ha_per_lsu_override is not None
+                else None
+            ),
+            "effective_stocking_rate_ha_per_lsu": float(
+                paddock.stocking_rate_ha_per_lsu_override or paddock.farm.default_stocking_rate_ha_per_lsu
+            ),
         }
     )
 
@@ -67,6 +93,18 @@ def update_paddock(paddock_id):
     for field in ["name", "status", "area_ha", "grazeable_area_ha"]:
         if field in payload:
             setattr(paddock, field, payload[field])
+    if "stocking_rate_ha_per_lsu_override" in payload:
+        value = payload["stocking_rate_ha_per_lsu_override"]
+        if value in (None, ""):
+            paddock.stocking_rate_ha_per_lsu_override = None
+        else:
+            try:
+                value = Decimal(str(value))
+                if value <= 0:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                return jsonify({"error": "stocking_rate_ha_per_lsu_override must be greater than 0"}), 400
+            paddock.stocking_rate_ha_per_lsu_override = value
 
     db.session.commit()
     return jsonify({"id": str(paddock.id), "name": paddock.name})

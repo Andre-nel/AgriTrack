@@ -1,7 +1,6 @@
 import uuid
 
 from sqlalchemy import DateTime, func
-from sqlalchemy.dialects.postgresql import UUID
 
 from app.extensions import db
 
@@ -23,7 +22,7 @@ class SoftDeleteMixin:
 
 class UUIDPrimaryKeyMixin:
     id = db.Column(
-        UUID(as_uuid=True).with_variant(db.String(36), "sqlite"),
+        db.String(36),
         primary_key=True,
-        default=uuid.uuid4,
+        default=lambda: str(uuid.uuid4()),
     )

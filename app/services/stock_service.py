@@ -14,8 +14,56 @@ IN_EVENTS = {
 
 
 class StockService:
+    SPECIES_MAP = {
+        "cattle": "Cattle",
+        "sheep": "Sheep",
+        "goat": "Goat",
+    }
+    AGE_CLASS_OPTIONS = {
+        "Cattle": ("calf", "young", "adult", "old"),
+        "Sheep": ("lamb", "young", "adult", "old"),
+        "Goat": ("kid", "young", "adult", "old"),
+    }
+    SEX_OPTIONS = {
+        "Cattle": ("mixed", "cow", "bul", "ox"),
+        "Sheep": ("mixed", "ewe", "ram", "wether"),
+        "Goat": ("mixed", "ewe", "ram", "wether"),
+    }
+
+    @classmethod
+    def normalize_species(cls, species: str) -> str:
+        key = (species or "").strip().lower()
+        normalized = cls.SPECIES_MAP.get(key)
+        if not normalized:
+            allowed = ", ".join(cls.SPECIES_MAP.values())
+            raise ValueError(f"Species must be one of: {allowed}")
+        return normalized
+
+    @classmethod
+    def normalize_age_class(cls, species: str, age_class: str) -> str:
+        value = (age_class or "").strip().lower()
+        allowed = cls.AGE_CLASS_OPTIONS[species]
+        if value not in allowed:
+            allowed_text = ", ".join(allowed)
+            raise ValueError(f"Age class for {species} must be one of: {allowed_text}")
+        return value
+
+    @classmethod
+    def normalize_sex(cls, species: str, sex: str) -> str:
+        value = (sex or "").strip().lower()
+        if species == "Cattle" and value == "bull":
+            value = "bul"
+        allowed = cls.SEX_OPTIONS[species]
+        if value not in allowed:
+            allowed_text = ", ".join(allowed)
+            raise ValueError(f"Sex for {species} must be one of: {allowed_text}")
+        return value
+
     @staticmethod
     def get_or_create_group_type(species: str, breed: str, sex: str, age_class: str) -> AnimalGroupType:
+        species = StockService.normalize_species(species)
+        sex = StockService.normalize_sex(species, sex)
+        age_class = StockService.normalize_age_class(species, age_class)
         group_type = AnimalGroupType.query.filter_by(
             species=species,
             breed=breed,
@@ -39,6 +87,9 @@ class StockService:
         quantity: int,
         note: str | None = None,
     ) -> StockLedgerEntry:
+        if event_type == StockEventType.count:
+            raise ValueError("Count events must be resolved to adjustment_in or missing before posting.")
+
         ValidationService.validate_positive_int(quantity, "quantity")
 
         ledger = StockLedgerEntry(

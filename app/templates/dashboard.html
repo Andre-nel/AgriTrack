@@ -1,21 +1,37 @@
 {% extends "base.html" %}
 {% block title %}Dashboard | AgriTrack{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
+<section class="hero">
+  <h1>Farm Operations Dashboard</h1>
+  <p>Set up farms quickly, then manage paddocks, mobs, grazing moves, and rainfall from one place.</p>
+  <div class="hero-actions">
+    <a class="btn" href="{{ url_for('web.setup_farm') }}">Start Setup</a>
+    <a class="btn btn-secondary" href="{{ url_for('web.farms_page') }}">Manage Existing Farms</a>
+  </div>
+</section>
+
 <div class="cards">
-  <article class="card"><h2>Farms</h2><p>{{ summary.farm_count }}</p></article>
-  <article class="card"><h2>Paddocks</h2><p>{{ summary.paddock_count }}</p></article>
-  <article class="card"><h2>Mobs</h2><p>{{ summary.mob_count }}</p></article>
+  <article class="card stat"><h2>Farms</h2><p>{{ summary.farm_count }}</p></article>
+  <article class="card stat"><h2>Paddocks</h2><p>{{ summary.paddock_count }}</p></article>
+  <article class="card stat"><h2>Mobs</h2><p>{{ summary.mob_count }}</p></article>
 </div>
 
 <section>
-  <h2>Farm quick links</h2>
-  <ul>
-    {% for farm in farms %}
-    <li><a href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">{{ farm.name }}</a></li>
+  <h2>Farm Setup Progress</h2>
+  <div class="cards farm-grid">
+    {% for farm in farm_cards %}
+    <article class="card">
+      <h3><a href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">{{ farm.name }}</a></h3>
+      <p>Timezone: {{ farm.timezone }}</p>
+      <p>Paddocks: {{ farm.paddock_count }} | Mobs: {{ farm.mob_count }} | Rainfall records: {{ farm.rainfall_count }}</p>
+      <p class="badge {{ 'ok' if farm.ready else 'warn' }}">{{ 'Ready for daily use' if farm.ready else 'Needs paddocks and mobs' }}</p>
+    </article>
     {% else %}
-    <li>No farms yet.</li>
+    <article class="card">
+      <h3>No farms yet</h3>
+      <p>Use Setup Farm to create your first farm, paddocks, and mobs in one workflow.</p>
+    </article>
     {% endfor %}
-  </ul>
+  </div>
 </section>
 {% endblock %}

@@ -9,6 +9,7 @@ class StockEventType(str, enum.Enum):
     purchase = "purchase"
     transfer_in = "transfer_in"
     adjustment_in = "adjustment_in"
+    count = "count"
     death = "death"
     sale = "sale"
     missing = "missing"

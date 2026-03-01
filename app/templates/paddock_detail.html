@@ -1,12 +1,99 @@
 {% extends "base.html" %}
 {% block title %}{{ paddock.name }} | AgriTrack{% endblock %}
 {% block content %}
+<a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=paddock.farm_id) }}">Back To Farm</a>
 <h1>{{ paddock.name }}</h1>
-<p>Area: {{ paddock.area_ha }} ha | Grazeable: {{ paddock.grazeable_area_ha }} ha</p>
+<p class="muted">Area: {{ paddock.area_ha }} ha | Grazeable: {{ paddock.grazeable_area_ha }} ha</p>
 
-<section>
+<section class="card">
+  <h2>Stocking Rate, Grazing Capacity & Density</h2>
+  <form method="post" action="{{ url_for('web.update_paddock_stocking_rate_form', paddock_id=paddock.id) }}" class="grid-form">
+    <label>Paddock Carrying Capacity Override (ha/LSU)
+      <input type="number" step="0.01" min="0.01" name="stocking_rate_ha_per_lsu_override" value="{{ paddock.stocking_rate_ha_per_lsu_override or '' }}" placeholder="Leave blank to use farm default" />
+    </label>
+    <p class="muted">Farm default: {{ "%.2f"|format(farm_stocking_rate) }} ha/LSU</p>
+    <button type="submit" class="btn">Save Paddock Carrying Capacity</button>
+  </form>
+
+  <form method="get" action="{{ url_for('web.paddock_detail', paddock_id=paddock.id) }}" class="grid-form">
+    <div class="grid-two">
+      <label>Analysis Start
+        <input type="date" name="period_start" value="{{ period_start.isoformat() }}" />
+      </label>
+      <label>Analysis End
+        <input type="date" name="period_end" value="{{ period_end.isoformat() }}" />
+      </label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply Period</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.paddock_detail', paddock_id=paddock.id) }}">Reset</a>
+    </div>
+  </form>
+
+  <table>
+    <tbody>
+      <tr>
+        <th>Current Stocking Rate (ha/LSU)</th>
+        <td>{{ "%.2f"|format(effective_stocking_rate) }}</td>
+      </tr>
+      <tr>
+        <th>Effective Grazing Area (ha)</th>
+        <td>{{ "%.2f"|format(effective_area_ha) }}</td>
+      </tr>
+      <tr>
+        <th>Grazing Capacity (SDH)</th>
+        <td>{{ "%.2f"|format(grazing_capacity_sdh) }}</td>
+      </tr>
+      <tr>
+        <th>SDH Used This Year</th>
+        <td>{% if sdh_used_this_year is not none %}{{ "%.2f"|format(sdh_used_this_year) }}{% else %}N/A{% endif %}</td>
+      </tr>
+      <tr>
+        <th>SDH Remaining This Year</th>
+        <td>{% if sdh_remaining_this_year is not none %}{{ "%.2f"|format(sdh_remaining_this_year) }}{% else %}N/A{% endif %}</td>
+      </tr>
+      <tr>
+        <th>Current Stocking Density (LSU/ha/day)</th>
+        <td>{% if current_stocking_density is not none %}{{ "%.2f"|format(current_stocking_density) }}{% else %}N/A{% endif %}</td>
+      </tr>
+      <tr>
+        <th>Selected Period LSU-Days</th>
+        <td>{{ "%.2f"|format(period_lsu_days) }}</td>
+      </tr>
+      <tr>
+        <th>Selected Period SDH Used</th>
+        <td>{% if period_sdh_used is not none %}{{ "%.2f"|format(period_sdh_used) }}{% else %}N/A{% endif %}</td>
+      </tr>
+      <tr>
+        <th>Selected Period Avg Stocking Density (LSU/ha/day)</th>
+        <td>{% if period_avg_stocking_density is not none %}{{ "%.2f"|format(period_avg_stocking_density) }}{% else %}N/A{% endif %}</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Current LSU By Mob (Allocation Weighted)</h2>
+  <table>
+    <thead><tr><th>Mob</th><th>Allocation %</th><th>Allocated LSU</th></tr></thead>
+    <tbody>
+      {% for row in current_lsu.mobs %}
+      <tr>
+        <td><a href="{{ url_for('web.mob_detail', mob_id=row.mob_id) }}">{{ row.mob_name }}</a></td>
+        <td>{{ "%.2f"|format(row.allocation_fraction * 100) }}%</td>
+        <td>{{ "%.2f"|format(row.allocated_lsu) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3">No active grazing allocations.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Current total LSU on paddock: {{ "%.2f"|format(current_lsu.total_lsu) }}</p>
+</section>
+
+<section class="card">
   <h2>Current Weighted Stock</h2>
-  <ul>
+  <ul class="link-list">
     {% for group_id, total in stock.items() %}
     <li>{{ group_id }}: {{ "%.2f"|format(total) }}</li>
     {% else %}
@@ -15,20 +102,21 @@
   </ul>
 </section>
 
-<section>
-  <h2>Grazing History</h2>
+<section class="card">
+  <h2>Grazing History (Session Intensity)</h2>
   <table>
-    <thead><tr><th>Mob</th><th>Start</th><th>End</th><th>Fraction</th></tr></thead>
+    <thead><tr><th>Mob</th><th>Start</th><th>End</th><th>Fraction</th><th>Allocated LSU</th></tr></thead>
     <tbody>
-      {% for a in history %}
+      {% for row in history %}
       <tr>
-        <td><a href="{{ url_for('web.mob_detail', mob_id=a.grazing_session.mob_id) }}">{{ a.grazing_session.mob.name }}</a></td>
-        <td>{{ a.grazing_session.start_at }}</td>
-        <td>{{ a.grazing_session.end_at or 'Open' }}</td>
-        <td>{{ a.allocation_fraction }}</td>
+        <td><a href="{{ url_for('web.mob_detail', mob_id=row.allocation.grazing_session.mob_id) }}">{{ row.mob_name }}</a></td>
+        <td>{{ row.allocation.grazing_session.start_at }}</td>
+        <td>{{ row.allocation.grazing_session.end_at or 'Open' }}</td>
+        <td>{{ "%.2f"|format(row.allocation.allocation_fraction * 100) }}%</td>
+        <td>{{ "%.2f"|format(row.allocated_lsu) }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="4">No grazing history.</td></tr>
+      <tr><td colspan="5">No grazing history.</td></tr>
       {% endfor %}
     </tbody>
   </table>

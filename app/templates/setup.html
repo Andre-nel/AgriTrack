@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Setup Farm | AgriTrack{% endblock %}
+{% block content %}
+<h1>Setup Farm</h1>
+<p class="muted">Create a farm with paddocks, mobs, and optional initial placements in one submission.</p>
+
+<form method="post" class="setup-form card">
+  <section>
+    <h2>1. Farm</h2>
+    <div class="grid-two">
+      <label>Farm name<input name="farm_name" required /></label>
+      <label>Timezone<input name="timezone" value="UTC" /></label>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Paddocks (optional)</h2>
+    <p class="muted">One line per paddock: <code>name,area_ha,grazeable_area_ha</code></p>
+    <textarea name="paddocks" rows="6" placeholder="North 1,12.5,10\nSouth 2,9,8"></textarea>
+  </section>
+
+  <section>
+    <h2>3. Mobs (optional)</h2>
+    <p class="muted">One mob name per line.</p>
+    <textarea name="mobs" rows="5" placeholder="Breeder Mob\nWeaner Mob"></textarea>
+  </section>
+
+  <section>
+    <h2>4. Initial Placement (optional)</h2>
+    <p class="muted">One line per mapping: <code>mob_name,paddock_name</code></p>
+    <textarea name="placements" rows="5" placeholder="Breeder Mob,North 1\nWeaner Mob,South 2"></textarea>
+  </section>
+
+  <button type="submit" class="btn">Create Farm Setup</button>
+</form>
+{% endblock %}

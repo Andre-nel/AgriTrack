@@ -9,9 +9,10 @@
   <body>
     <header class="topbar">
       <a href="{{ url_for('web.dashboard') }}" class="brand">AgriTrack</a>
-      <nav>
+      <nav class="topnav">
         <a href="{{ url_for('web.dashboard') }}">Dashboard</a>
-        <a href="{{ url_for('web.farms_page') }}">Farms</a>
+        <a href="{{ url_for('web.setup_farm') }}">Setup Farm</a>
+        <a href="{{ url_for('web.farms_page') }}">Manage Farms</a>
       </nav>
     </header>
 
