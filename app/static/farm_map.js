@@ -6,6 +6,11 @@
 
   const statusElement = document.getElementById("farm-map-status");
   const dataUrl = mapElement.dataset.url;
+  const speciesIconUrls = {
+    cattle: mapElement.dataset.cowIcon || "/static/cow.png",
+    sheep: mapElement.dataset.sheepIcon || "/static/sheep.png",
+    goat: mapElement.dataset.goatIcon || "/static/goat.png",
+  };
   if (!dataUrl) {
     if (statusElement) {
       statusElement.textContent = "Map data URL is missing.";
@@ -49,6 +54,94 @@
       return "#dd8f3d";
     }
     return "#c85047";
+  }
+
+  function normalizeSpecies(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function formatHeadCount(value) {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return "0";
+    }
+    const rounded = Math.round(Number(value));
+    if (Math.abs(Number(value) - rounded) < 0.05) {
+      return String(rounded);
+    }
+    return Number(value).toFixed(1);
+  }
+
+  function stockFloatHtml(properties) {
+    const speciesRows = Array.isArray(properties.species_heads) ? properties.species_heads : [];
+    const rows = speciesRows
+      .map((row) => ({
+        species: normalizeSpecies(row.species),
+        count: Number(row.head || 0),
+      }))
+      .filter((row) => row.count > 0)
+      .sort((a, b) => b.count - a.count);
+
+    if (!rows.length) {
+      return "";
+    }
+
+    const chips = rows
+      .map((row) => {
+        const iconUrl = speciesIconUrls[row.species] || "";
+        const speciesLabel = row.species ? row.species.charAt(0).toUpperCase() + row.species.slice(1) : "Stock";
+        return (
+          '<div class="stock-float-chip" title="' +
+          escapeHtml(speciesLabel + ": " + formatHeadCount(row.count)) +
+          '">' +
+          (iconUrl
+            ? '<img src="' + escapeHtml(iconUrl) + '" alt="' + escapeHtml(speciesLabel) + '" />'
+            : '<span class="stock-float-fallback">' + escapeHtml(speciesLabel.slice(0, 1)) + "</span>") +
+          '<span class="stock-float-count">' +
+          escapeHtml(formatHeadCount(row.count)) +
+          "</span>" +
+          "</div>"
+        );
+      })
+      .join("");
+
+    return (
+      '<div class="stock-float-badge" aria-hidden="true">' +
+      '<div class="stock-float-chip-row">' +
+      chips +
+      "</div>" +
+      '<div class="stock-float-tail"></div>' +
+      "</div>"
+    );
+  }
+
+  function addStockFloatMarker(feature, geoLayer, markerLayer) {
+    const props = (feature && feature.properties) || {};
+    if (props.feature_type !== "paddock") {
+      return;
+    }
+
+    const html = stockFloatHtml(props);
+    if (!html) {
+      return;
+    }
+
+    const bounds = geoLayer.getBounds();
+    if (!bounds.isValid()) {
+      return;
+    }
+
+    const marker = L.marker(bounds.getCenter(), {
+      pane: "stockFloatPane",
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({
+        className: "stock-float-marker-wrap",
+        html: '<div class="stock-float-marker">' + html + "</div>",
+        iconSize: [1, 1],
+        iconAnchor: [0, 0],
+      }),
+    });
+    markerLayer.addLayer(marker);
   }
 
   function styleForFeature(feature) {
@@ -137,6 +230,10 @@
   }
 
   const map = L.map(mapElement, { scrollWheelZoom: true });
+  map.createPane("stockFloatPane");
+  map.getPane("stockFloatPane").style.zIndex = "650";
+  map.getPane("stockFloatPane").style.pointerEvents = "none";
+
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 20,
     attribution: "&copy; OpenStreetMap contributors",
@@ -158,10 +255,12 @@
         return;
       }
 
+      const stockFloatLayer = L.layerGroup().addTo(map);
       const layer = L.geoJSON(payload, {
         style: styleForFeature,
         onEachFeature: function (feature, geoLayer) {
           geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
+          addStockFloatMarker(feature, geoLayer, stockFloatLayer);
         },
       }).addTo(map);
 

@@ -16,7 +16,13 @@
 <section class="card">
   <h2>Farm Map</h2>
   <p class="muted">Paddocks are coloured by year-to-date grazing pressure (used SDH vs annual SDH capacity).</p>
-  <div id="farm-map" data-url="{{ url_for('web.farm_map_data', farm_id=farm.id) }}"></div>
+  <div
+    id="farm-map"
+    data-url="{{ url_for('web.farm_map_data', farm_id=farm.id) }}"
+    data-cow-icon="{{ url_for('static', filename='cow.png') }}"
+    data-sheep-icon="{{ url_for('static', filename='sheep.png') }}"
+    data-goat-icon="{{ url_for('static', filename='goat.png') }}"
+  ></div>
   <div class="map-legend" aria-hidden="true">
     <span><i class="swatch low"></i>Low</span>
     <span><i class="swatch medium"></i>Medium</span>

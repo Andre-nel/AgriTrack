@@ -278,9 +278,110 @@ a { color: #1b5f49; }
   color: var(--muted);
 }
 
+.stock-float-marker-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.stock-float-marker {
+  transform: translate(-50%, -92%);
+  pointer-events: none;
+}
+
+.stock-float-badge {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  animation: stock-float 3.2s ease-in-out infinite;
+}
+
+.stock-float-chip-row {
+  display: inline-flex;
+  gap: 0.4rem;
+  padding: 0.3rem 0.45rem 0.35rem;
+  border-radius: 10px;
+  border: 1px solid rgba(21, 38, 56, 0.32);
+  background: rgba(10, 31, 56, 0.94);
+  box-shadow: 0 6px 14px rgba(7, 18, 33, 0.35);
+}
+
+.stock-float-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 32px;
+}
+
+.stock-float-chip img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.35));
+}
+
+.stock-float-fallback {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dce8f5;
+  color: #16324b;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.stock-float-count {
+  margin-top: 0.12rem;
+  color: #f7fbff;
+  font-size: 0.7rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.stock-float-tail {
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid rgba(10, 31, 56, 0.94);
+  margin-top: -1px;
+}
+
+@keyframes stock-float {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+  100% { transform: translateY(0); }
+}
+
 @media (max-width: 760px) {
   #farm-map {
     height: 380px;
+  }
+
+  .stock-float-marker {
+    transform: translate(-50%, -86%);
+  }
+
+  .stock-float-chip-row {
+    gap: 0.25rem;
+    padding: 0.24rem 0.32rem 0.28rem;
+  }
+
+  .stock-float-chip {
+    min-width: 27px;
+  }
+
+  .stock-float-chip img,
+  .stock-float-fallback {
+    width: 14px;
+    height: 14px;
+  }
+
+  .stock-float-count {
+    font-size: 0.62rem;
   }
 
   .grid-two {
