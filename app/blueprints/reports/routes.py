@@ -1,11 +1,21 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
+import xml.etree.ElementTree as ET
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import AnimalGroupBalance, Farm, Mob, Paddock, RainfallRecord
+from app.models import (
+    AnimalGroupBalance,
+    Farm,
+    GrazingAllocation,
+    GrazingSession,
+    Mob,
+    Paddock,
+    RainfallRecord,
+)
 from app.models.stock_ledger import StockEventType
 from app.services.movement_service import MovementService
 from app.services.reporting_service import ReportingService
@@ -49,6 +59,171 @@ def _parse_query_date(value: str | None) -> date | None:
     if not text:
         return None
     return date.fromisoformat(text)
+
+
+def _normalize_name(value: str | None) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _round_float(value: float | None, precision: int = 4) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), precision)
+
+
+def _parse_kml_ring(raw: str | None) -> list[list[float]]:
+    coords = []
+    for token in (raw or "").replace("\n", " ").split():
+        parts = token.split(",")
+        if len(parts) < 2:
+            continue
+        try:
+            lon = float(parts[0])
+            lat = float(parts[1])
+        except ValueError:
+            continue
+        coords.append([lon, lat])
+
+    if len(coords) >= 3 and coords[0] != coords[-1]:
+        coords.append(coords[0])
+    return coords
+
+
+def _placemark_geometry(placemark, namespace: dict[str, str]) -> dict | None:
+    polygons = []
+    for polygon in placemark.findall(".//k:Polygon", namespace):
+        ring_text = polygon.findtext(
+            ".//k:outerBoundaryIs/k:LinearRing/k:coordinates",
+            default="",
+            namespaces=namespace,
+        )
+        ring = _parse_kml_ring(ring_text)
+        if len(ring) >= 4:
+            polygons.append([ring])
+
+    if not polygons:
+        return None
+    if len(polygons) == 1:
+        return {"type": "Polygon", "coordinates": polygons[0]}
+    return {"type": "MultiPolygon", "coordinates": polygons}
+
+
+def _load_farm_kml_features(farm_name: str) -> tuple[list[dict], str]:
+    kml_path = Path(current_app.instance_path) / "maps" / f"{farm_name}.kml"
+    if not kml_path.exists():
+        raise FileNotFoundError(kml_path)
+
+    namespace = {"k": "http://www.opengis.net/kml/2.2"}
+    root = ET.parse(kml_path).getroot()
+    features = []
+    for placemark in root.findall(".//k:Placemark", namespace):
+        name = placemark.findtext("k:name", default="", namespaces=namespace).strip()
+        geometry = _placemark_geometry(placemark, namespace)
+        if not name or geometry is None:
+            continue
+        features.append(
+            {
+                "name": name,
+                "normalized_name": _normalize_name(name),
+                "geometry": geometry,
+            }
+        )
+
+    return features, str(kml_path)
+
+
+def _active_grazing_snapshot_by_paddock(farm_id: str) -> dict[str, dict]:
+    rows = (
+        GrazingAllocation.query.join(GrazingSession)
+        .filter(
+            GrazingSession.farm_id == farm_id,
+            GrazingSession.end_at.is_(None),
+        )
+        .all()
+    )
+
+    by_paddock = {}
+    for allocation in rows:
+        paddock_key = str(allocation.paddock_id)
+        snapshot = by_paddock.setdefault(
+            paddock_key,
+            {"current_lsu": 0.0, "mobs": [], "species_heads": {}},
+        )
+
+        fraction = float(allocation.allocation_fraction)
+        mob = allocation.grazing_session.mob
+        allocated_lsu = ReportingService.mob_total_lsu(mob) * fraction
+        snapshot["current_lsu"] += allocated_lsu
+        snapshot["mobs"].append(
+            {
+                "mob_id": str(mob.id),
+                "mob_name": mob.name,
+                "allocation_pct": _round_float(fraction * 100.0, 2),
+                "allocated_lsu": _round_float(allocated_lsu, 3),
+            }
+        )
+
+        for balance in mob.balances:
+            species = balance.animal_group_type.species
+            current_head = snapshot["species_heads"].get(species, 0.0)
+            snapshot["species_heads"][species] = current_head + (float(balance.head_count) * fraction)
+
+    for snapshot in by_paddock.values():
+        snapshot["mobs"].sort(key=lambda item: item["allocated_lsu"], reverse=True)
+        species_rows = [
+            {"species": species, "head": _round_float(head, 2)}
+            for species, head in sorted(snapshot["species_heads"].items(), key=lambda row: row[0])
+        ]
+        snapshot["species_heads"] = species_rows
+        snapshot["current_lsu"] = _round_float(snapshot["current_lsu"], 3)
+
+    return by_paddock
+
+
+def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict) -> dict:
+    today = date.today()
+    now_dt = datetime.utcnow()
+    year_start_dt = datetime(today.year, 1, 1)
+
+    grazeable_area_ha = float(paddock.grazeable_area_ha or 0)
+    area_ha = float(paddock.area_ha or 0)
+    effective_area_ha = grazeable_area_ha if grazeable_area_ha > 0 else area_ha
+
+    effective_stocking_rate = float(
+        paddock.stocking_rate_ha_per_lsu_override or farm.default_stocking_rate_ha_per_lsu
+    )
+    grazing_capacity_sdh = (365.0 / effective_stocking_rate) if effective_stocking_rate > 0 else None
+
+    year_lsu_days = ReportingService.paddock_lsu_days_for_period(
+        paddock_id=str(paddock.id),
+        period_start=year_start_dt,
+        period_end=now_dt,
+    )
+    sdh_used_this_year = (year_lsu_days / effective_area_ha) if effective_area_ha > 0 else None
+    grazing_pressure_ratio = (
+        (sdh_used_this_year / grazing_capacity_sdh)
+        if sdh_used_this_year is not None and grazing_capacity_sdh
+        else None
+    )
+
+    active = active_snapshot.get(str(paddock.id), {})
+    return {
+        "feature_type": "paddock",
+        "paddock_id": str(paddock.id),
+        "paddock_url": url_for("web.paddock_detail", paddock_id=paddock.id),
+        "name": paddock.name,
+        "status": paddock.status,
+        "area_ha": _round_float(area_ha, 2),
+        "grazeable_area_ha": _round_float(grazeable_area_ha, 2),
+        "effective_area_ha": _round_float(effective_area_ha, 2),
+        "effective_stocking_rate_ha_per_lsu": _round_float(effective_stocking_rate, 2),
+        "grazing_capacity_sdh": _round_float(grazing_capacity_sdh, 4),
+        "sdh_used_this_year": _round_float(sdh_used_this_year, 4),
+        "grazing_pressure_ratio": _round_float(grazing_pressure_ratio, 4),
+        "current_lsu": active.get("current_lsu", 0.0),
+        "mobs": active.get("mobs", []),
+        "species_heads": active.get("species_heads", []),
+    }
 
 
 @bp.get("/")
@@ -228,6 +403,89 @@ def farm_detail(farm_id):
         farm_total_area_ha=farm_total_area_ha,
         farm_capacity_lsu=farm_capacity_lsu,
         farm_current_lsu=farm_current_lsu,
+    )
+
+
+@bp.get("/farms/<farm_id>/map-data")
+def farm_map_data(farm_id):
+    farm = Farm.query.get_or_404(farm_id)
+    expected_kml_path = Path(current_app.instance_path) / "maps" / f"{farm.name}.kml"
+
+    try:
+        kml_features, kml_path = _load_farm_kml_features(farm.name)
+    except FileNotFoundError as exc:
+        return (
+            jsonify(
+                {
+                    "error": "Farm map KML file not found",
+                    "farm_id": str(farm.id),
+                    "farm_name": farm.name,
+                    "expected_path": str(exc.args[0]),
+                }
+            ),
+            404,
+        )
+    except ET.ParseError:
+        return (
+            jsonify(
+                {
+                    "error": "Unable to parse farm KML file",
+                    "farm_id": str(farm.id),
+                    "farm_name": farm.name,
+                    "kml_path": str(expected_kml_path),
+                }
+            ),
+            500,
+        )
+
+    paddocks = list(Paddock.query.filter_by(farm_id=farm_id).all())
+    paddock_by_name = {_normalize_name(p.name): p for p in paddocks}
+    farm_name_key = _normalize_name(farm.name)
+    active_snapshot = _active_grazing_snapshot_by_paddock(farm_id)
+
+    feature_collection = []
+    matched_paddock_ids = set()
+    unmatched_placemarks = []
+
+    for item in kml_features:
+        normalized_name = item["normalized_name"]
+        paddock = paddock_by_name.get(normalized_name)
+        if paddock:
+            properties = _paddock_map_properties(paddock, farm, active_snapshot)
+            matched_paddock_ids.add(str(paddock.id))
+        else:
+            feature_type = "farm_boundary" if normalized_name == farm_name_key else "unmatched"
+            properties = {
+                "feature_type": feature_type,
+                "name": item["name"],
+            }
+            if feature_type == "unmatched":
+                unmatched_placemarks.append(item["name"])
+
+        feature_collection.append(
+            {
+                "type": "Feature",
+                "geometry": item["geometry"],
+                "properties": properties,
+            }
+        )
+
+    paddocks_without_kml = [
+        p.name for p in sorted(paddocks, key=lambda row: row.name.lower()) if str(p.id) not in matched_paddock_ids
+    ]
+
+    return jsonify(
+        {
+            "type": "FeatureCollection",
+            "farm_id": str(farm.id),
+            "farm_name": farm.name,
+            "kml_path": kml_path,
+            "metric": "grazing_pressure_ratio",
+            "generated_at": f"{datetime.utcnow().isoformat()}Z",
+            "unmatched_placemarks": unmatched_placemarks,
+            "paddocks_without_kml": paddocks_without_kml,
+            "features": feature_collection,
+        }
     )
 
 

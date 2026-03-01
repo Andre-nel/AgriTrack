@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}AgriTrack{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+    {% block head_extra %}{% endblock %}
   </head>
   <body>
     <header class="topbar">
@@ -29,5 +30,6 @@
 
       {% block content %}{% endblock %}
     </main>
+    {% block scripts %}{% endblock %}
   </body>
 </html>

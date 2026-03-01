@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ farm.name }} | AgriTrack{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+{% endblock %}
 {% block content %}
 <h1>{{ farm.name }}</h1>
 <p class="muted">Timezone: {{ farm.timezone }}</p>
@@ -9,6 +12,20 @@
   <article class="card stat"><h2>Mobs</h2><p>{{ mobs|length }}</p></article>
   <article class="card stat"><h2>Rainfall Logs</h2><p>{{ rainfall|length }}</p></article>
 </div>
+
+<section class="card">
+  <h2>Farm Map</h2>
+  <p class="muted">Paddocks are coloured by year-to-date grazing pressure (used SDH vs annual SDH capacity).</p>
+  <div id="farm-map" data-url="{{ url_for('web.farm_map_data', farm_id=farm.id) }}"></div>
+  <div class="map-legend" aria-hidden="true">
+    <span><i class="swatch low"></i>Low</span>
+    <span><i class="swatch medium"></i>Medium</span>
+    <span><i class="swatch high"></i>High</span>
+    <span><i class="swatch over"></i>Over Capacity</span>
+    <span><i class="swatch unknown"></i>No Data</span>
+  </div>
+  <p id="farm-map-status" class="muted">Loading map...</p>
+</section>
 
 <section class="card">
   <h2>Farm Carrying Capacity</h2>
@@ -151,4 +168,8 @@
     </tbody>
   </table>
 </section>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="{{ url_for('static', filename='farm_map.js') }}"></script>
 {% endblock %}
