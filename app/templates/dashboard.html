@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Dashboard | AgriTrack{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+{% endblock %}
 {% block content %}
 <section class="hero">
   <h1>Farm Operations Dashboard</h1>
@@ -15,6 +18,36 @@
   <article class="card stat"><h2>Paddocks</h2><p>{{ summary.paddock_count }}</p></article>
   <article class="card stat"><h2>Mobs</h2><p>{{ summary.mob_count }}</p></article>
 </div>
+
+<section class="card">
+  <h2>Combined Farm Map</h2>
+  <p class="muted">All farm paddocks are combined here with the same grazing pressure shading and stock overlays used in farm detail maps.</p>
+  <div
+    id="farm-map"
+    data-url="{{ url_for('web.dashboard_map_data') }}"
+    data-cow-icon="{{ url_for('static', filename='cow.png') }}"
+    data-sheep-icon="{{ url_for('static', filename='sheep.png') }}"
+    data-goat-icon="{{ url_for('static', filename='goat.png') }}"
+  ></div>
+  <div class="map-legend map-legend-scale" aria-hidden="true">
+    <span class="scale-label">Low</span>
+    <span class="scale-ramp">
+      <i class="swatch s1"></i>
+      <i class="swatch s2"></i>
+      <i class="swatch s3"></i>
+      <i class="swatch s4"></i>
+      <i class="swatch s5"></i>
+      <i class="swatch s6"></i>
+      <i class="swatch s7"></i>
+      <i class="swatch s8"></i>
+      <i class="swatch s9"></i>
+      <i class="swatch s10"></i>
+    </span>
+    <span class="scale-label">High / Over</span>
+    <span><i class="swatch unknown"></i>No Data</span>
+  </div>
+  <p id="farm-map-status" class="muted">Loading map...</p>
+</section>
 
 <section>
   <h2>Farm Setup Progress</h2>
@@ -34,4 +67,8 @@
     {% endfor %}
   </div>
 </section>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="{{ url_for('static', filename='farm_map.js') }}"></script>
 {% endblock %}

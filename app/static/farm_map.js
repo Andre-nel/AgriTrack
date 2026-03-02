@@ -187,10 +187,12 @@
   function popupHtml(properties) {
     const props = properties || {};
     const name = escapeHtml(props.name || "Unnamed");
+    const farmText = props.farm_name ? escapeHtml(props.farm_name) : "";
+    const farmLine = farmText ? '<div class="map-popup-farm">' + farmText + "</div>" : "";
 
     if (props.feature_type !== "paddock") {
       const label = props.feature_type === "farm_boundary" ? "Farm Boundary" : "Unmatched Shape";
-      return "<strong>" + name + "</strong><br>" + label;
+      return farmLine + "<strong>" + name + "</strong><br>" + label;
     }
 
     const speciesRows = Array.isArray(props.species_heads) ? props.species_heads : [];
@@ -224,6 +226,7 @@
         : formatNumber(props.grazing_pressure_ratio * 100, 1) + "%";
 
     return [
+      farmLine,
       "<strong>" + name + "</strong>",
       '<table class="map-popup-table">',
       "<tr><td>Status</td><td>" + escapeHtml(props.status || "-") + "</td></tr>",
@@ -259,8 +262,24 @@
     })
     .then((payload) => {
       const features = Array.isArray(payload.features) ? payload.features : [];
+      const missingKmlFarms = Array.isArray(payload.missing_kml_farms)
+        ? payload.missing_kml_farms.length
+        : 0;
+      const invalidKmlFarms = Array.isArray(payload.invalid_kml_farms)
+        ? payload.invalid_kml_farms.length
+        : 0;
       if (!features.length) {
-        setStatus("No polygons were found in the KML.");
+        if (missingKmlFarms > 0 || invalidKmlFarms > 0) {
+          setStatus(
+            "No map polygons could be loaded. Missing farm KML files: " +
+              missingKmlFarms +
+              ". Invalid farm KML files: " +
+              invalidKmlFarms +
+              "."
+          );
+        } else {
+          setStatus("No polygons were found in the KML.");
+        }
         return;
       }
 
@@ -285,9 +304,13 @@
         ? payload.paddocks_without_kml.length
         : 0;
 
-      if (unmatched > 0 || missing > 0) {
+      if (unmatched > 0 || missing > 0 || missingKmlFarms > 0 || invalidKmlFarms > 0) {
         setStatus(
-          "Map loaded with warnings. Unmatched KML shapes: " +
+          "Map loaded with warnings. Missing farm KML files: " +
+            missingKmlFarms +
+            ". Invalid farm KML files: " +
+            invalidKmlFarms +
+            ". Unmatched KML shapes: " +
             unmatched +
             ". Paddocks without map geometry: " +
             missing +

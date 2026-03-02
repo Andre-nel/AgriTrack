@@ -217,6 +217,8 @@ def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict)
     active = active_snapshot.get(str(paddock.id), {})
     return {
         "feature_type": "paddock",
+        "farm_id": str(farm.id),
+        "farm_name": farm.name,
         "paddock_id": str(paddock.id),
         "paddock_url": url_for("web.paddock_detail", paddock_id=paddock.id),
         "name": paddock.name,
@@ -231,6 +233,59 @@ def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict)
         "current_lsu": active.get("current_lsu", 0.0),
         "mobs": active.get("mobs", []),
         "species_heads": active.get("species_heads", []),
+    }
+
+
+def _build_farm_map_feature_collection(farm: Farm) -> dict:
+    kml_features, kml_path = _load_farm_kml_features(farm.name)
+    paddocks = list(Paddock.query.filter_by(farm_id=farm.id).all())
+    paddock_by_name = {_normalize_name(p.name): p for p in paddocks}
+    farm_name_key = _normalize_name(farm.name)
+    active_snapshot = _active_grazing_snapshot_by_paddock(str(farm.id))
+
+    feature_collection = []
+    matched_paddock_ids = set()
+    unmatched_placemarks = []
+
+    for item in kml_features:
+        normalized_name = item["normalized_name"]
+        paddock = paddock_by_name.get(normalized_name)
+        if paddock:
+            properties = _paddock_map_properties(paddock, farm, active_snapshot)
+            matched_paddock_ids.add(str(paddock.id))
+        else:
+            feature_type = "farm_boundary" if normalized_name == farm_name_key else "unmatched"
+            properties = {
+                "feature_type": feature_type,
+                "farm_id": str(farm.id),
+                "farm_name": farm.name,
+                "name": item["name"],
+            }
+            if feature_type == "unmatched":
+                unmatched_placemarks.append(item["name"])
+
+        feature_collection.append(
+            {
+                "type": "Feature",
+                "geometry": item["geometry"],
+                "properties": properties,
+            }
+        )
+
+    paddocks_without_kml = [
+        p.name for p in sorted(paddocks, key=lambda row: row.name.lower()) if str(p.id) not in matched_paddock_ids
+    ]
+
+    return {
+        "type": "FeatureCollection",
+        "farm_id": str(farm.id),
+        "farm_name": farm.name,
+        "kml_path": kml_path,
+        "metric": "grazing_pressure_ratio",
+        "generated_at": f"{datetime.utcnow().isoformat()}Z",
+        "unmatched_placemarks": unmatched_placemarks,
+        "paddocks_without_kml": paddocks_without_kml,
+        "features": feature_collection,
     }
 
 
@@ -417,10 +472,8 @@ def farm_detail(farm_id):
 @bp.get("/farms/<farm_id>/map-data")
 def farm_map_data(farm_id):
     farm = Farm.query.get_or_404(farm_id)
-    expected_kml_path = Path(current_app.instance_path) / "maps" / f"{farm.name}.kml"
-
     try:
-        kml_features, kml_path = _load_farm_kml_features(farm.name)
+        payload = _build_farm_map_feature_collection(farm)
     except FileNotFoundError as exc:
         return (
             jsonify(
@@ -434,6 +487,7 @@ def farm_map_data(farm_id):
             404,
         )
     except ET.ParseError:
+        expected_kml_path = Path(current_app.instance_path) / "maps" / f"{farm.name}.kml"
         return (
             jsonify(
                 {
@@ -446,53 +500,49 @@ def farm_map_data(farm_id):
             500,
         )
 
-    paddocks = list(Paddock.query.filter_by(farm_id=farm_id).all())
-    paddock_by_name = {_normalize_name(p.name): p for p in paddocks}
-    farm_name_key = _normalize_name(farm.name)
-    active_snapshot = _active_grazing_snapshot_by_paddock(farm_id)
+    return jsonify(payload)
 
-    feature_collection = []
-    matched_paddock_ids = set()
+
+@bp.get("/dashboard/map-data")
+def dashboard_map_data():
+    farms = Farm.query.order_by(Farm.name).all()
+
+    combined_features = []
     unmatched_placemarks = []
+    paddocks_without_kml = []
+    missing_kml_farms = []
+    invalid_kml_farms = []
+    kml_paths = []
 
-    for item in kml_features:
-        normalized_name = item["normalized_name"]
-        paddock = paddock_by_name.get(normalized_name)
-        if paddock:
-            properties = _paddock_map_properties(paddock, farm, active_snapshot)
-            matched_paddock_ids.add(str(paddock.id))
-        else:
-            feature_type = "farm_boundary" if normalized_name == farm_name_key else "unmatched"
-            properties = {
-                "feature_type": feature_type,
-                "name": item["name"],
-            }
-            if feature_type == "unmatched":
-                unmatched_placemarks.append(item["name"])
+    for farm in farms:
+        expected_kml_path = Path(current_app.instance_path) / "maps" / f"{farm.name}.kml"
+        try:
+            payload = _build_farm_map_feature_collection(farm)
+        except FileNotFoundError:
+            missing_kml_farms.append({"farm_id": str(farm.id), "farm_name": farm.name, "path": str(expected_kml_path)})
+            continue
+        except ET.ParseError:
+            invalid_kml_farms.append({"farm_id": str(farm.id), "farm_name": farm.name, "path": str(expected_kml_path)})
+            continue
 
-        feature_collection.append(
-            {
-                "type": "Feature",
-                "geometry": item["geometry"],
-                "properties": properties,
-            }
-        )
-
-    paddocks_without_kml = [
-        p.name for p in sorted(paddocks, key=lambda row: row.name.lower()) if str(p.id) not in matched_paddock_ids
-    ]
+        kml_paths.append(payload["kml_path"])
+        combined_features.extend(payload["features"])
+        unmatched_placemarks.extend([f"{farm.name}: {name}" for name in payload["unmatched_placemarks"]])
+        paddocks_without_kml.extend([f"{farm.name}: {name}" for name in payload["paddocks_without_kml"]])
 
     return jsonify(
         {
             "type": "FeatureCollection",
-            "farm_id": str(farm.id),
-            "farm_name": farm.name,
-            "kml_path": kml_path,
             "metric": "grazing_pressure_ratio",
             "generated_at": f"{datetime.utcnow().isoformat()}Z",
+            "farm_count": len(farms),
+            "mapped_farm_count": len(kml_paths),
+            "kml_paths": kml_paths,
+            "missing_kml_farms": missing_kml_farms,
+            "invalid_kml_farms": invalid_kml_farms,
             "unmatched_placemarks": unmatched_placemarks,
             "paddocks_without_kml": paddocks_without_kml,
-            "features": feature_collection,
+            "features": combined_features,
         }
     )
 
