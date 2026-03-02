@@ -11,6 +11,18 @@
     sheep: mapElement.dataset.sheepIcon || "/static/sheep.png",
     goat: mapElement.dataset.goatIcon || "/static/goat.png",
   };
+  const pressureColors = [
+    "#274e13",
+    "#38761d",
+    "#6aa84f",
+    "#93c47d",
+    "#b6d7a8",
+    "#ffe599",
+    "#f6b26b",
+    "#b45f06",
+    "#e06666",
+    "#cc0000",
+  ];
   if (!dataUrl) {
     if (statusElement) {
       statusElement.textContent = "Map data URL is missing.";
@@ -44,16 +56,13 @@
     if (ratio === null || ratio === undefined) {
       return "#8f9a96";
     }
-    if (ratio < 0.4) {
-      return "#5cb85c";
+    const value = Number(ratio);
+    if (Number.isNaN(value)) {
+      return "#8f9a96";
     }
-    if (ratio < 0.7) {
-      return "#e0c24d";
-    }
-    if (ratio < 1.0) {
-      return "#dd8f3d";
-    }
-    return "#c85047";
+    const clamped = Math.max(0, Math.min(1, value));
+    const idx = Math.min(pressureColors.length - 1, Math.floor(clamped * pressureColors.length));
+    return pressureColors[idx];
   }
 
   function normalizeSpecies(value) {

@@ -23,11 +23,21 @@
     data-sheep-icon="{{ url_for('static', filename='sheep.png') }}"
     data-goat-icon="{{ url_for('static', filename='goat.png') }}"
   ></div>
-  <div class="map-legend" aria-hidden="true">
-    <span><i class="swatch low"></i>Low</span>
-    <span><i class="swatch medium"></i>Medium</span>
-    <span><i class="swatch high"></i>High</span>
-    <span><i class="swatch over"></i>Over Capacity</span>
+  <div class="map-legend map-legend-scale" aria-hidden="true">
+    <span class="scale-label">Low</span>
+    <span class="scale-ramp">
+      <i class="swatch s1"></i>
+      <i class="swatch s2"></i>
+      <i class="swatch s3"></i>
+      <i class="swatch s4"></i>
+      <i class="swatch s5"></i>
+      <i class="swatch s6"></i>
+      <i class="swatch s7"></i>
+      <i class="swatch s8"></i>
+      <i class="swatch s9"></i>
+      <i class="swatch s10"></i>
+    </span>
+    <span class="scale-label">High / Over</span>
     <span><i class="swatch unknown"></i>No Data</span>
   </div>
   <p id="farm-map-status" class="muted">Loading map...</p>

@@ -257,10 +257,30 @@ a { color: #1b5f49; }
   border: 1px solid #49524f;
 }
 
-.map-legend .swatch.low { background: #5cb85c; }
-.map-legend .swatch.medium { background: #e0c24d; }
-.map-legend .swatch.high { background: #dd8f3d; }
-.map-legend .swatch.over { background: #c85047; }
+.map-legend-scale {
+  align-items: center;
+}
+
+.map-legend .scale-label {
+  font-weight: 600;
+}
+
+.map-legend .scale-ramp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.map-legend .swatch.s1 { background: #274e13; }
+.map-legend .swatch.s2 { background: #38761d; }
+.map-legend .swatch.s3 { background: #6aa84f; }
+.map-legend .swatch.s4 { background: #93c47d; }
+.map-legend .swatch.s5 { background: #b6d7a8; }
+.map-legend .swatch.s6 { background: #ffe599; }
+.map-legend .swatch.s7 { background: #f6b26b; }
+.map-legend .swatch.s8 { background: #b45f06; }
+.map-legend .swatch.s9 { background: #e06666; }
+.map-legend .swatch.s10 { background: #cc0000; }
 .map-legend .swatch.unknown { background: #8f9a96; }
 
 .map-popup-table {
