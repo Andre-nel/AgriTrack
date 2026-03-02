@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import AnimalGroupBalance, Mob
@@ -9,9 +10,13 @@ from app.services.stock_service import StockService
 bp = Blueprint("mobs", __name__)
 
 
+def _get_active_mob_or_404(mob_id: str) -> Mob:
+    return Mob.query.filter_by(id=mob_id, status="active").first_or_404()
+
+
 @bp.get("")
 def list_mobs():
-    mobs = Mob.query.order_by(Mob.name).all()
+    mobs = Mob.query.filter_by(status="active").order_by(Mob.name).all()
     return jsonify(
         [{"id": str(m.id), "farm_id": m.farm_id, "name": m.name, "status": m.status} for m in mobs]
     )
@@ -26,19 +31,23 @@ def create_mob():
 
     mob = Mob(farm_id=payload["farm_id"], name=payload["name"], status=payload.get("status", "active"))
     db.session.add(mob)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Active mob name already exists on this farm"}), 400
     return jsonify({"id": str(mob.id), "name": mob.name}), 201
 
 
 @bp.get("/<mob_id>")
 def get_mob(mob_id):
-    mob = Mob.query.get_or_404(mob_id)
+    mob = _get_active_mob_or_404(mob_id)
     return jsonify({"id": str(mob.id), "farm_id": mob.farm_id, "name": mob.name, "status": mob.status})
 
 
 @bp.patch("/<mob_id>")
 def update_mob(mob_id):
-    mob = Mob.query.get_or_404(mob_id)
+    mob = _get_active_mob_or_404(mob_id)
     payload = request.get_json() or {}
 
     mob.name = payload.get("name", mob.name)
@@ -50,12 +59,17 @@ def update_mob(mob_id):
     mob.status = requested_status
     mob.origin_note = payload.get("origin_note", mob.origin_note)
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Active mob name already exists on this farm"}), 400
     return jsonify({"id": str(mob.id), "name": mob.name})
 
 
 @bp.post("/<mob_id>/animal-groups/adjust")
 def adjust_mob_stock(mob_id):
+    mob = _get_active_mob_or_404(mob_id)
     payload = request.get_json() or {}
     try:
         selected_event_type = StockEventType(payload["event_type"])
@@ -79,8 +93,8 @@ def adjust_mob_stock(mob_id):
                 event_quantity = -delta
 
         ledger = StockService.adjust_stock(
-            mob_id=mob_id,
-            farm_id=payload["farm_id"],
+            mob_id=mob.id,
+            farm_id=mob.farm_id,
             animal_group_type_id=payload["animal_group_type_id"],
             event_type=event_type,
             quantity=event_quantity,
@@ -96,7 +110,8 @@ def adjust_mob_stock(mob_id):
 
 @bp.get("/<mob_id>/balances")
 def mob_balances(mob_id):
-    balances = AnimalGroupBalance.query.filter_by(mob_id=mob_id).all()
+    mob = _get_active_mob_or_404(mob_id)
+    balances = AnimalGroupBalance.query.filter_by(mob_id=mob.id).all()
     return jsonify(
         [
             {
@@ -110,7 +125,7 @@ def mob_balances(mob_id):
 
 @bp.post("/<mob_id>/move")
 def move_mob(mob_id):
-    mob = Mob.query.get_or_404(mob_id)
+    mob = _get_active_mob_or_404(mob_id)
     payload = request.get_json() or {}
     allocations = payload.get("allocations", [])
 
@@ -126,7 +141,7 @@ def move_mob(mob_id):
 
 @bp.post("/<mob_id>/deactivate")
 def deactivate_mob(mob_id):
-    mob = Mob.query.get_or_404(mob_id)
+    mob = _get_active_mob_or_404(mob_id)
     total_head_count = sum(int(balance.head_count) for balance in mob.balances)
     if total_head_count > 0:
         return jsonify({"error": "Mob cannot be deactivated while it still contains stock"}), 400
@@ -138,7 +153,7 @@ def deactivate_mob(mob_id):
 
 @bp.post("/<mob_id>/split")
 def split_mob(mob_id):
-    source = Mob.query.get_or_404(mob_id)
+    source = _get_active_mob_or_404(mob_id)
     payload = request.get_json() or {}
     splits = payload.get("splits", [])
 
@@ -161,7 +176,7 @@ def merge_mobs():
     if not source_ids or not result_name:
         return jsonify({"error": "source_mob_ids and result_name are required"}), 400
 
-    sources = Mob.query.filter(Mob.id.in_(source_ids)).all()
+    sources = Mob.query.filter(Mob.id.in_(source_ids), Mob.status == "active").all()
     if len(sources) != len(source_ids):
         return jsonify({"error": "One or more source mobs were not found"}), 404
 

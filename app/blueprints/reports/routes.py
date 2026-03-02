@@ -71,6 +71,14 @@ def _round_float(value: float | None, precision: int = 4) -> float | None:
     return round(float(value), precision)
 
 
+def _active_mobs_for_farm(farm_id: str) -> list[Mob]:
+    return Mob.query.filter_by(farm_id=farm_id, status="active").order_by(Mob.name).all()
+
+
+def _get_active_mob_or_404(mob_id: str) -> Mob:
+    return Mob.query.filter_by(id=mob_id, status="active").first_or_404()
+
+
 def _parse_kml_ring(raw: str | None) -> list[list[float]]:
     coords = []
     for token in (raw or "").replace("\n", " ").split():
@@ -234,7 +242,7 @@ def dashboard():
     farm_cards = []
     for farm in farms:
         paddocks = len(farm.paddocks)
-        mobs = len(farm.mobs)
+        mobs = len([mob for mob in farm.mobs if mob.status == "active"])
         ready = paddocks > 0 and mobs > 0
         farm_cards.append(
             {
@@ -332,7 +340,7 @@ def farms_page():
 def farm_detail(farm_id):
     farm = Farm.query.get_or_404(farm_id)
     paddocks = sorted(farm.paddocks, key=lambda p: p.name.lower())
-    mobs = sorted(farm.mobs, key=lambda m: m.name.lower())
+    mobs = _active_mobs_for_farm(farm_id)
     farm_total_area_ha = float(sum((p.area_ha or 0) for p in paddocks))
     farm_current_lsu = sum(ReportingService.mob_total_lsu(mob) for mob in mobs)
     farm_capacity_lsu = (
@@ -549,7 +557,12 @@ def create_mob_form(farm_id):
 
     mob = Mob(farm_id=farm_id, name=name, status="active")
     db.session.add(mob)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("Active mob name already exists on this farm", "error")
+        return redirect(url_for("web.farm_detail", farm_id=farm_id))
     flash("Mob created", "success")
     return redirect(url_for("web.farm_detail", farm_id=farm_id))
 
@@ -583,7 +596,7 @@ def create_rainfall_form(farm_id):
 
 @bp.get("/mobs/<mob_id>")
 def mob_detail(mob_id):
-    mob = Mob.query.get_or_404(mob_id)
+    mob = _get_active_mob_or_404(mob_id)
     paddocks = Paddock.query.filter_by(farm_id=mob.farm_id).order_by(Paddock.name).all()
     active_session = next((session for session in mob.grazing_sessions if session.end_at is None), None)
     current_allocations = []
@@ -639,7 +652,7 @@ def mob_detail(mob_id):
 
 @bp.post("/mobs/<mob_id>/adjust")
 def mob_adjust_form(mob_id):
-    mob = Mob.query.get_or_404(mob_id)
+    mob = _get_active_mob_or_404(mob_id)
     try:
         group_type = StockService.get_or_create_group_type(
             species=(request.form.get("species") or "Cattle").strip(),
@@ -690,7 +703,7 @@ def mob_adjust_form(mob_id):
 
 @bp.post("/mobs/<mob_id>/move")
 def mob_move_form(mob_id):
-    mob = Mob.query.get_or_404(mob_id)
+    mob = _get_active_mob_or_404(mob_id)
     paddock_ids = request.form.getlist("paddock_id")
     allocation_pcts = request.form.getlist("allocation_pct")
 
@@ -750,7 +763,7 @@ def mob_move_form(mob_id):
 
 @bp.post("/mobs/<mob_id>/deactivate")
 def mob_deactivate_form(mob_id):
-    mob = Mob.query.get_or_404(mob_id)
+    mob = _get_active_mob_or_404(mob_id)
     total_head_count = sum(int(balance.head_count) for balance in mob.balances)
     if total_head_count > 0:
         flash("Mob cannot be deactivated while it still contains stock", "error")
@@ -764,7 +777,7 @@ def mob_deactivate_form(mob_id):
 
 @bp.post("/mobs/<mob_id>/split")
 def mob_split_form(mob_id):
-    source = Mob.query.get_or_404(mob_id)
+    source = _get_active_mob_or_404(mob_id)
     split_names = request.form.getlist("split_mob_name")
     split_group_ids = request.form.getlist("split_group_id")
     split_quantities = request.form.getlist("split_quantity")

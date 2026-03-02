@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import or_
 
-from app.models import Farm, MovementEvent
+from app.models import Farm, Mob, MovementEvent
 from app.models.grazing import GrazingAllocation, GrazingSession
 
 
@@ -17,7 +17,7 @@ class ReportingService:
     def dashboard_summary() -> dict:
         farm_count = Farm.query.count()
         paddock_count = sum(len(f.paddocks) for f in Farm.query.all())
-        mob_count = sum(len(f.mobs) for f in Farm.query.all())
+        mob_count = Mob.query.filter_by(status="active").count()
         return {
             "farm_count": farm_count,
             "paddock_count": paddock_count,

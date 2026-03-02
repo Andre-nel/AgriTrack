@@ -15,4 +15,13 @@ class Mob(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     ledger_entries = db.relationship("StockLedgerEntry", back_populates="mob", cascade="all, delete-orphan")
     grazing_sessions = db.relationship("GrazingSession", back_populates="mob", cascade="all, delete-orphan")
 
-    __table_args__ = (db.UniqueConstraint("farm_id", "name", name="uq_mob_farm_name"),)
+    __table_args__ = (
+        db.Index(
+            "uq_mob_farm_name_active",
+            "farm_id",
+            "name",
+            unique=True,
+            sqlite_where=db.text("status = 'active'"),
+            postgresql_where=db.text("status = 'active'"),
+        ),
+    )

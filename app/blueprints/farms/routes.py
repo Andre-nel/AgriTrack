@@ -92,6 +92,8 @@ def farm_stock(farm_id):
     farm = Farm.query.get_or_404(farm_id)
     totals = {}
     for mob in farm.mobs:
+        if mob.status != "active":
+            continue
         for bal in mob.balances:
             key = bal.animal_group_type_id
             totals[key] = totals.get(key, 0) + bal.head_count
