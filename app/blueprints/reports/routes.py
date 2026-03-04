@@ -647,7 +647,16 @@ def create_rainfall_form(farm_id):
 @bp.get("/mobs/<mob_id>")
 def mob_detail(mob_id):
     mob = _get_active_mob_or_404(mob_id)
-    paddocks = Paddock.query.filter_by(farm_id=mob.farm_id).order_by(Paddock.name).all()
+    farms = Farm.query.order_by(Farm.name).all()
+    all_paddocks = Paddock.query.order_by(Paddock.name).all()
+    move_farms = [{"id": str(farm.id), "name": farm.name} for farm in farms]
+    move_paddocks_by_farm = {str(farm.id): [] for farm in farms}
+    for paddock in all_paddocks:
+        move_paddocks_by_farm.setdefault(str(paddock.farm_id), []).append(
+            {"id": str(paddock.id), "name": paddock.name}
+        )
+    has_move_paddocks = any(len(rows) > 0 for rows in move_paddocks_by_farm.values())
+    default_move_farm_id = str(mob.farm_id)
     active_session = next((session for session in mob.grazing_sessions if session.end_at is None), None)
     current_allocations = []
     allocation_total_pct = Decimal("0")
@@ -692,7 +701,10 @@ def mob_detail(mob_id):
     return render_template(
         "mob_detail.html",
         mob=mob,
-        paddocks=paddocks,
+        move_farms=move_farms,
+        move_paddocks_by_farm=move_paddocks_by_farm,
+        has_move_paddocks=has_move_paddocks,
+        default_move_farm_id=default_move_farm_id,
         stock_event_types=StockEventType,
         current_allocations=current_allocations,
         allocation_total_pct=float(allocation_total_pct),
@@ -754,11 +766,19 @@ def mob_adjust_form(mob_id):
 @bp.post("/mobs/<mob_id>/move")
 def mob_move_form(mob_id):
     mob = _get_active_mob_or_404(mob_id)
+    destination_farm_id = (request.form.get("destination_farm_id") or str(mob.farm_id)).strip()
     paddock_ids = request.form.getlist("paddock_id")
     allocation_pcts = request.form.getlist("allocation_pct")
 
     try:
-        valid_paddock_ids = {str(p.id) for p in Paddock.query.filter_by(farm_id=mob.farm_id).all()}
+        if not destination_farm_id:
+            raise ValueError("Destination farm is required")
+        if not Farm.query.filter_by(id=destination_farm_id).first():
+            raise ValueError("Destination farm is invalid")
+
+        valid_paddock_ids = {
+            str(p.id) for p in Paddock.query.filter_by(farm_id=destination_farm_id).all()
+        }
         allocations = []
         used_paddocks = set()
         total_pct = Decimal("0")
@@ -771,7 +791,7 @@ def mob_move_form(mob_id):
             if not paddock_id:
                 raise ValueError("Each allocation row requires a paddock")
             if paddock_id not in valid_paddock_ids:
-                raise ValueError("Paddock is invalid for this mob's farm")
+                raise ValueError("Selected paddock is invalid for the chosen destination farm")
             if paddock_id in used_paddocks:
                 raise ValueError("Duplicate paddock rows are not allowed")
             if not pct_text:
@@ -801,9 +821,13 @@ def mob_move_form(mob_id):
         MovementService.move_mob(
             mob=mob,
             allocations=allocations,
+            destination_farm_id=destination_farm_id,
         )
         db.session.commit()
         flash("Mob moved", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash("Move failed: active mob name already exists on the destination farm", "error")
     except (ValueError, InvalidOperation) as exc:
         db.session.rollback()
         flash(str(exc), "error")

@@ -92,16 +92,22 @@
 
 <section class="card">
   <h2>Move Mob</h2>
-  {% if paddocks %}
+  {% if has_move_paddocks %}
   <form method="post" action="{{ url_for('web.mob_move_form', mob_id=mob.id) }}" class="grid-form">
+    <label>Destination Farm
+      <select name="destination_farm_id" id="destinationFarm" required>
+        {% for farm in move_farms %}
+        <option value="{{ farm.id }}" {% if farm.id == default_move_farm_id %}selected{% endif %}>
+          {{ farm.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
     <div id="allocationRows">
       <div class="allocation-row">
         <label>Paddock
-          <select name="paddock_id" required>
+          <select name="paddock_id" class="allocation-paddock-select" required>
             <option value="">Choose paddock</option>
-            {% for p in paddocks %}
-            <option value="{{ p.id }}">{{ p.name }}</option>
-            {% endfor %}
           </select>
         </label>
         <label>Allocation %
@@ -119,11 +125,8 @@
   <template id="allocationRowTemplate">
     <div class="allocation-row">
       <label>Paddock
-        <select name="paddock_id" required>
+        <select name="paddock_id" class="allocation-paddock-select" required>
           <option value="">Choose paddock</option>
-          {% for p in paddocks %}
-          <option value="{{ p.id }}">{{ p.name }}</option>
-          {% endfor %}
         </select>
       </label>
       <label>Allocation %
@@ -132,8 +135,9 @@
       <button type="button" class="btn btn-secondary row-remove">Remove</button>
     </div>
   </template>
+  <script id="movePaddocksByFarm" type="application/json">{{ move_paddocks_by_farm | tojson }}</script>
   {% else %}
-  <p>No paddocks available for this farm yet. Add paddocks first.</p>
+  <p>No paddocks are available yet. Add paddocks to a farm first.</p>
   {% endif %}
 </section>
 
@@ -148,7 +152,7 @@
 <section class="card">
   <h2>Split Mob</h2>
   {% if split_group_options %}
-  <p class="muted">Allocate all source stock into two or more new mobs.</p>
+  <p class="muted">Move selected stock into one or more new mobs. Any unallocated stock stays in this mob.</p>
   <form method="post" action="{{ url_for('web.mob_split_form', mob_id=mob.id) }}" class="grid-form">
     <div id="splitRows">
       <div class="split-row allocation-row">
@@ -292,7 +296,51 @@
     const addBtn = document.getElementById("addAllocationRow");
     const totalEl = document.getElementById("allocationTotal");
     const template = document.getElementById("allocationRowTemplate");
-    if (rowsContainer && addBtn && template && totalEl) {
+    const destinationFarmSelect = document.getElementById("destinationFarm");
+    const movePaddocksByFarmEl = document.getElementById("movePaddocksByFarm");
+    let movePaddocksByFarm = {};
+    if (movePaddocksByFarmEl) {
+      try {
+        movePaddocksByFarm = JSON.parse(movePaddocksByFarmEl.textContent || "{}");
+      } catch (error) {
+        movePaddocksByFarm = {};
+      }
+    }
+
+    if (rowsContainer && addBtn && template && totalEl && destinationFarmSelect) {
+      function updatePaddockSelectOptions(selectEl, farmId, selectedValue) {
+        if (!selectEl) return;
+        const options = movePaddocksByFarm[farmId] || [];
+        const nextSelected = selectedValue || "";
+
+        selectEl.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = options.length ? "Choose paddock" : "No paddocks available";
+        selectEl.appendChild(placeholder);
+
+        options.forEach((paddock) => {
+          const option = document.createElement("option");
+          option.value = paddock.id;
+          option.textContent = paddock.name;
+          selectEl.appendChild(option);
+        });
+
+        if (nextSelected && options.some((paddock) => paddock.id === nextSelected)) {
+          selectEl.value = nextSelected;
+        } else {
+          selectEl.value = "";
+        }
+        selectEl.disabled = options.length === 0;
+      }
+
+      function syncPaddockOptions() {
+        const farmId = destinationFarmSelect.value;
+        rowsContainer.querySelectorAll("select[name='paddock_id']").forEach((selectEl) => {
+          updatePaddockSelectOptions(selectEl, farmId, selectEl.value);
+        });
+      }
+
       function recalcTotal() {
         let total = 0;
         rowsContainer.querySelectorAll("input[name='allocation_pct']").forEach((input) => {
@@ -306,6 +354,14 @@
       function bindRow(row) {
         const removeBtn = row.querySelector(".row-remove");
         const pctInput = row.querySelector("input[name='allocation_pct']");
+        const paddockSelect = row.querySelector("select[name='paddock_id']");
+        if (paddockSelect) {
+          updatePaddockSelectOptions(
+            paddockSelect,
+            destinationFarmSelect.value,
+            paddockSelect.value
+          );
+        }
         if (removeBtn) {
           removeBtn.addEventListener("click", () => {
             if (rowsContainer.children.length > 1) {
@@ -325,7 +381,9 @@
         bindRow(clone);
       });
 
+      destinationFarmSelect.addEventListener("change", syncPaddockOptions);
       rowsContainer.querySelectorAll(".allocation-row").forEach(bindRow);
+      syncPaddockOptions();
       recalcTotal();
     }
 

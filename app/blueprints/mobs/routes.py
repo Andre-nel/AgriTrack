@@ -128,10 +128,18 @@ def move_mob(mob_id):
     mob = _get_active_mob_or_404(mob_id)
     payload = request.get_json() or {}
     allocations = payload.get("allocations", [])
+    destination_farm_id = payload.get("destination_farm_id")
 
     try:
-        session = MovementService.move_mob(mob=mob, allocations=allocations)
+        session = MovementService.move_mob(
+            mob=mob,
+            allocations=allocations,
+            destination_farm_id=destination_farm_id,
+        )
         db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Move failed: active mob name already exists on the destination farm"}), 400
     except ValueError as exc:
         db.session.rollback()
         return jsonify({"error": str(exc)}), 400

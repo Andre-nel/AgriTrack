@@ -2,19 +2,60 @@ from datetime import datetime, timezone
 from collections import defaultdict
 
 from app.extensions import db
-from app.models import Mob, MovementEvent, MovementEventMob
+from app.models import Farm, Mob, MovementEvent, MovementEventMob, Paddock
 from app.models.animal_group import AnimalGroupBalance
 from app.models.movement import MobLineage, MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
 from app.services.grazing_service import GrazingService
 from app.services.stock_service import StockService
+from app.services.validation_service import ValidationService
 
 
 class MovementService:
     @staticmethod
+    def _resolve_move_destination_farm_id(
+        mob: Mob,
+        allocations: list[dict],
+        destination_farm_id: str | None = None,
+    ) -> str:
+        farm_id = str(destination_farm_id or mob.farm_id).strip()
+        if not farm_id:
+            raise ValueError("Destination farm is required")
+
+        if not Farm.query.filter_by(id=farm_id).first():
+            raise ValueError("Destination farm is invalid")
+
+        paddock_ids = [str(item.get("paddock_id") or "").strip() for item in allocations]
+        if not all(paddock_ids):
+            raise ValueError("Each allocation row requires a paddock")
+
+        unique_paddock_ids = set(paddock_ids)
+        if len(unique_paddock_ids) != len(paddock_ids):
+            raise ValueError("Duplicate paddock rows are not allowed")
+
+        paddocks = Paddock.query.filter(Paddock.id.in_(unique_paddock_ids)).all()
+        if len(paddocks) != len(unique_paddock_ids):
+            raise ValueError("One or more selected paddocks are invalid")
+
+        if any(str(paddock.farm_id) != farm_id for paddock in paddocks):
+            raise ValueError("Selected paddocks do not belong to the chosen destination farm")
+
+        if str(mob.farm_id) != farm_id:
+            conflict = Mob.query.filter(
+                Mob.farm_id == farm_id,
+                Mob.status == "active",
+                Mob.name == mob.name,
+                Mob.id != mob.id,
+            ).first()
+            if conflict:
+                raise ValueError("Active mob name already exists on the destination farm")
+
+        return farm_id
+
+    @staticmethod
     def _normalize_splits(source_mob: Mob, splits: list[dict]) -> list[dict]:
         if not splits:
-            raise ValueError("At least two split mobs are required")
+            raise ValueError("At least one split mob is required")
 
         source_balances = {
             str(balance.animal_group_type_id): int(balance.head_count)
@@ -62,33 +103,46 @@ class MovementService:
             ]
             normalized.append({"name": name, "groups": normalized_groups})
 
-        if len(normalized) < 2:
-            raise ValueError("Split must create at least two mobs")
+        if len(normalized) < 1:
+            raise ValueError("Split must create at least one mob")
 
+        has_allocated_stock = False
         for group_id, source_qty in source_balances.items():
             allocated_qty = allocated_totals.get(group_id, 0)
-            if allocated_qty != source_qty:
+            if allocated_qty > source_qty:
                 raise ValueError(
-                    "Split allocations must fully allocate each source group "
+                    "Split allocations cannot exceed source stock "
                     f"(group {group_id}: allocated {allocated_qty}, available {source_qty})"
                 )
+            if allocated_qty > 0:
+                has_allocated_stock = True
+
+        if not has_allocated_stock:
+            raise ValueError("Split must allocate stock to at least one new mob")
 
         return normalized
 
     @staticmethod
-    def move_mob(mob: Mob, allocations: list[dict], when=None):
+    def move_mob(mob: Mob, allocations: list[dict], destination_farm_id: str | None = None, when=None):
         when = when or datetime.now(timezone.utc)
+        ValidationService.validate_allocations(allocations)
+        resolved_destination_farm_id = MovementService._resolve_move_destination_farm_id(
+            mob=mob,
+            allocations=allocations,
+            destination_farm_id=destination_farm_id,
+        )
 
         GrazingService.close_open_session(mob_id=mob.id, end_at=when)
+        mob.farm_id = resolved_destination_farm_id
         session = GrazingService.open_session(
-            farm_id=mob.farm_id,
+            farm_id=resolved_destination_farm_id,
             mob_id=mob.id,
             start_at=when,
             allocations=allocations,
         )
 
         event = MovementEvent(
-            farm_id=mob.farm_id,
+            farm_id=resolved_destination_farm_id,
             event_time=when,
             event_kind=MovementEventKind.move,
         )
