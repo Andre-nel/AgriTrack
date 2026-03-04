@@ -155,7 +155,7 @@
     </form>
     <ul class="link-list">
       {% for m in mobs %}
-      <li><a href="{{ url_for('web.mob_detail', mob_id=m.id) }}">{{ m.name }}</a> ({{ m.status }})</li>
+      <li><a href="{{ url_for('web.mob_detail', mob_id=m.id) }}">{{ m.name }}</a> ({{ mob_detail_labels.get(m.id, m.status) }})</li>
       {% else %}
       <li>No mobs yet.</li>
       {% endfor %}

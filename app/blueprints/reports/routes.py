@@ -396,6 +396,22 @@ def farm_detail(farm_id):
     farm = Farm.query.get_or_404(farm_id)
     paddocks = sorted(farm.paddocks, key=lambda p: p.name.lower())
     mobs = _active_mobs_for_farm(farm_id)
+    located_mob_ids = set()
+    if mobs:
+        mob_ids = [mob.id for mob in mobs]
+        active_allocations = (
+            GrazingAllocation.query.join(GrazingSession)
+            .filter(
+                GrazingSession.mob_id.in_(mob_ids),
+                GrazingSession.end_at.is_(None),
+            )
+            .all()
+        )
+        located_mob_ids = {str(allocation.grazing_session.mob_id) for allocation in active_allocations}
+    mob_detail_labels = {
+        str(mob.id): ("Not Located" if str(mob.id) not in located_mob_ids else mob.status)
+        for mob in mobs
+    }
     farm_total_area_ha = float(sum((p.area_ha or 0) for p in paddocks))
     farm_current_lsu = sum(ReportingService.mob_total_lsu(mob) for mob in mobs)
     farm_capacity_lsu = (
@@ -466,6 +482,7 @@ def farm_detail(farm_id):
         farm_total_area_ha=farm_total_area_ha,
         farm_capacity_lsu=farm_capacity_lsu,
         farm_current_lsu=farm_current_lsu,
+        mob_detail_labels=mob_detail_labels,
     )
 
 
