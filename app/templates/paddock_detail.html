@@ -93,13 +93,30 @@
 
 <section class="card">
   <h2>Current Weighted Stock</h2>
-  <ul class="link-list">
-    {% for group_id, total in stock.items() %}
-    <li>{{ group_id }}: {{ "%.2f"|format(total) }}</li>
-    {% else %}
-    <li>No active grazing allocations.</li>
-    {% endfor %}
-  </ul>
+  <table>
+    <thead>
+      <tr>
+        <th>Species</th>
+        <th>Breed</th>
+        <th>Sex</th>
+        <th>Age Class</th>
+        <th>Head</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in stock_summary %}
+      <tr>
+        <td>{{ row.species }}</td>
+        <td>{{ row.breed }}</td>
+        <td>{{ row.sex }}</td>
+        <td>{{ row.age_class }}</td>
+        <td>{{ "%.2f"|format(row.head_count) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">No active grazing allocations.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </section>
 
 <section class="card">

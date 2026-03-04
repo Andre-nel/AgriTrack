@@ -909,7 +909,7 @@ def update_paddock_stocking_rate_form(paddock_id):
 @bp.get("/paddocks/<paddock_id>")
 def paddock_detail(paddock_id):
     paddock = Paddock.query.get_or_404(paddock_id)
-    stock = ReportingService.paddock_current_stock(paddock_id)
+    stock_summary = ReportingService.paddock_current_stock_summary(paddock_id)
 
     today = date.today()
     try:
@@ -989,7 +989,7 @@ def paddock_detail(paddock_id):
     return render_template(
         "paddock_detail.html",
         paddock=paddock,
-        stock=stock,
+        stock_summary=stock_summary,
         history=history,
         current_lsu=current_lsu,
         effective_stocking_rate=effective_stocking_rate,

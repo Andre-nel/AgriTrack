@@ -41,6 +41,38 @@ class ReportingService:
         return totals
 
     @staticmethod
+    def paddock_current_stock_summary(paddock_id: str) -> list[dict]:
+        rows = (
+            GrazingAllocation.query.join(GrazingSession)
+            .filter(GrazingAllocation.paddock_id == paddock_id, GrazingSession.end_at.is_(None))
+            .all()
+        )
+
+        totals: dict[tuple[str, str, str, str], float] = {}
+        for allocation in rows:
+            fraction = float(allocation.allocation_fraction)
+            for balance in allocation.grazing_session.mob.balances:
+                group = balance.animal_group_type
+                key = (
+                    group.species,
+                    group.breed,
+                    group.sex,
+                    group.age_class,
+                )
+                totals[key] = totals.get(key, 0.0) + (float(balance.head_count) * fraction)
+
+        return [
+            {
+                "species": key[0],
+                "breed": key[1],
+                "sex": key[2],
+                "age_class": key[3],
+                "head_count": head_count,
+            }
+            for key, head_count in sorted(totals.items(), key=lambda item: item[0])
+        ]
+
+    @staticmethod
     def _normalize_text(value: str | None) -> str:
         return (value or "").strip().lower()
 
