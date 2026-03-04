@@ -987,6 +987,79 @@ def mob_split_form(mob_id):
     return redirect(url_for("web.mob_detail", mob_id=mob_id))
 
 
+@bp.post("/paddocks/<paddock_id>/move-mobs")
+def paddock_move_all_mobs_form(paddock_id):
+    paddock = Paddock.query.get_or_404(paddock_id)
+    mob_ids = request.form.getlist("mob_id")
+    destination_farm_ids = request.form.getlist("destination_farm_id")
+    destination_paddock_ids = request.form.getlist("destination_paddock_id")
+
+    try:
+        if not mob_ids:
+            raise ValueError("No active mobs on this paddock to move")
+        if not (
+            len(mob_ids) == len(destination_farm_ids) == len(destination_paddock_ids)
+        ):
+            raise ValueError("Move request is incomplete. Provide destination farm and paddock for each mob")
+        if len(set(mob_ids)) != len(mob_ids):
+            raise ValueError("Duplicate mob rows are not allowed")
+
+        active_allocations = (
+            GrazingAllocation.query.join(GrazingSession)
+            .filter(
+                GrazingAllocation.paddock_id == paddock_id,
+                GrazingSession.end_at.is_(None),
+            )
+            .all()
+        )
+        active_mob_ids = {
+            str(allocation.grazing_session.mob_id)
+            for allocation in active_allocations
+            if allocation.grazing_session.mob.status == "active"
+        }
+        if set(mob_ids) != active_mob_ids:
+            raise ValueError("Active mob list is out of date. Refresh and try again.")
+
+        moved_count = 0
+        for mob_id_raw, destination_farm_raw, destination_paddock_raw in zip(
+            mob_ids, destination_farm_ids, destination_paddock_ids
+        ):
+            mob_id = (mob_id_raw or "").strip()
+            destination_farm_id = (destination_farm_raw or "").strip()
+            destination_paddock_id = (destination_paddock_raw or "").strip()
+
+            if not destination_farm_id:
+                raise ValueError("Destination farm is required for each mob")
+            if not destination_paddock_id:
+                raise ValueError("Destination paddock is required for each mob")
+            if destination_paddock_id == str(paddock.id):
+                raise ValueError("Destination paddock must be different from the current paddock")
+            if mob_id not in active_mob_ids:
+                raise ValueError("One or more mobs are no longer active on this paddock")
+
+            mob = Mob.query.filter_by(id=mob_id, status="active").first()
+            if not mob:
+                raise ValueError("One or more selected mobs are invalid")
+
+            MovementService.move_mob(
+                mob=mob,
+                allocations=[{"paddock_id": destination_paddock_id, "allocation_fraction": "1.0"}],
+                destination_farm_id=destination_farm_id,
+            )
+            moved_count += 1
+
+        db.session.commit()
+        flash(f"Moved {moved_count} mob(s) from {paddock.name}", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash("Move failed: active mob name already exists on one of the destination farms", "error")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+
+    return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
+
+
 @bp.post("/paddocks/<paddock_id>/stocking-rate")
 def update_paddock_stocking_rate_form(paddock_id):
     paddock = Paddock.query.get_or_404(paddock_id)
@@ -1015,6 +1088,14 @@ def update_paddock_stocking_rate_form(paddock_id):
 def paddock_detail(paddock_id):
     paddock = Paddock.query.get_or_404(paddock_id)
     stock_summary = ReportingService.paddock_current_stock_summary(paddock_id)
+    farms = Farm.query.order_by(Farm.name).all()
+    all_paddocks = Paddock.query.order_by(Paddock.name).all()
+    bulk_move_farms = [{"id": str(farm.id), "name": farm.name} for farm in farms]
+    bulk_move_paddocks_by_farm = {str(farm.id): [] for farm in farms}
+    for option_paddock in all_paddocks:
+        bulk_move_paddocks_by_farm.setdefault(str(option_paddock.farm_id), []).append(
+            {"id": str(option_paddock.id), "name": option_paddock.name}
+        )
 
     today = date.today()
     try:
@@ -1079,6 +1160,32 @@ def paddock_detail(paddock_id):
         key=lambda a: a.grazing_session.start_at,
         reverse=True,
     )
+    active_allocations = (
+        GrazingAllocation.query.join(GrazingSession)
+        .filter(
+            GrazingAllocation.paddock_id == paddock_id,
+            GrazingSession.end_at.is_(None),
+        )
+        .all()
+    )
+    bulk_move_mob_rows = []
+    seen_mob_ids = set()
+    for allocation in sorted(active_allocations, key=lambda row: row.grazing_session.mob.name.lower()):
+        session = allocation.grazing_session
+        mob = session.mob
+        mob_id = str(mob.id)
+        if mob.status != "active" or mob_id in seen_mob_ids:
+            continue
+        seen_mob_ids.add(mob_id)
+        bulk_move_mob_rows.append(
+            {
+                "mob_id": mob_id,
+                "mob_name": mob.name,
+                "allocation_pct": float(allocation.allocation_fraction) * 100.0,
+                "default_destination_farm_id": str(mob.farm_id),
+            }
+        )
+
     history = []
     for allocation in history_allocations:
         session = allocation.grazing_session
@@ -1110,4 +1217,7 @@ def paddock_detail(paddock_id):
         period_avg_stocking_density=period_avg_stocking_density,
         period_lsu_days=period_lsu_days,
         effective_area_ha=effective_area_ha,
+        bulk_move_farms=bulk_move_farms,
+        bulk_move_paddocks_by_farm=bulk_move_paddocks_by_farm,
+        bulk_move_mob_rows=bulk_move_mob_rows,
     )

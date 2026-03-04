@@ -92,6 +92,58 @@
 </section>
 
 <section class="card">
+  <h2>Move All Mobs Off This Paddock</h2>
+  {% if bulk_move_mob_rows %}
+  <p class="muted">Each listed mob is moved to one destination paddock at 100% allocation.</p>
+  <form method="post" action="{{ url_for('web.paddock_move_all_mobs_form', paddock_id=paddock.id) }}" class="grid-form">
+    <table>
+      <thead><tr><th>Mob</th><th>Current Allocation %</th><th>Destination Farm</th><th>Destination Paddock</th></tr></thead>
+      <tbody>
+        {% for row in bulk_move_mob_rows %}
+        <tr>
+          <td>
+            <a href="{{ url_for('web.mob_detail', mob_id=row.mob_id) }}">{{ row.mob_name }}</a>
+            <input type="hidden" name="mob_id" value="{{ row.mob_id }}" />
+          </td>
+          <td>{{ "%.2f"|format(row.allocation_pct) }}%</td>
+          <td>
+            <select
+              name="destination_farm_id"
+              class="bulk-move-farm"
+              data-target="bulkMovePaddock{{ loop.index0 }}"
+              required
+            >
+              {% for farm in bulk_move_farms %}
+              <option value="{{ farm.id }}" {% if farm.id == row.default_destination_farm_id %}selected{% endif %}>
+                {{ farm.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select
+              id="bulkMovePaddock{{ loop.index0 }}"
+              name="destination_paddock_id"
+              class="bulk-move-paddock"
+              data-current-paddock-id="{{ paddock.id }}"
+              required
+            >
+              <option value="">Choose paddock</option>
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" class="btn">Move All Mobs</button>
+  </form>
+  <script id="bulkMovePaddocksByFarm" type="application/json">{{ bulk_move_paddocks_by_farm | tojson }}</script>
+  {% else %}
+  <p>No active mobs are currently allocated to this paddock.</p>
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Current Weighted Stock</h2>
   <table>
     <thead>
@@ -138,4 +190,56 @@
     </tbody>
   </table>
 </section>
+<script>
+  (function () {
+    const paddocksByFarmEl = document.getElementById("bulkMovePaddocksByFarm");
+    const farmSelects = document.querySelectorAll(".bulk-move-farm");
+    if (!paddocksByFarmEl || !farmSelects.length) return;
+
+    let paddocksByFarm = {};
+    try {
+      paddocksByFarm = JSON.parse(paddocksByFarmEl.textContent || "{}");
+    } catch (error) {
+      paddocksByFarm = {};
+    }
+
+    function syncRowPaddocks(farmSelect) {
+      const targetId = farmSelect.dataset.target;
+      if (!targetId) return;
+      const paddockSelect = document.getElementById(targetId);
+      if (!paddockSelect) return;
+
+      const currentPaddockId = paddockSelect.dataset.currentPaddockId || "";
+      const previousValue = paddockSelect.value;
+      const options = (paddocksByFarm[farmSelect.value] || []).filter(
+        (option) => option.id !== currentPaddockId
+      );
+
+      paddockSelect.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = options.length ? "Choose paddock" : "No paddocks available";
+      paddockSelect.appendChild(placeholder);
+
+      options.forEach((optionRow) => {
+        const option = document.createElement("option");
+        option.value = optionRow.id;
+        option.textContent = optionRow.name;
+        paddockSelect.appendChild(option);
+      });
+
+      if (previousValue && options.some((optionRow) => optionRow.id === previousValue)) {
+        paddockSelect.value = previousValue;
+      } else {
+        paddockSelect.value = "";
+      }
+      paddockSelect.disabled = options.length === 0;
+    }
+
+    farmSelects.forEach((farmSelect) => {
+      farmSelect.addEventListener("change", () => syncRowPaddocks(farmSelect));
+      syncRowPaddocks(farmSelect);
+    });
+  })();
+</script>
 {% endblock %}
