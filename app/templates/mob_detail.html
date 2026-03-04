@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ mob.name }} | AgriTrack{% endblock %}
 {% block content %}
+<a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=mob.farm_id) }}">Back To Farm</a>
 <h1>{{ mob.name }}</h1>
 <p class="muted">Status: {{ mob.status }}</p>
 
