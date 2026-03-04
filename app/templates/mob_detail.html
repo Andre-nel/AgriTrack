@@ -10,7 +10,7 @@
     <table>
       <thead><tr><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
       <tbody>
-        {% for b in mob.balances %}
+        {% for b in mob.balances if b.head_count > 0 %}
         <tr>
           <td>{{ b.animal_group_type.species }}</td>
           <td>{{ b.animal_group_type.breed }}</td>
@@ -138,6 +138,72 @@
   <script id="movePaddocksByFarm" type="application/json">{{ move_paddocks_by_farm | tojson }}</script>
   {% else %}
   <p>No paddocks are available yet. Add paddocks to a farm first.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Transfer Stock To Existing Mob</h2>
+  {% if split_group_options and has_transfer_destination_mobs %}
+  <form method="post" action="{{ url_for('web.mob_transfer_form', mob_id=mob.id) }}" class="grid-form">
+    <label>Destination Farm
+      <select name="transfer_destination_farm_id" id="transferDestinationFarm" required>
+        {% for farm in move_farms %}
+        <option value="{{ farm.id }}" {% if farm.id == default_transfer_farm_id %}selected{% endif %}>
+          {{ farm.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Destination Mob
+      <select name="transfer_destination_mob_id" id="transferDestinationMob" required>
+        <option value="">Choose destination mob</option>
+      </select>
+    </label>
+    <div id="transferRows">
+      <div class="transfer-row allocation-row">
+        <label>Group
+          <select name="transfer_group_id" required>
+            <option value="">Choose group</option>
+            {% for option in split_group_options %}
+            <option value="{{ option.id }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Quantity
+          <input type="number" min="1" name="transfer_quantity" required />
+        </label>
+        <button type="button" class="btn btn-secondary transfer-row-remove">Remove</button>
+      </div>
+    </div>
+    <div class="row-actions">
+      <button type="button" id="addTransferRow" class="btn btn-secondary">Add Transfer Row</button>
+    </div>
+    <label>Note
+      <input name="transfer_note" />
+    </label>
+    <button type="submit" class="btn">Transfer Stock</button>
+  </form>
+  <template id="transferRowTemplate">
+    <div class="transfer-row allocation-row">
+      <label>Group
+        <select name="transfer_group_id" required>
+          <option value="">Choose group</option>
+          {% for option in split_group_options %}
+          <option value="{{ option.id }}">{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Quantity
+        <input type="number" min="1" name="transfer_quantity" required />
+      </label>
+      <button type="button" class="btn btn-secondary transfer-row-remove">Remove</button>
+    </div>
+  </template>
+  <script id="transferMobsByFarm" type="application/json">{{ transfer_mobs_by_farm | tojson }}</script>
+  {% elif not split_group_options %}
+  <p>No positive stock balances are available to transfer from this mob.</p>
+  {% else %}
+  <p>No destination mobs are available yet. Create another active mob first.</p>
   {% endif %}
 </section>
 
@@ -385,6 +451,73 @@
       rowsContainer.querySelectorAll(".allocation-row").forEach(bindRow);
       syncPaddockOptions();
       recalcTotal();
+    }
+
+    const transferFarmSelect = document.getElementById("transferDestinationFarm");
+    const transferMobSelect = document.getElementById("transferDestinationMob");
+    const transferMobsByFarmEl = document.getElementById("transferMobsByFarm");
+    let transferMobsByFarm = {};
+    if (transferMobsByFarmEl) {
+      try {
+        transferMobsByFarm = JSON.parse(transferMobsByFarmEl.textContent || "{}");
+      } catch (error) {
+        transferMobsByFarm = {};
+      }
+    }
+
+    if (transferFarmSelect && transferMobSelect) {
+      function syncTransferMobOptions(selectedMobId) {
+        const farmId = transferFarmSelect.value;
+        const options = transferMobsByFarm[farmId] || [];
+        const nextSelectedMobId = selectedMobId || "";
+
+        transferMobSelect.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = options.length ? "Choose destination mob" : "No mobs available";
+        transferMobSelect.appendChild(placeholder);
+
+        options.forEach((mobOption) => {
+          const option = document.createElement("option");
+          option.value = mobOption.id;
+          option.textContent = mobOption.name;
+          transferMobSelect.appendChild(option);
+        });
+
+        if (nextSelectedMobId && options.some((mobOption) => mobOption.id === nextSelectedMobId)) {
+          transferMobSelect.value = nextSelectedMobId;
+        } else {
+          transferMobSelect.value = "";
+        }
+        transferMobSelect.disabled = options.length === 0;
+      }
+
+      transferFarmSelect.addEventListener("change", () => syncTransferMobOptions(""));
+      syncTransferMobOptions(transferMobSelect.value);
+    }
+
+    const transferRowsContainer = document.getElementById("transferRows");
+    const addTransferBtn = document.getElementById("addTransferRow");
+    const transferTemplate = document.getElementById("transferRowTemplate");
+    if (transferRowsContainer && addTransferBtn && transferTemplate) {
+      function bindTransferRow(row) {
+        const removeBtn = row.querySelector(".transfer-row-remove");
+        if (removeBtn) {
+          removeBtn.addEventListener("click", () => {
+            if (transferRowsContainer.children.length > 1) {
+              row.remove();
+            }
+          });
+        }
+      }
+
+      addTransferBtn.addEventListener("click", () => {
+        const clone = transferTemplate.content.firstElementChild.cloneNode(true);
+        transferRowsContainer.appendChild(clone);
+        bindTransferRow(clone);
+      });
+
+      transferRowsContainer.querySelectorAll(".transfer-row").forEach(bindTransferRow);
     }
 
     const splitRowsContainer = document.getElementById("splitRows");

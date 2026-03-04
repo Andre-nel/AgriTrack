@@ -119,5 +119,8 @@ class StockService:
         if next_balance < 0:
             raise ValueError("Stock balance cannot go negative")
 
-        balance.head_count = next_balance
+        if next_balance == 0:
+            db.session.delete(balance)
+        else:
+            balance.head_count = next_balance
         return ledger

@@ -649,14 +649,24 @@ def mob_detail(mob_id):
     mob = _get_active_mob_or_404(mob_id)
     farms = Farm.query.order_by(Farm.name).all()
     all_paddocks = Paddock.query.order_by(Paddock.name).all()
+    all_active_mobs = Mob.query.filter_by(status="active").order_by(Mob.name).all()
     move_farms = [{"id": str(farm.id), "name": farm.name} for farm in farms]
     move_paddocks_by_farm = {str(farm.id): [] for farm in farms}
+    transfer_mobs_by_farm = {str(farm.id): [] for farm in farms}
     for paddock in all_paddocks:
         move_paddocks_by_farm.setdefault(str(paddock.farm_id), []).append(
             {"id": str(paddock.id), "name": paddock.name}
         )
+    for item in all_active_mobs:
+        if str(item.id) == str(mob.id):
+            continue
+        transfer_mobs_by_farm.setdefault(str(item.farm_id), []).append(
+            {"id": str(item.id), "name": item.name}
+        )
     has_move_paddocks = any(len(rows) > 0 for rows in move_paddocks_by_farm.values())
+    has_transfer_destination_mobs = any(len(rows) > 0 for rows in transfer_mobs_by_farm.values())
     default_move_farm_id = str(mob.farm_id)
+    default_transfer_farm_id = str(mob.farm_id)
     active_session = next((session for session in mob.grazing_sessions if session.end_at is None), None)
     current_allocations = []
     allocation_total_pct = Decimal("0")
@@ -705,6 +715,9 @@ def mob_detail(mob_id):
         move_paddocks_by_farm=move_paddocks_by_farm,
         has_move_paddocks=has_move_paddocks,
         default_move_farm_id=default_move_farm_id,
+        transfer_mobs_by_farm=transfer_mobs_by_farm,
+        has_transfer_destination_mobs=has_transfer_destination_mobs,
+        default_transfer_farm_id=default_transfer_farm_id,
         stock_event_types=StockEventType,
         current_allocations=current_allocations,
         allocation_total_pct=float(allocation_total_pct),
@@ -829,6 +842,74 @@ def mob_move_form(mob_id):
         db.session.rollback()
         flash("Move failed: active mob name already exists on the destination farm", "error")
     except (ValueError, InvalidOperation) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+
+    return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+
+@bp.post("/mobs/<mob_id>/transfer")
+def mob_transfer_form(mob_id):
+    source = _get_active_mob_or_404(mob_id)
+    destination_farm_id = (request.form.get("transfer_destination_farm_id") or str(source.farm_id)).strip()
+    destination_mob_id = (request.form.get("transfer_destination_mob_id") or "").strip()
+    transfer_group_ids = request.form.getlist("transfer_group_id")
+    transfer_quantities = request.form.getlist("transfer_quantity")
+    note = (request.form.get("transfer_note") or "").strip() or None
+
+    try:
+        if not destination_farm_id:
+            raise ValueError("Destination farm is required")
+        if not Farm.query.filter_by(id=destination_farm_id).first():
+            raise ValueError("Destination farm is invalid")
+        if not destination_mob_id:
+            raise ValueError("Destination mob is required")
+
+        destination_mob = Mob.query.filter_by(id=destination_mob_id, status="active").first()
+        if not destination_mob:
+            raise ValueError("Destination mob is invalid")
+        if str(destination_mob.farm_id) != destination_farm_id:
+            raise ValueError("Destination mob is invalid for the selected farm")
+
+        transfer_totals: dict[str, int] = {}
+        for group_id_raw, qty_raw in zip(transfer_group_ids, transfer_quantities):
+            group_id = (group_id_raw or "").strip()
+            qty_text = (qty_raw or "").strip()
+
+            if not group_id and not qty_text:
+                continue
+            if not group_id or not qty_text:
+                raise ValueError("Each transfer row requires a group and quantity")
+
+            try:
+                quantity = int(qty_text)
+            except ValueError:
+                raise ValueError("Transfer quantities must be whole numbers")
+            if quantity <= 0:
+                raise ValueError("Transfer quantities must be greater than 0")
+
+            transfer_totals[group_id] = transfer_totals.get(group_id, 0) + quantity
+
+        if not transfer_totals:
+            raise ValueError("Add at least one transfer row")
+
+        transfers = [
+            {"animal_group_type_id": group_id, "quantity": quantity}
+            for group_id, quantity in transfer_totals.items()
+        ]
+        MovementService.transfer_stock_between_mobs(
+            source_mob=source,
+            destination_mob=destination_mob,
+            transfers=transfers,
+            destination_farm_id=destination_farm_id,
+            note=note,
+        )
+        db.session.commit()
+        flash(f"Transferred stock to {destination_mob.name}", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash("Transfer failed due to a concurrent stock update. Please retry.", "error")
+    except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
 

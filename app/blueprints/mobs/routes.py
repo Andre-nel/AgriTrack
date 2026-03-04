@@ -111,7 +111,13 @@ def adjust_mob_stock(mob_id):
 @bp.get("/<mob_id>/balances")
 def mob_balances(mob_id):
     mob = _get_active_mob_or_404(mob_id)
-    balances = AnimalGroupBalance.query.filter_by(mob_id=mob.id).all()
+    balances = (
+        AnimalGroupBalance.query.filter(
+            AnimalGroupBalance.mob_id == mob.id,
+            AnimalGroupBalance.head_count > 0,
+        )
+        .all()
+    )
     return jsonify(
         [
             {
@@ -145,6 +151,41 @@ def move_mob(mob_id):
         return jsonify({"error": str(exc)}), 400
 
     return jsonify({"grazing_session_id": str(session.id)}), 201
+
+
+@bp.post("/<mob_id>/transfer")
+def transfer_mob_stock(mob_id):
+    source = _get_active_mob_or_404(mob_id)
+    payload = request.get_json() or {}
+    destination_mob_id = str(payload.get("destination_mob_id") or "").strip()
+    destination_farm_id = payload.get("destination_farm_id")
+    transfers = payload.get("transfers", [])
+    note = payload.get("note")
+
+    if not destination_mob_id:
+        return jsonify({"error": "destination_mob_id is required"}), 400
+
+    destination = Mob.query.filter_by(id=destination_mob_id, status="active").first()
+    if not destination:
+        return jsonify({"error": "Destination mob is invalid"}), 400
+
+    try:
+        MovementService.transfer_stock_between_mobs(
+            source_mob=source,
+            destination_mob=destination,
+            transfers=transfers,
+            destination_farm_id=destination_farm_id,
+            note=note,
+        )
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Transfer failed due to a concurrent stock update. Please retry."}), 400
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"status": "ok"}), 200
 
 
 @bp.post("/<mob_id>/deactivate")

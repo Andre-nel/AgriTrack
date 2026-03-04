@@ -155,6 +155,78 @@ class MovementService:
         return session
 
     @staticmethod
+    def transfer_stock_between_mobs(
+        source_mob: Mob,
+        destination_mob: Mob,
+        transfers: list[dict],
+        destination_farm_id: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        if not transfers:
+            raise ValueError("At least one transfer row is required")
+        if str(source_mob.id) == str(destination_mob.id):
+            raise ValueError("Destination mob must be different from source mob")
+        if source_mob.status != "active":
+            raise ValueError("Source mob must be active")
+        if destination_mob.status != "active":
+            raise ValueError("Destination mob must be active")
+
+        selected_destination_farm_id = str(destination_farm_id or destination_mob.farm_id).strip()
+        if str(destination_mob.farm_id) != selected_destination_farm_id:
+            raise ValueError("Destination mob is invalid for the selected destination farm")
+
+        source_balances = {
+            str(balance.animal_group_type_id): int(balance.head_count)
+            for balance in source_mob.balances
+            if int(balance.head_count) > 0
+        }
+        if not source_balances:
+            raise ValueError("Source mob has no stock to transfer")
+
+        normalized: dict[str, int] = {}
+        for item in transfers:
+            group_id = str(item.get("animal_group_type_id") or "").strip()
+            if not group_id:
+                raise ValueError("Each transfer row requires a group")
+            if group_id not in source_balances:
+                raise ValueError("Transfer contains an invalid animal group for this source mob")
+            try:
+                quantity = int(item.get("quantity", 0))
+            except (TypeError, ValueError):
+                raise ValueError("Transfer quantities must be whole numbers")
+            if quantity <= 0:
+                raise ValueError("Transfer quantities must be greater than 0")
+            normalized[group_id] = normalized.get(group_id, 0) + quantity
+
+        for group_id, quantity in normalized.items():
+            available = source_balances[group_id]
+            if quantity > available:
+                raise ValueError(
+                    "Transfer quantities cannot exceed source stock "
+                    f"(group {group_id}: transfer {quantity}, available {available})"
+                )
+
+        source_note = note or f"transfer to {destination_mob.name}"
+        destination_note = note or f"transfer from {source_mob.name}"
+        for group_id, quantity in normalized.items():
+            StockService.adjust_stock(
+                mob_id=source_mob.id,
+                farm_id=source_mob.farm_id,
+                animal_group_type_id=group_id,
+                event_type=StockEventType.transfer_out,
+                quantity=quantity,
+                note=source_note,
+            )
+            StockService.adjust_stock(
+                mob_id=destination_mob.id,
+                farm_id=destination_mob.farm_id,
+                animal_group_type_id=group_id,
+                event_type=StockEventType.transfer_in,
+                quantity=quantity,
+                note=destination_note,
+            )
+
+    @staticmethod
     def split_mob(source_mob: Mob, splits: list[dict], when=None):
         splits = MovementService._normalize_splits(source_mob=source_mob, splits=splits)
         when = when or datetime.now(timezone.utc)
