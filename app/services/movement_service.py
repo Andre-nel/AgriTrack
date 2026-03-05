@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 
 from app.extensions import db
-from app.models import Farm, Mob, MovementEvent, MovementEventMob, Paddock
+from app.models import Farm, Mob, MobEvent, MovementEvent, MovementEventMob, Paddock
 from app.models.animal_group import AnimalGroupBalance
 from app.models.movement import MobLineage, MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
@@ -240,6 +240,7 @@ class MovementService:
         )
 
         created = []
+        parent_events = list(source_mob.events)
         for split in splits:
             new_mob = Mob(farm_id=source_mob.farm_id, name=split["name"], status="active")
             db.session.add(new_mob)
@@ -259,6 +260,16 @@ class MovementService:
                     movement_event_id=event.id,
                 )
             )
+            for parent_event in parent_events:
+                db.session.add(
+                    MobEvent(
+                        mob_id=new_mob.id,
+                        farm_id=new_mob.farm_id,
+                        event_at=parent_event.event_at,
+                        tags_csv=parent_event.tags_csv,
+                        description=parent_event.description,
+                    )
+                )
 
             for group in split.get("groups", []):
                 qty = int(group["quantity"])

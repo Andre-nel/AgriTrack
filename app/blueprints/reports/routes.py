@@ -844,6 +844,29 @@ def mob_event_create_form(mob_id):
     return redirect(url_for("web.mob_detail", mob_id=mob_id))
 
 
+@bp.post("/mobs/<mob_id>/rename")
+def mob_rename_form(mob_id):
+    mob = _get_active_mob_or_404(mob_id)
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Mob name is required", "error")
+        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+    if name == mob.name:
+        flash("Mob name unchanged", "success")
+        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+    mob.name = name
+    try:
+        db.session.commit()
+        flash("Mob name updated", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash("Active mob name already exists on this farm", "error")
+
+    return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+
 @bp.post("/mobs/<mob_id>/move")
 def mob_move_form(mob_id):
     mob = _get_active_mob_or_404(mob_id)

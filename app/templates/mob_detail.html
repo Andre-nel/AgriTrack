@@ -5,6 +5,16 @@
 <h1>{{ mob.name }}</h1>
 <p class="muted">Status: {{ mob.status }}</p>
 
+<section class="card">
+  <h2>Edit Mob Name</h2>
+  <form method="post" action="{{ url_for('web.mob_rename_form', mob_id=mob.id) }}" class="grid-two">
+    <label>Name
+      <input name="name" value="{{ mob.name }}" required />
+    </label>
+    <button type="submit" class="btn">Save Name</button>
+  </form>
+</section>
+
 <section class="split">
   <article class="card">
     <h2>Balances</h2>
