@@ -14,6 +14,7 @@ class Mob(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     balances = db.relationship("AnimalGroupBalance", back_populates="mob", cascade="all, delete-orphan")
     ledger_entries = db.relationship("StockLedgerEntry", back_populates="mob", cascade="all, delete-orphan")
     grazing_sessions = db.relationship("GrazingSession", back_populates="mob", cascade="all, delete-orphan")
+    events = db.relationship("MobEvent", back_populates="mob", cascade="all, delete-orphan")
 
     __table_args__ = (
         db.Index(

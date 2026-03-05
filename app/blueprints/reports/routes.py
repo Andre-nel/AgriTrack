@@ -13,10 +13,12 @@ from app.models import (
     GrazingAllocation,
     GrazingSession,
     Mob,
+    MobEvent,
     Paddock,
     RainfallRecord,
 )
 from app.models.stock_ledger import StockEventType
+from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
 from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
@@ -664,6 +666,7 @@ def create_rainfall_form(farm_id):
 @bp.get("/mobs/<mob_id>")
 def mob_detail(mob_id):
     mob = _get_active_mob_or_404(mob_id)
+    selected_event_tag = " ".join((request.args.get("event_tag") or "").strip().lower().split())
     farms = Farm.query.order_by(Farm.name).all()
     all_paddocks = Paddock.query.order_by(Paddock.name).all()
     all_active_mobs = Mob.query.filter_by(status="active").order_by(Mob.name).all()
@@ -725,6 +728,29 @@ def mob_detail(mob_id):
             }
         )
 
+    mob_events_all = []
+    event_rows = (
+        MobEvent.query.filter_by(mob_id=mob.id)
+        .order_by(MobEvent.event_at.desc(), MobEvent.created_at.desc())
+        .all()
+    )
+    for event in event_rows:
+        tags = MobEventService.tags_from_csv(event.tags_csv)
+        mob_events_all.append(
+            {
+                "id": str(event.id),
+                "event_at": event.event_at,
+                "tags": tags,
+                "description": event.description,
+            }
+        )
+    event_tag_options = sorted({tag for row in mob_events_all for tag in row["tags"]})
+    mob_events = [
+        row
+        for row in mob_events_all
+        if not selected_event_tag or selected_event_tag in row["tags"]
+    ]
+
     return render_template(
         "mob_detail.html",
         mob=mob,
@@ -739,6 +765,9 @@ def mob_detail(mob_id):
         current_allocations=current_allocations,
         allocation_total_pct=float(allocation_total_pct),
         split_group_options=split_group_options,
+        mob_events=mob_events,
+        event_tag_options=event_tag_options,
+        selected_event_tag=selected_event_tag,
     )
 
 
@@ -786,6 +815,28 @@ def mob_adjust_form(mob_id):
         )
         db.session.commit()
         flash("Stock updated", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+
+    return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+
+@bp.post("/mobs/<mob_id>/events")
+def mob_event_create_form(mob_id):
+    mob = _get_active_mob_or_404(mob_id)
+    tags_text = request.form.get("event_tags")
+    description = request.form.get("event_description")
+
+    try:
+        MobEventService.create_event(
+            mob_id=mob.id,
+            farm_id=mob.farm_id,
+            description=description,
+            raw_tags=tags_text,
+        )
+        db.session.commit()
+        flash("Mob event recorded", "success")
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")

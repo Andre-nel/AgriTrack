@@ -74,6 +74,58 @@
 </section>
 
 <section class="card">
+  <h2>Mob Events</h2>
+  <form method="post" action="{{ url_for('web.mob_event_create_form', mob_id=mob.id) }}" class="grid-form">
+    <label>Tags / Keywords (comma separated)
+      <input
+        name="event_tags"
+        placeholder="e.g. vaccination, drench, hoof-trim"
+        required
+      />
+    </label>
+    <label>Event Description
+      <textarea
+        name="event_description"
+        rows="4"
+        placeholder="Describe what was done, why, and any follow-up notes."
+        required
+      ></textarea>
+    </label>
+    <button type="submit" class="btn">Record Event</button>
+  </form>
+
+  <form method="get" action="{{ url_for('web.mob_detail', mob_id=mob.id) }}" class="grid-form">
+    <label>Filter By Tag
+      <select name="event_tag">
+        <option value="">All tags</option>
+        {% for tag in event_tag_options %}
+        <option value="{{ tag }}" {% if selected_event_tag == tag %}selected{% endif %}>{{ tag }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply Filter</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.mob_detail', mob_id=mob.id) }}">Clear</a>
+    </div>
+  </form>
+
+  <table>
+    <thead><tr><th>Recorded At</th><th>Tags</th><th>Description</th></tr></thead>
+    <tbody>
+      {% for row in mob_events %}
+      <tr>
+        <td>{{ row.event_at }}</td>
+        <td>{{ row.tags | join(", ") }}</td>
+        <td>{{ row.description }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3">No mob events recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
   <h2>Current Paddock Allocation</h2>
   <table>
     <thead><tr><th>Paddock</th><th>Allocation %</th></tr></thead>

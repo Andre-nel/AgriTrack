@@ -2,8 +2,9 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import AnimalGroupBalance, Mob
+from app.models import AnimalGroupBalance, Mob, MobEvent
 from app.models.stock_ledger import StockEventType
+from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
 from app.services.stock_service import StockService
 
@@ -151,6 +152,56 @@ def move_mob(mob_id):
         return jsonify({"error": str(exc)}), 400
 
     return jsonify({"grazing_session_id": str(session.id)}), 201
+
+
+@bp.post("/<mob_id>/events")
+def create_mob_event(mob_id):
+    mob = _get_active_mob_or_404(mob_id)
+    payload = request.get_json() or {}
+    raw_tags = payload.get("tags")
+    if isinstance(raw_tags, list):
+        raw_tags = ",".join(str(value) for value in raw_tags)
+    description = payload.get("description")
+
+    try:
+        event = MobEventService.create_event(
+            mob_id=mob.id,
+            farm_id=mob.farm_id,
+            description=description,
+            raw_tags=raw_tags,
+        )
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"event_id": str(event.id)}), 201
+
+
+@bp.get("/<mob_id>/events")
+def list_mob_events(mob_id):
+    mob = _get_active_mob_or_404(mob_id)
+    tag_filter = " ".join((request.args.get("tag") or "").strip().lower().split())
+    rows = (
+        MobEvent.query.filter_by(mob_id=mob.id)
+        .order_by(MobEvent.event_at.desc(), MobEvent.created_at.desc())
+        .all()
+    )
+    events = []
+    for row in rows:
+        tags = MobEventService.tags_from_csv(row.tags_csv)
+        if tag_filter and tag_filter not in tags:
+            continue
+        events.append(
+            {
+                "id": str(row.id),
+                "event_at": row.event_at.isoformat() if row.event_at else None,
+                "tags": tags,
+                "description": row.description,
+            }
+        )
+
+    return jsonify({"mob_id": str(mob.id), "tag_filter": tag_filter, "events": events})
 
 
 @bp.post("/<mob_id>/transfer")
