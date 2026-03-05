@@ -153,6 +153,38 @@
     markerLayer.addLayer(marker);
   }
 
+  function addPaddockNameLabel(feature, geoLayer, labelLayer) {
+    const props = (feature && feature.properties) || {};
+    if (props.feature_type !== "paddock") {
+      return;
+    }
+
+    const name = String(props.name || "").trim();
+    if (!name) {
+      return;
+    }
+
+    const bounds = geoLayer.getBounds();
+    if (!bounds.isValid()) {
+      return;
+    }
+
+    const hasStock = Number(props.current_lsu || 0) > 0.01;
+    const labelClass = hasStock ? "map-paddock-label map-paddock-label-bold" : "map-paddock-label";
+    const marker = L.marker(bounds.getCenter(), {
+      pane: "paddockLabelPane",
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({
+        className: "map-paddock-label-wrap",
+        html: '<span class="' + labelClass + '">' + escapeHtml(name) + "</span>",
+        iconSize: [1, 1],
+        iconAnchor: [0, 0],
+      }),
+    });
+    labelLayer.addLayer(marker);
+  }
+
   function styleForFeature(feature) {
     const props = feature.properties || {};
     if (props.feature_type === "farm_boundary") {
@@ -242,6 +274,9 @@
   }
 
   const map = L.map(mapElement, { scrollWheelZoom: true });
+  map.createPane("paddockLabelPane");
+  map.getPane("paddockLabelPane").style.zIndex = "640";
+  map.getPane("paddockLabelPane").style.pointerEvents = "none";
   map.createPane("stockFloatPane");
   map.getPane("stockFloatPane").style.zIndex = "650";
   map.getPane("stockFloatPane").style.pointerEvents = "none";
@@ -283,11 +318,13 @@
         return;
       }
 
+      const paddockLabelLayer = L.layerGroup().addTo(map);
       const stockFloatLayer = L.layerGroup().addTo(map);
       const layer = L.geoJSON(payload, {
         style: styleForFeature,
         onEachFeature: function (feature, geoLayer) {
           geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
+          addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
           addStockFloatMarker(feature, geoLayer, stockFloatLayer);
         },
       }).addTo(map);

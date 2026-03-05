@@ -304,6 +304,31 @@ a { color: #1b5f49; }
   margin-bottom: 0.2rem;
 }
 
+.map-paddock-label-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.map-paddock-label {
+  display: inline-block;
+  transform: translate(-50%, -50%);
+  color: #f4f8f2;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-shadow:
+    -1px -1px 0 rgba(20, 32, 25, 0.62),
+    1px -1px 0 rgba(20, 32, 25, 0.62),
+    -1px 1px 0 rgba(20, 32, 25, 0.62),
+    1px 1px 0 rgba(20, 32, 25, 0.62),
+    0 0 6px rgba(20, 32, 25, 0.48);
+}
+
+.map-paddock-label-bold {
+  font-weight: 800;
+}
+
 .stock-float-marker-wrap {
   background: transparent;
   border: 0;
@@ -389,6 +414,10 @@ a { color: #1b5f49; }
 
   .stock-float-marker {
     transform: translate(-50%, -86%);
+  }
+
+  .map-paddock-label {
+    font-size: 0.7rem;
   }
 
   .stock-float-chip-row {
