@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -16,6 +16,8 @@ from app.models import (
     GrazingSession,
     Mob,
     MobEvent,
+    MovementEvent,
+    MovementEventMob,
     Paddock,
     RainfallRecord,
     StockLedgerEntry,
@@ -1111,6 +1113,114 @@ def mob_adjust_form(mob_id):
         )
         db.session.commit()
         flash("Stock updated", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+
+    return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+
+@bp.post("/mobs/<mob_id>/balances/edit")
+def mob_edit_balance_form(mob_id):
+    mob = _get_active_mob_or_404(mob_id)
+    source_group_type_id = (request.form.get("source_animal_group_type_id") or "").strip()
+    if not source_group_type_id:
+        flash("Select a balance line to edit", "error")
+        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+    source_balance = AnimalGroupBalance.query.filter_by(
+        mob_id=mob.id,
+        animal_group_type_id=source_group_type_id,
+    ).first()
+    if not source_balance or int(source_balance.head_count) <= 0:
+        flash("Selected balance line is no longer available. Refresh and try again.", "error")
+        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+    source_group = source_balance.animal_group_type
+    source_head = int(source_balance.head_count)
+    head_count_raw = (request.form.get("head_count") or "").strip()
+    try:
+        target_head = int(head_count_raw)
+    except ValueError:
+        flash("Head count must be a whole number", "error")
+        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+    if target_head <= 0:
+        flash("Head count must be greater than 0", "error")
+        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+    note_text = " ".join((request.form.get("note") or "").strip().split())
+
+    try:
+        target_group = StockService.get_or_create_group_type(
+            species=source_group.species,
+            breed=source_group.breed,
+            sex=(request.form.get("sex") or source_group.sex).strip(),
+            age_class=(request.form.get("age_class") or source_group.age_class).strip(),
+        )
+
+        source_label = (
+            f"{source_group.species} | {source_group.breed} | "
+            f"{source_group.sex} | {source_group.age_class}"
+        )
+        target_label = (
+            f"{target_group.species} | {target_group.breed} | "
+            f"{target_group.sex} | {target_group.age_class}"
+        )
+        unchanged = str(target_group.id) == str(source_group.id) and target_head == source_head
+        if unchanged:
+            flash("No changes detected for the selected balance line", "success")
+            return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+        if str(target_group.id) == str(source_group.id):
+            delta = target_head - source_head
+            event_type = StockEventType.adjustment_in if delta > 0 else StockEventType.adjustment_out
+            quantity = abs(delta)
+            description = (
+                f"Balance head updated for {source_label}: {source_head} -> {target_head}."
+            )
+            event_tags = "stock,balance edit,head adjustment"
+            StockService.adjust_stock(
+                mob_id=mob.id,
+                farm_id=mob.farm_id,
+                animal_group_type_id=source_group.id,
+                event_type=event_type,
+                quantity=quantity,
+                note=f"{description} Note: {note_text}" if note_text else description,
+            )
+        else:
+            description = (
+                f"Balance reclassified from {source_label} (head: {source_head}) "
+                f"to {target_label} (head: {target_head})."
+            )
+            event_tags = "stock,balance edit,reclassification"
+            ledger_note = f"{description} Note: {note_text}" if note_text else description
+            StockService.adjust_stock(
+                mob_id=mob.id,
+                farm_id=mob.farm_id,
+                animal_group_type_id=source_group.id,
+                event_type=StockEventType.adjustment_out,
+                quantity=source_head,
+                note=ledger_note,
+            )
+            StockService.adjust_stock(
+                mob_id=mob.id,
+                farm_id=mob.farm_id,
+                animal_group_type_id=target_group.id,
+                event_type=StockEventType.adjustment_in,
+                quantity=target_head,
+                note=ledger_note,
+            )
+
+        event_description = f"{description} Note: {note_text}" if note_text else description
+        MobEventService.create_event(
+            mob_id=mob.id,
+            farm_id=mob.farm_id,
+            description=event_description,
+            raw_tags=event_tags,
+        )
+        db.session.commit()
+        flash("Balance line updated", "success")
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")

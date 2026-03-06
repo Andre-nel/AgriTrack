@@ -179,6 +179,14 @@ th, td {
   text-align: left;
 }
 
+.balance-row {
+  cursor: pointer;
+}
+
+.balance-row.is-selected {
+  background: var(--accent-soft);
+}
+
 a { color: #1b5f49; }
 
 .link-list {

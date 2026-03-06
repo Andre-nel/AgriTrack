@@ -18,11 +18,21 @@
 <section class="split">
   <article class="card">
     <h2>Balances</h2>
-    <table>
-      <thead><tr><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
+    <p class="muted">Select a balance line, then edit its sex, age class, and head count.</p>
+    <table id="balanceTable">
+      <thead><tr><th>Select</th><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
       <tbody>
         {% for b in mob.balances if b.head_count > 0 %}
-        <tr>
+        <tr
+          class="balance-row"
+          data-group-id="{{ b.animal_group_type_id }}"
+          data-species="{{ b.animal_group_type.species }}"
+          data-breed="{{ b.animal_group_type.breed }}"
+          data-sex="{{ b.animal_group_type.sex }}"
+          data-age-class="{{ b.animal_group_type.age_class }}"
+          data-head-count="{{ b.head_count }}"
+        >
+          <td><input type="radio" name="selectedBalanceRow" value="{{ b.animal_group_type_id }}" aria-label="Select balance row for editing" /></td>
           <td>{{ b.animal_group_type.species }}</td>
           <td>{{ b.animal_group_type.breed }}</td>
           <td>{{ b.animal_group_type.sex }}</td>
@@ -30,10 +40,41 @@
           <td>{{ b.head_count }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="5">No stock balances yet.</td></tr>
+        <tr><td colspan="6">No stock balances yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+    <form method="post" action="{{ url_for('web.mob_edit_balance_form', mob_id=mob.id) }}" class="grid-form" id="editBalanceForm">
+      <input type="hidden" name="source_animal_group_type_id" id="editSourceGroupTypeId" />
+      <div class="grid-two">
+        <label>Species
+          <input id="editSpecies" disabled />
+        </label>
+        <label>Breed
+          <input id="editBreed" disabled />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Sex
+          <select name="sex" id="editSex" required disabled></select>
+        </label>
+        <label>Age class
+          <select name="age_class" id="editAgeClass" required disabled></select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Head
+          <input type="number" min="1" step="1" name="head_count" id="editHeadCount" required disabled />
+        </label>
+        <label>Current line
+          <input id="editCurrentLine" value="Select a balance row" disabled />
+        </label>
+      </div>
+      <label>Note
+        <input name="note" id="editBalanceNote" placeholder="Optional reason for this change" />
+      </label>
+      <button type="submit" class="btn" id="editBalanceSubmit" disabled>Save Balance Edit</button>
+    </form>
   </article>
 
   <article class="card">
@@ -378,9 +419,9 @@
     const ageClassInput = document.getElementById("adjustAgeClass");
     const eventTypeSelect = document.getElementById("adjustEventType");
 
-    function setAgeClassOptions(options, selectedValue) {
-      if (!ageClassInput) return;
-      ageClassInput.innerHTML = "";
+    function setSelectOptions(selectEl, options, selectedValue) {
+      if (!selectEl) return;
+      selectEl.innerHTML = "";
       options.forEach((value) => {
         const option = document.createElement("option");
         option.value = value;
@@ -388,21 +429,7 @@
         if (value === selectedValue) {
           option.selected = true;
         }
-        ageClassInput.appendChild(option);
-      });
-    }
-
-    function setSexOptions(options, selectedValue) {
-      if (!sexInput) return;
-      sexInput.innerHTML = "";
-      options.forEach((value) => {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = value;
-        if (value === selectedValue) {
-          option.selected = true;
-        }
-        sexInput.appendChild(option);
+        selectEl.appendChild(option);
       });
     }
 
@@ -411,8 +438,8 @@
       const defaults = speciesDefaults[speciesSelect.value];
       if (!defaults) return;
       breedInput.value = defaults.breed;
-      setSexOptions(defaults.sex_options, defaults.sex);
-      setAgeClassOptions(defaults.age_classes, defaults.age_class);
+      setSelectOptions(sexInput, defaults.sex_options, defaults.sex);
+      setSelectOptions(ageClassInput, defaults.age_classes, defaults.age_class);
       eventTypeSelect.value = "count";
     }
 
@@ -420,6 +447,91 @@
       speciesSelect.addEventListener("change", applySpeciesDefaults);
       applySpeciesDefaults();
     }
+
+    const balanceTable = document.getElementById("balanceTable");
+    const editSourceGroupTypeIdInput = document.getElementById("editSourceGroupTypeId");
+    const editSpeciesInput = document.getElementById("editSpecies");
+    const editBreedInput = document.getElementById("editBreed");
+    const editSexSelect = document.getElementById("editSex");
+    const editAgeClassSelect = document.getElementById("editAgeClass");
+    const editHeadInput = document.getElementById("editHeadCount");
+    const editCurrentLineInput = document.getElementById("editCurrentLine");
+    const editBalanceNoteInput = document.getElementById("editBalanceNote");
+    const editBalanceSubmit = document.getElementById("editBalanceSubmit");
+
+    function setEditFormEnabled(enabled) {
+      [editSexSelect, editAgeClassSelect, editHeadInput, editBalanceNoteInput].forEach((el) => {
+        if (el) el.disabled = !enabled;
+      });
+      if (editBalanceSubmit) {
+        editBalanceSubmit.disabled = !enabled;
+      }
+    }
+
+    function updateSelectedBalanceRow(activeRow) {
+      if (!balanceTable) return;
+      balanceTable.querySelectorAll(".balance-row").forEach((row) => {
+        row.classList.toggle("is-selected", row === activeRow);
+      });
+    }
+
+    function selectBalanceRow(row) {
+      if (
+        !row ||
+        !editSourceGroupTypeIdInput ||
+        !editSpeciesInput ||
+        !editBreedInput ||
+        !editSexSelect ||
+        !editAgeClassSelect ||
+        !editHeadInput ||
+        !editCurrentLineInput
+      ) {
+        return;
+      }
+
+      const groupId = row.dataset.groupId || "";
+      const species = row.dataset.species || "";
+      const breed = row.dataset.breed || "";
+      const sex = row.dataset.sex || "";
+      const ageClass = row.dataset.ageClass || "";
+      const headCount = row.dataset.headCount || "";
+      const defaults = speciesDefaults[species];
+
+      editSourceGroupTypeIdInput.value = groupId;
+      editSpeciesInput.value = species;
+      editBreedInput.value = breed;
+      editHeadInput.value = headCount;
+      editCurrentLineInput.value = `${species} | ${breed} | ${sex} | ${ageClass}`;
+
+      if (defaults) {
+        setSelectOptions(editSexSelect, defaults.sex_options, sex);
+        setSelectOptions(editAgeClassSelect, defaults.age_classes, ageClass);
+      } else {
+        setSelectOptions(editSexSelect, [sex], sex);
+        setSelectOptions(editAgeClassSelect, [ageClass], ageClass);
+      }
+
+      setEditFormEnabled(true);
+      updateSelectedBalanceRow(row);
+    }
+
+    if (balanceTable) {
+      balanceTable.querySelectorAll(".balance-row").forEach((row) => {
+        const radio = row.querySelector("input[name='selectedBalanceRow']");
+        if (!radio) return;
+        radio.addEventListener("change", () => {
+          if (radio.checked) {
+            selectBalanceRow(row);
+          }
+        });
+        row.addEventListener("click", (event) => {
+          if (event.target && event.target.tagName === "INPUT") return;
+          radio.checked = true;
+          selectBalanceRow(row);
+        });
+      });
+    }
+    setEditFormEnabled(false);
 
     const rowsContainer = document.getElementById("allocationRows");
     const addBtn = document.getElementById("addAllocationRow");

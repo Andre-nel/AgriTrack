@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from app.extensions import db
-from app.models import AnimalGroupBalance, AnimalGroupType, Farm, Mob, StockLedgerEntry
+from app.models import AnimalGroupBalance, AnimalGroupType, Farm, Mob, MobEvent, StockLedgerEntry
 from app.models.stock_ledger import StockEventType
 
 
@@ -133,3 +133,77 @@ def test_stock_tracking_reconciles_latest_to_current_balance(client, app):
     assert "Species: Goat | Breed: Angora | Sex: ewe | Age Class: adult" in text
     assert "<td>59</td>" in text
     assert "<td>24</td>" not in text
+
+
+def test_mob_balance_edit_reclassifies_and_records_change(client, app):
+    with app.app_context():
+        farm = Farm(name="Reclass Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+
+        mob = Mob(farm_id=farm.id, name="Reclass Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+
+        source_group = AnimalGroupType(species="Sheep", breed="Dohne", sex="ram", age_class="lamb")
+        db.session.add(source_group)
+        db.session.flush()
+
+        db.session.add(
+            AnimalGroupBalance(
+                mob_id=mob.id,
+                animal_group_type_id=source_group.id,
+                head_count=12,
+            )
+        )
+        db.session.commit()
+
+        mob_id = str(mob.id)
+        source_group_id = str(source_group.id)
+
+    response = client.post(
+        f"/mobs/{mob_id}/balances/edit",
+        data={
+            "source_animal_group_type_id": source_group_id,
+            "sex": "wether",
+            "age_class": "young",
+            "head_count": "10",
+            "note": "Castrated and aged up",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        source_balance = AnimalGroupBalance.query.filter_by(
+            mob_id=mob_id,
+            animal_group_type_id=source_group_id,
+        ).first()
+        assert source_balance is None
+
+        target_group = AnimalGroupType.query.filter_by(
+            species="Sheep",
+            breed="Dohne",
+            sex="wether",
+            age_class="young",
+        ).first()
+        assert target_group is not None
+
+        target_balance = AnimalGroupBalance.query.filter_by(
+            mob_id=mob_id,
+            animal_group_type_id=target_group.id,
+        ).first()
+        assert target_balance is not None
+        assert target_balance.head_count == 10
+
+        ledger_rows = StockLedgerEntry.query.filter_by(mob_id=mob_id).all()
+        assert len(ledger_rows) == 2
+        posted = {(row.event_type, str(row.animal_group_type_id), row.quantity) for row in ledger_rows}
+        assert (StockEventType.adjustment_out, source_group_id, 12) in posted
+        assert (StockEventType.adjustment_in, str(target_group.id), 10) in posted
+
+        mob_event = MobEvent.query.filter_by(mob_id=mob_id).first()
+        assert mob_event is not None
+        assert "ram" in mob_event.description
+        assert "wether" in mob_event.description
+        assert "lamb" in mob_event.description
+        assert "young" in mob_event.description
