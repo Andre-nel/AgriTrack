@@ -258,6 +258,253 @@ def _build_stock_tracking_chart_data(
     return {"labels": labels, "datasets": datasets}, latest_totals
 
 
+def _normalize_journal_tag(value: str | None) -> str:
+    return " ".join((value or "").replace("_", " ").strip().lower().split())
+
+
+def _normalize_journal_tags(values: list[str]) -> list[str]:
+    tags = []
+    seen = set()
+    for value in values:
+        tag = _normalize_journal_tag(value)
+        if not tag or tag in seen:
+            continue
+        tags.append(tag)
+        seen.add(tag)
+    return tags
+
+
+def _normalize_journal_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _build_analytics_journal_entries(
+    farm_id: str,
+    start_date: date,
+    end_date: date,
+) -> list[dict]:
+    entries = []
+    start_dt = datetime.combine(start_date, time.min)
+    end_dt = datetime.combine(end_date + timedelta(days=1), time.min)
+
+    mob_event_query = (
+        db.session.query(MobEvent, Farm.name.label("farm_name"), Mob.name.label("mob_name"))
+        .join(Farm, MobEvent.farm_id == Farm.id)
+        .join(Mob, MobEvent.mob_id == Mob.id)
+        .filter(MobEvent.event_at >= start_dt, MobEvent.event_at < end_dt)
+    )
+    if farm_id:
+        mob_event_query = mob_event_query.filter(MobEvent.farm_id == farm_id)
+
+    for event, farm_name, mob_name in mob_event_query.all():
+        tags = MobEventService.tags_from_csv(event.tags_csv)
+        if not tags:
+            tags = _normalize_journal_tags(
+                [
+                    "mob event",
+                    f"farm {farm_name}",
+                    f"mob {mob_name}",
+                ]
+            )
+        entries.append(
+            {
+                "id": f"mob_event:{event.id}",
+                "event_at": _normalize_journal_datetime(event.event_at),
+                "source_label": "Mob Event",
+                "farm_name": farm_name,
+                "mob_name": mob_name,
+                "tags": tags,
+                "description": event.description,
+            }
+        )
+
+    ledger_query = (
+        db.session.query(
+            StockLedgerEntry,
+            Farm.name.label("farm_name"),
+            Mob.name.label("mob_name"),
+            AnimalGroupType,
+        )
+        .join(Farm, StockLedgerEntry.farm_id == Farm.id)
+        .join(Mob, StockLedgerEntry.mob_id == Mob.id)
+        .join(AnimalGroupType, StockLedgerEntry.animal_group_type_id == AnimalGroupType.id)
+        .filter(StockLedgerEntry.event_time >= start_dt, StockLedgerEntry.event_time < end_dt)
+    )
+    if farm_id:
+        ledger_query = ledger_query.filter(StockLedgerEntry.farm_id == farm_id)
+
+    for entry, farm_name, mob_name, group_type in ledger_query.all():
+        group_label = (
+            f"{group_type.species} | {group_type.breed} | {group_type.sex} | {group_type.age_class}"
+        )
+        event_name = entry.event_type.value.replace("_", " ")
+        description = (
+            f"Stock {event_name} ({int(entry.quantity)}) recorded for {group_label} in mob {mob_name}."
+        )
+        note_text = (entry.note or "").strip()
+        if note_text:
+            description = f"{description}\n{note_text}"
+
+        tags = _normalize_journal_tags(
+            [
+                "stock",
+                event_name,
+                group_type.species,
+                group_type.breed,
+                group_type.sex,
+                group_type.age_class,
+                f"farm {farm_name}",
+                f"mob {mob_name}",
+            ]
+        )
+        entries.append(
+            {
+                "id": f"stock_ledger:{entry.id}",
+                "event_at": _normalize_journal_datetime(entry.event_time),
+                "source_label": "Stock Ledger",
+                "farm_name": farm_name,
+                "mob_name": mob_name,
+                "tags": tags,
+                "description": description,
+            }
+        )
+
+    movement_query = (
+        db.session.query(MovementEvent, Farm.name.label("farm_name"))
+        .join(Farm, MovementEvent.farm_id == Farm.id)
+        .filter(MovementEvent.event_time >= start_dt, MovementEvent.event_time < end_dt)
+    )
+    if farm_id:
+        movement_query = movement_query.filter(MovementEvent.farm_id == farm_id)
+
+    movement_rows = movement_query.all()
+    movement_ids = [str(event.id) for event, _farm_name in movement_rows]
+    movement_mobs_by_event: dict[str, list[MovementEventMob]] = defaultdict(list)
+    mob_name_by_id = {}
+    if movement_ids:
+        movement_mob_rows = (
+            MovementEventMob.query.filter(MovementEventMob.movement_event_id.in_(movement_ids)).all()
+        )
+        mob_ids = set()
+        for row in movement_mob_rows:
+            movement_mobs_by_event[str(row.movement_event_id)].append(row)
+            mob_ids.add(str(row.mob_id))
+
+        if mob_ids:
+            mob_name_rows = db.session.query(Mob.id, Mob.name).filter(Mob.id.in_(mob_ids)).all()
+            mob_name_by_id = {str(mob_id): mob_name for mob_id, mob_name in mob_name_rows}
+
+    for event, farm_name in movement_rows:
+        movement_kind = event.event_kind.value.replace("_", " ")
+        linked = movement_mobs_by_event.get(str(event.id), [])
+        mob_names = []
+        for row in linked:
+            mob_names.append(mob_name_by_id.get(str(row.mob_id), str(row.mob_id)))
+
+        role_segments = sorted(
+            f"{row.role.value}: {mob_name_by_id.get(str(row.mob_id), str(row.mob_id))}"
+            for row in linked
+        )
+        description = f"Movement {movement_kind} event."
+        if role_segments:
+            description = f"{description} {'; '.join(role_segments)}."
+
+        note_text = (event.source_note or "").strip()
+        if note_text:
+            description = f"{description}\n{note_text}"
+
+        tags = _normalize_journal_tags(
+            [
+                "movement",
+                movement_kind,
+                f"farm {farm_name}",
+                *[f"mob {name}" for name in mob_names],
+            ]
+        )
+
+        entries.append(
+            {
+                "id": f"movement:{event.id}",
+                "event_at": _normalize_journal_datetime(event.event_time),
+                "source_label": "Movement",
+                "farm_name": farm_name,
+                "mob_name": ", ".join(mob_names),
+                "tags": tags,
+                "description": description,
+            }
+        )
+
+    rainfall_query = (
+        db.session.query(RainfallRecord, Farm.name.label("farm_name"))
+        .join(Farm, RainfallRecord.farm_id == Farm.id)
+        .filter(RainfallRecord.recorded_on >= start_date, RainfallRecord.recorded_on <= end_date)
+    )
+    if farm_id:
+        rainfall_query = rainfall_query.filter(RainfallRecord.farm_id == farm_id)
+
+    for rainfall, farm_name in rainfall_query.all():
+        description = f"Rainfall recorded: {float(rainfall.mm):.2f} mm (source: {rainfall.source})."
+        note_text = (rainfall.note or "").strip()
+        if note_text:
+            description = f"{description}\n{note_text}"
+
+        tags = _normalize_journal_tags(
+            [
+                "rainfall",
+                rainfall.source,
+                f"farm {farm_name}",
+            ]
+        )
+
+        entries.append(
+            {
+                "id": f"rainfall:{rainfall.id}",
+                "event_at": datetime.combine(rainfall.recorded_on, time.min),
+                "source_label": "Rainfall",
+                "farm_name": farm_name,
+                "mob_name": "",
+                "tags": tags,
+                "description": description,
+            }
+        )
+
+    return entries
+
+
+def _group_analytics_journal_entries(
+    entries: list[dict],
+    selected_tag: str,
+) -> list[dict]:
+    tag_filter = _normalize_journal_tag(selected_tag)
+    if tag_filter:
+        entries = [
+            row
+            for row in entries
+            if any(tag_filter in tag for tag in row.get("tags", []))
+        ]
+
+    entries.sort(
+        key=lambda row: (
+            row["event_at"],
+            row["source_label"].lower(),
+            row["id"],
+        ),
+        reverse=True,
+    )
+
+    grouped = []
+    for row in entries:
+        day = row["event_at"].date()
+        row["event_time"] = row["event_at"].strftime("%H:%M")
+        if not grouped or grouped[-1]["date"] != day:
+            grouped.append({"date": day, "entries": []})
+        grouped[-1]["entries"].append(row)
+
+    return grouped
+
+
 def _parse_kml_ring(raw: str | None) -> list[list[float]]:
     coords = []
     for token in (raw or "").replace("\n", " ").split():
@@ -597,6 +844,52 @@ def analytics_stock_tracking():
         end_date=end_date,
         chart_data=chart_data,
         latest_totals=latest_totals,
+    )
+
+
+@bp.get("/analytics/journal")
+def analytics_journal():
+    selected_filters = {
+        "farm_id": (request.args.get("farm_id") or "").strip(),
+        "tag": (request.args.get("tag") or "").strip(),
+    }
+    today = date.today()
+
+    try:
+        start_date = _parse_query_date(request.args.get("start_date")) or (today - timedelta(days=30))
+        end_date = _parse_query_date(request.args.get("end_date")) or today
+    except ValueError:
+        flash("Journal dates must be valid (YYYY-MM-DD)", "error")
+        return redirect(url_for("web.analytics_journal"))
+
+    if end_date < start_date:
+        flash("Journal end date must be on or after the start date", "error")
+        return redirect(url_for("web.analytics_journal"))
+
+    farms = Farm.query.order_by(Farm.name).all()
+    filter_options = {
+        "farms": [{"id": str(farm.id), "name": farm.name} for farm in farms],
+    }
+
+    entries = _build_analytics_journal_entries(
+        farm_id=selected_filters["farm_id"],
+        start_date=start_date,
+        end_date=end_date,
+    )
+    journal_days = _group_analytics_journal_entries(
+        entries=entries,
+        selected_tag=selected_filters["tag"],
+    )
+    total_entries = sum(len(day["entries"]) for day in journal_days)
+
+    return render_template(
+        "analytics/journal.html",
+        filter_options=filter_options,
+        selected_filters=selected_filters,
+        start_date=start_date,
+        end_date=end_date,
+        journal_days=journal_days,
+        total_entries=total_entries,
     )
 
 

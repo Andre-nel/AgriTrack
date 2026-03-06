@@ -445,6 +445,41 @@ a { color: #1b5f49; }
   min-height: 360px;
 }
 
+.journal-entry-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.journal-entry {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem;
+  background: #fcfdfb;
+}
+
+.journal-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.45rem 0;
+}
+
+.journal-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.48rem;
+  border-radius: 999px;
+  border: 1px solid #c8d8cf;
+  background: #eef5f1;
+  color: #275444;
+  font-size: 0.82rem;
+}
+
+.journal-description {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 @keyframes stock-float {
   0% { transform: translateY(0); }
   50% { transform: translateY(-4px); }

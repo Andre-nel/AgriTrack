@@ -1,7 +1,18 @@
 from datetime import datetime, timezone
 
 from app.extensions import db
-from app.models import AnimalGroupBalance, AnimalGroupType, Farm, Mob, MobEvent, StockLedgerEntry
+from app.models import (
+    AnimalGroupBalance,
+    AnimalGroupType,
+    Farm,
+    Mob,
+    MobEvent,
+    MovementEvent,
+    MovementEventMob,
+    RainfallRecord,
+    StockLedgerEntry,
+)
+from app.models.movement import MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
 
 
@@ -31,6 +42,10 @@ def test_analytics_pages_load(client):
     response = client.get("/analytics/stock-tracking")
     assert response.status_code == 200
     assert b"Stock Tracking" in response.data
+
+    response = client.get("/analytics/journal")
+    assert response.status_code == 200
+    assert b"Journal" in response.data
 
 
 def test_stock_tracking_renders_series(client, app):
@@ -133,6 +148,90 @@ def test_stock_tracking_reconciles_latest_to_current_balance(client, app):
     assert "Species: Goat | Breed: Angora | Sex: ewe | Age Class: adult" in text
     assert "<td>59</td>" in text
     assert "<td>24</td>" not in text
+
+
+def test_journal_aggregates_entries_with_original_and_auto_tags(client, app):
+    with app.app_context():
+        farm = Farm(name="Journal Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        farm_id = str(farm.id)
+
+        mob = Mob(farm_id=farm.id, name="Journal Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+
+        group = AnimalGroupType(species="Goat", breed="Angora", sex="ewe", age_class="adult")
+        db.session.add(group)
+        db.session.flush()
+
+        db.session.add(
+            MobEvent(
+                mob_id=mob.id,
+                farm_id=farm.id,
+                event_at=datetime(2026, 3, 5, 7, 30, tzinfo=timezone.utc),
+                tags_csv="health,vaccination",
+                description="Vaccinated and weighed goats.",
+            )
+        )
+        db.session.add(
+            StockLedgerEntry(
+                farm_id=farm.id,
+                mob_id=mob.id,
+                animal_group_type_id=group.id,
+                event_time=datetime(2026, 3, 5, 9, 15, tzinfo=timezone.utc),
+                event_type=StockEventType.adjustment_in,
+                quantity=4,
+                note="Manual stock correction after counting.",
+            )
+        )
+        movement_event = MovementEvent(
+            farm_id=farm.id,
+            event_time=datetime(2026, 3, 5, 10, 0, tzinfo=timezone.utc),
+            event_kind=MovementEventKind.move,
+            source_note="Shifted mob to lower camp.",
+        )
+        db.session.add(movement_event)
+        db.session.flush()
+        db.session.add(
+            MovementEventMob(
+                movement_event_id=movement_event.id,
+                mob_id=mob.id,
+                role=MovementRole.source,
+            )
+        )
+        db.session.add(
+            RainfallRecord(
+                farm_id=farm.id,
+                recorded_on=datetime(2026, 3, 5, 0, 0, tzinfo=timezone.utc).date(),
+                mm=12.5,
+                source="manual",
+                note="Late afternoon thunderstorm.",
+            )
+        )
+        db.session.commit()
+
+    response = client.get(
+        f"/analytics/journal?farm_id={farm_id}&start_date=2026-03-01&end_date=2026-03-06"
+    )
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "Vaccinated and weighed goats." in body
+    assert "health" in body
+    assert "Manual stock correction after counting." in body
+    assert "stock" in body
+    assert "Shifted mob to lower camp." in body
+    assert "movement" in body
+    assert "Late afternoon thunderstorm." in body
+    assert "rainfall" in body
+
+    filtered = client.get(
+        f"/analytics/journal?farm_id={farm_id}&start_date=2026-03-01&end_date=2026-03-06&tag=health"
+    )
+    assert filtered.status_code == 200
+    filtered_body = filtered.data.decode("utf-8")
+    assert "Vaccinated and weighed goats." in filtered_body
+    assert "Manual stock correction after counting." not in filtered_body
 
 
 def test_mob_balance_edit_reclassifies_and_records_change(client, app):
