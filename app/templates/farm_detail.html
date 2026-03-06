@@ -105,7 +105,7 @@
   </form>
   <p class="muted">Total head on farm: {{ farm_stock_total }}</p>
   <table>
-    <thead><tr><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
+    <thead><tr><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th><th>Mobs</th></tr></thead>
     <tbody>
       {% for row in farm_stock_summary %}
       <tr>
@@ -114,9 +114,16 @@
         <td>{{ row.sex }}</td>
         <td>{{ row.age_class }}</td>
         <td>{{ row.head_count }}</td>
+        <td>
+          {% for mob in row.mobs %}
+          <a href="{{ url_for('web.mob_detail', mob_id=mob.mob_id) }}">{{ mob.mob_name }} ({{ mob.head_count }})</a>{% if not loop.last %}, {% endif %}
+          {% else %}
+          -
+          {% endfor %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="5">No stock balances on this farm yet.</td></tr>
+      <tr><td colspan="6">No stock balances on this farm yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

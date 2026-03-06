@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Stock Tracking | Analytics | AgriTrack{% endblock %}
+{% block content %}
+<a class="btn btn-secondary" href="{{ url_for('web.analytics_landing') }}">Back To Analytics</a>
+<h1>Stock Tracking</h1>
+<p class="muted">
+  Plot head counts over time. Use filters to narrow stock, and choose group fields to split or combine lines.
+</p>
+
+<section class="card">
+  <h2>Filters</h2>
+  <form method="get" action="{{ url_for('web.analytics_stock_tracking') }}" class="grid-form">
+    <div class="grid-two">
+      <label>Farm
+        <select name="farm_id">
+          <option value="">All farms</option>
+          {% for farm in filter_options.farms %}
+          <option value="{{ farm.id }}" {% if selected_filters.farm_id == farm.id %}selected{% endif %}>
+            {{ farm.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Species
+        <select name="species">
+          <option value="">All species</option>
+          {% for value in filter_options.species %}
+          <option value="{{ value }}" {% if selected_filters.species == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="grid-two">
+      <label>Breed
+        <select name="breed">
+          <option value="">All breeds</option>
+          {% for value in filter_options.breed %}
+          <option value="{{ value }}" {% if selected_filters.breed == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Sex
+        <select name="sex">
+          <option value="">All sexes</option>
+          {% for value in filter_options.sex %}
+          <option value="{{ value }}" {% if selected_filters.sex == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="grid-two">
+      <label>Age Class
+        <select name="age_class">
+          <option value="">All age classes</option>
+          {% for value in filter_options.age_class %}
+          <option value="{{ value }}" {% if selected_filters.age_class == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Start Date
+        <input type="date" name="start_date" value="{{ start_date }}" />
+      </label>
+    </div>
+
+    <div class="grid-two">
+      <label>End Date
+        <input type="date" name="end_date" value="{{ end_date }}" />
+      </label>
+      <span></span>
+    </div>
+
+    <fieldset class="analytics-group-by">
+      <legend>Group Lines By</legend>
+      <p class="muted">Unchecked fields are combined together (for example, combine all sexes).</p>
+      <div class="analytics-checkbox-grid">
+        {% for option in group_by_options %}
+        <label class="analytics-checkbox">
+          <input
+            type="checkbox"
+            name="group_by"
+            value="{{ option.value }}"
+            {% if option.value in selected_group_by %}checked{% endif %}
+          />
+          <span>{{ option.label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.analytics_stock_tracking') }}">Clear</a>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Head Count Over Time</h2>
+  <p class="muted">Window: {{ start_date }} to {{ end_date }}</p>
+  {% if chart_data.datasets %}
+  <div class="analytics-chart-wrap">
+    <canvas id="stockTrackingChart" role="img" aria-label="Stock head count line graph"></canvas>
+  </div>
+  {% else %}
+  <p>No stock ledger data found for this filter selection.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Latest Totals</h2>
+  <table>
+    <thead><tr><th>Series</th><th>Head Count</th></tr></thead>
+    <tbody>
+      {% for row in latest_totals %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td>{{ row.head_count }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="2">No totals available for the selected range.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if chart_data.datasets %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>
+<script id="stockTrackingChartData" type="application/json">{{ chart_data | tojson }}</script>
+<script>
+  (function () {
+    const payloadEl = document.getElementById("stockTrackingChartData");
+    const canvas = document.getElementById("stockTrackingChart");
+    if (!payloadEl || !canvas || !window.Chart) return;
+
+    let payload = { labels: [], datasets: [] };
+    try {
+      payload = JSON.parse(payloadEl.textContent || "{}");
+    } catch (error) {
+      return;
+    }
+
+    const colors = [
+      "#1f77b4",
+      "#2ca02c",
+      "#d62728",
+      "#ff7f0e",
+      "#17becf",
+      "#8c564b",
+      "#bcbd22",
+      "#e377c2",
+      "#9467bd",
+      "#7f7f7f",
+    ];
+
+    const datasets = (payload.datasets || []).map((series, index) => {
+      const color = colors[index % colors.length];
+      return {
+        label: series.label,
+        data: series.values,
+        borderColor: color,
+        backgroundColor: color,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        tension: 0.2,
+      };
+    });
+
+    new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: payload.labels || [],
+        datasets,
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: "index",
+          intersect: false,
+        },
+        plugins: {
+          legend: {
+            position: "bottom",
+          },
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: {
+              display: true,
+              text: "Head Count",
+            },
+          },
+          x: {
+            ticks: {
+              maxTicksLimit: 12,
+            },
+          },
+        },
+      },
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

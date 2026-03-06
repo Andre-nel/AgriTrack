@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -9,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.models import (
     AnimalGroupBalance,
+    AnimalGroupType,
     Farm,
     GrazingAllocation,
     GrazingSession,
@@ -16,6 +18,7 @@ from app.models import (
     MobEvent,
     Paddock,
     RainfallRecord,
+    StockLedgerEntry,
 )
 from app.models.stock_ledger import StockEventType
 from app.services.mob_event_service import MobEventService
@@ -24,6 +27,29 @@ from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
 
 bp = Blueprint("web", __name__)
+
+ANALYTICS_GROUP_LABELS = {
+    "species": "Species",
+    "breed": "Breed",
+    "sex": "Sex",
+    "age_class": "Age Class",
+    "farm": "Farm",
+}
+ANALYTICS_GROUP_ORDER = ("species", "breed", "sex", "age_class", "farm")
+ANALYTICS_DEFAULT_GROUP_BY = ("species",)
+ANALYTICS_STOCK_IN_TYPES = {
+    StockEventType.birth,
+    StockEventType.purchase,
+    StockEventType.transfer_in,
+    StockEventType.adjustment_in,
+}
+ANALYTICS_STOCK_OUT_TYPES = {
+    StockEventType.death,
+    StockEventType.sale,
+    StockEventType.missing,
+    StockEventType.transfer_out,
+    StockEventType.adjustment_out,
+}
 
 
 def _parse_paddock_lines(raw: str) -> list[dict]:
@@ -79,6 +105,155 @@ def _active_mobs_for_farm(farm_id: str) -> list[Mob]:
 
 def _get_active_mob_or_404(mob_id: str) -> Mob:
     return Mob.query.filter_by(id=mob_id, status="active").first_or_404()
+
+
+def _normalize_analytics_group_by(raw_values: list[str]) -> list[str]:
+    selected = []
+    seen = set()
+    for raw in raw_values:
+        value = (raw or "").strip().lower()
+        if value not in ANALYTICS_GROUP_LABELS or value in seen:
+            continue
+        selected.append(value)
+        seen.add(value)
+
+    if not selected:
+        return list(ANALYTICS_DEFAULT_GROUP_BY)
+    return selected
+
+
+def _stock_delta_for_event(event_type: StockEventType, quantity: int) -> int:
+    if event_type in ANALYTICS_STOCK_IN_TYPES:
+        return quantity
+    if event_type in ANALYTICS_STOCK_OUT_TYPES:
+        return -quantity
+    return 0
+
+
+def _stock_group_dimensions(farm_name: str, group_type: AnimalGroupType) -> dict[str, str]:
+    return {
+        "species": (group_type.species or "Unknown").strip(),
+        "breed": (group_type.breed or "Unknown").strip(),
+        "sex": (group_type.sex or "Unknown").strip(),
+        "age_class": (group_type.age_class or "Unknown").strip(),
+        "farm": (farm_name or "Unknown").strip(),
+    }
+
+
+def _stock_series_label(group_by_fields: list[str], group_key: tuple[str, ...]) -> str:
+    if len(group_by_fields) == 1:
+        return group_key[0]
+
+    parts = []
+    for field, value in zip(group_by_fields, group_key):
+        parts.append(f"{ANALYTICS_GROUP_LABELS[field]}: {value}")
+    return " | ".join(parts)
+
+
+def _current_stock_totals_by_group(
+    selected_filters: dict[str, str],
+    group_by_fields: list[str],
+) -> dict[tuple[str, ...], int]:
+    rows = (
+        db.session.query(AnimalGroupBalance, Mob, AnimalGroupType, Farm.name.label("farm_name"))
+        .join(Mob, AnimalGroupBalance.mob_id == Mob.id)
+        .join(AnimalGroupType, AnimalGroupBalance.animal_group_type_id == AnimalGroupType.id)
+        .join(Farm, Mob.farm_id == Farm.id)
+        .filter(Mob.status == "active", AnimalGroupBalance.head_count > 0)
+    )
+
+    if selected_filters["farm_id"]:
+        rows = rows.filter(Mob.farm_id == selected_filters["farm_id"])
+    if selected_filters["species"]:
+        rows = rows.filter(AnimalGroupType.species == selected_filters["species"])
+    if selected_filters["breed"]:
+        rows = rows.filter(AnimalGroupType.breed == selected_filters["breed"])
+    if selected_filters["sex"]:
+        rows = rows.filter(AnimalGroupType.sex == selected_filters["sex"])
+    if selected_filters["age_class"]:
+        rows = rows.filter(AnimalGroupType.age_class == selected_filters["age_class"])
+
+    totals: dict[tuple[str, ...], int] = defaultdict(int)
+    for balance, _mob, group_type, farm_name in rows.all():
+        dimensions = _stock_group_dimensions(farm_name=farm_name, group_type=group_type)
+        group_key = tuple(dimensions[field] for field in group_by_fields)
+        totals[group_key] += int(balance.head_count)
+
+    return totals
+
+
+def _build_stock_tracking_chart_data(
+    ledger_rows: list[tuple[StockLedgerEntry, str, AnimalGroupType]],
+    group_by_fields: list[str],
+    start_date: date,
+    end_date: date,
+    reconcile_to_current_totals: dict[tuple[str, ...], int] | None = None,
+) -> tuple[dict, list[dict]]:
+    labels = []
+    cursor = start_date
+    while cursor <= end_date:
+        labels.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+
+    baseline_totals: dict[tuple[str, ...], int] = defaultdict(int)
+    daily_deltas: dict[str, dict[tuple[str, ...], int]] = defaultdict(lambda: defaultdict(int))
+
+    for entry, farm_name, group_type in ledger_rows:
+        event_date = entry.event_time.date()
+        dimensions = _stock_group_dimensions(farm_name=farm_name, group_type=group_type)
+        group_key = tuple(dimensions[field] for field in group_by_fields)
+        delta = _stock_delta_for_event(event_type=entry.event_type, quantity=int(entry.quantity))
+        if delta == 0:
+            continue
+
+        if event_date < start_date:
+            baseline_totals[group_key] += delta
+            continue
+        if event_date > end_date:
+            continue
+
+        daily_deltas[event_date.isoformat()][group_key] += delta
+
+    all_keys = set(baseline_totals.keys())
+    for values in daily_deltas.values():
+        all_keys.update(values.keys())
+    if reconcile_to_current_totals:
+        all_keys.update(reconcile_to_current_totals.keys())
+
+    sorted_keys = sorted(all_keys, key=lambda row: tuple(value.lower() for value in row))
+    running_totals = {key: baseline_totals.get(key, 0) for key in sorted_keys}
+    series_by_key = {key: [] for key in sorted_keys}
+
+    for label in labels:
+        day_changes = daily_deltas.get(label, {})
+        for key, delta in day_changes.items():
+            running_totals[key] = running_totals.get(key, 0) + delta
+
+        for key in sorted_keys:
+            series_by_key[key].append(running_totals.get(key, 0))
+
+    if reconcile_to_current_totals:
+        for key in sorted_keys:
+            desired_latest = int(reconcile_to_current_totals.get(key, 0))
+            if not series_by_key[key]:
+                continue
+            observed_latest = int(series_by_key[key][-1])
+            offset = desired_latest - observed_latest
+            if offset:
+                series_by_key[key] = [value + offset for value in series_by_key[key]]
+
+    datasets = []
+    latest_totals = []
+    for key in sorted_keys:
+        values = series_by_key[key]
+        if not values or not any(value != 0 for value in values):
+            continue
+        label = _stock_series_label(group_by_fields=group_by_fields, group_key=key)
+        datasets.append({"label": label, "values": values})
+        latest_totals.append({"label": label, "head_count": values[-1]})
+
+    latest_totals.sort(key=lambda row: (-row["head_count"], row["label"].lower()))
+    return {"labels": labels, "datasets": datasets}, latest_totals
 
 
 def _parse_kml_ring(raw: str | None) -> list[list[float]]:
@@ -316,6 +491,113 @@ def dashboard():
     return render_template("dashboard.html", summary=summary, farm_cards=farm_cards)
 
 
+@bp.get("/analytics")
+def analytics_landing():
+    return render_template("analytics/index.html")
+
+
+@bp.get("/analytics/stock-tracking")
+def analytics_stock_tracking():
+    selected_filters = {
+        "farm_id": (request.args.get("farm_id") or "").strip(),
+        "species": (request.args.get("species") or "").strip(),
+        "breed": (request.args.get("breed") or "").strip(),
+        "sex": (request.args.get("sex") or "").strip(),
+        "age_class": (request.args.get("age_class") or "").strip(),
+    }
+    selected_group_by = _normalize_analytics_group_by(request.args.getlist("group_by"))
+    today = date.today()
+
+    try:
+        start_date = _parse_query_date(request.args.get("start_date"))
+        end_date = _parse_query_date(request.args.get("end_date")) or today
+    except ValueError:
+        flash("Analytics dates must be valid (YYYY-MM-DD)", "error")
+        return redirect(url_for("web.analytics_stock_tracking"))
+
+    if start_date and end_date < start_date:
+        flash("Analytics end date must be on or after the start date", "error")
+        return redirect(url_for("web.analytics_stock_tracking"))
+
+    farms = Farm.query.order_by(Farm.name).all()
+    group_types = AnimalGroupType.query.order_by(
+        AnimalGroupType.species,
+        AnimalGroupType.breed,
+        AnimalGroupType.sex,
+        AnimalGroupType.age_class,
+    ).all()
+    filter_options = {
+        "farms": [{"id": str(farm.id), "name": farm.name} for farm in farms],
+        "species": sorted({group.species for group in group_types}),
+        "breed": sorted({group.breed for group in group_types}),
+        "sex": sorted({group.sex for group in group_types}),
+        "age_class": sorted({group.age_class for group in group_types}),
+    }
+    group_by_options = [
+        {"value": field, "label": ANALYTICS_GROUP_LABELS[field]}
+        for field in ANALYTICS_GROUP_ORDER
+    ]
+
+    ledger_query = (
+        db.session.query(StockLedgerEntry, Farm.name.label("farm_name"), AnimalGroupType)
+        .join(Farm, StockLedgerEntry.farm_id == Farm.id)
+        .join(AnimalGroupType, StockLedgerEntry.animal_group_type_id == AnimalGroupType.id)
+    )
+
+    if selected_filters["farm_id"]:
+        ledger_query = ledger_query.filter(StockLedgerEntry.farm_id == selected_filters["farm_id"])
+    if selected_filters["species"]:
+        ledger_query = ledger_query.filter(AnimalGroupType.species == selected_filters["species"])
+    if selected_filters["breed"]:
+        ledger_query = ledger_query.filter(AnimalGroupType.breed == selected_filters["breed"])
+    if selected_filters["sex"]:
+        ledger_query = ledger_query.filter(AnimalGroupType.sex == selected_filters["sex"])
+    if selected_filters["age_class"]:
+        ledger_query = ledger_query.filter(AnimalGroupType.age_class == selected_filters["age_class"])
+
+    period_end_dt = datetime.combine(end_date + timedelta(days=1), time.min)
+    ledger_rows = (
+        ledger_query.filter(StockLedgerEntry.event_time < period_end_dt)
+        .order_by(StockLedgerEntry.event_time.asc(), StockLedgerEntry.id.asc())
+        .all()
+    )
+
+    if start_date is None:
+        if ledger_rows:
+            start_date = ledger_rows[0][0].event_time.date()
+        else:
+            start_date = end_date - timedelta(days=30)
+
+    reconcile_to_current_totals = None
+    if end_date >= today:
+        current_totals = _current_stock_totals_by_group(
+            selected_filters=selected_filters,
+            group_by_fields=selected_group_by,
+        )
+        if current_totals:
+            reconcile_to_current_totals = current_totals
+
+    chart_data, latest_totals = _build_stock_tracking_chart_data(
+        ledger_rows=ledger_rows,
+        group_by_fields=selected_group_by,
+        start_date=start_date,
+        end_date=end_date,
+        reconcile_to_current_totals=reconcile_to_current_totals,
+    )
+
+    return render_template(
+        "analytics/stock_tracking.html",
+        filter_options=filter_options,
+        selected_filters=selected_filters,
+        group_by_options=group_by_options,
+        selected_group_by=selected_group_by,
+        start_date=start_date,
+        end_date=end_date,
+        chart_data=chart_data,
+        latest_totals=latest_totals,
+    )
+
+
 @bp.route("/setup", methods=["GET", "POST"])
 def setup_farm():
     if request.method == "GET":
@@ -428,7 +710,9 @@ def farm_detail(farm_id):
         "age_class": (request.args.get("age_class") or "").strip(),
     }
     stock_totals = {}
+    stock_mob_totals = {}
     for mob in mobs:
+        mob_id = str(mob.id)
         for balance in mob.balances:
             group = balance.animal_group_type
             key = (
@@ -437,7 +721,15 @@ def farm_detail(farm_id):
                 group.sex,
                 group.age_class,
             )
-            stock_totals[key] = stock_totals.get(key, 0) + balance.head_count
+            head_count = int(balance.head_count)
+            stock_totals[key] = stock_totals.get(key, 0) + head_count
+
+            mob_totals = stock_mob_totals.setdefault(key, {})
+            mob_totals[mob_id] = {
+                "mob_id": mob_id,
+                "mob_name": mob.name,
+                "head_count": mob_totals.get(mob_id, {}).get("head_count", 0) + head_count,
+            }
 
     farm_stock_summary_all = [
         {
@@ -446,6 +738,10 @@ def farm_detail(farm_id):
             "sex": key[2],
             "age_class": key[3],
             "head_count": head_count,
+            "mobs": sorted(
+                stock_mob_totals.get(key, {}).values(),
+                key=lambda row: (-row["head_count"], row["mob_name"].lower()),
+            ),
         }
         for key, head_count in sorted(stock_totals.items(), key=lambda item: item[0])
     ]

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Analytics | AgriTrack{% endblock %}
+{% block content %}
+<h1>Analytics</h1>
+<p class="muted">Track stock trends and key farm signals over time.</p>
+
+<section class="cards farm-grid">
+  <article class="card">
+    <h2>Stock Tracking</h2>
+    <p class="muted">Plot stock head counts over time with filters and grouping controls.</p>
+    <a class="btn" href="{{ url_for('web.analytics_stock_tracking') }}">Open Stock Tracking</a>
+  </article>
+  <article class="card">
+    <h2>More Pages Coming</h2>
+    <p class="muted">This analytics section is ready for additional reports as you add them.</p>
+  </article>
+</section>
+{% endblock %}

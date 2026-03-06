@@ -401,6 +401,42 @@ a { color: #1b5f49; }
   margin-top: -1px;
 }
 
+.analytics-group-by {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+}
+
+.analytics-group-by legend {
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+.analytics-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+}
+
+.analytics-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.analytics-checkbox input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
+}
+
+.analytics-chart-wrap {
+  position: relative;
+  min-height: 360px;
+}
+
 @keyframes stock-float {
   0% { transform: translateY(0); }
   50% { transform: translateY(-4px); }
@@ -459,5 +495,9 @@ a { color: #1b5f49; }
   .topnav a {
     margin-left: 0;
     margin-right: 0.8rem;
+  }
+
+  .analytics-chart-wrap {
+    min-height: 300px;
   }
 }
