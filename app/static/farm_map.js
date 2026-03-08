@@ -313,6 +313,9 @@
   map.setView([-32.9102, 25.449], 13);
 
   let fullscreenButton = null;
+  let labelToggleButton = null;
+  let paddockLabelLayer = null;
+  let labelsVisible = true;
 
   function isMapFullscreen() {
     return getFullscreenElement() === mapElement;
@@ -334,13 +337,65 @@
     fullscreenButton.title = isFullscreen ? "Exit full screen" : "Open full screen";
   }
 
+  function syncPaddockLabelVisibility() {
+    if (!paddockLabelLayer) {
+      return;
+    }
+    if (labelsVisible) {
+      if (!map.hasLayer(paddockLabelLayer)) {
+        paddockLabelLayer.addTo(map);
+      }
+      return;
+    }
+    if (map.hasLayer(paddockLabelLayer)) {
+      map.removeLayer(paddockLabelLayer);
+    }
+  }
+
+  function updateLabelToggleButton() {
+    if (!labelToggleButton) {
+      return;
+    }
+    labelToggleButton.textContent = labelsVisible ? "Names Off" : "Names On";
+    labelToggleButton.setAttribute("aria-pressed", labelsVisible ? "true" : "false");
+    labelToggleButton.setAttribute(
+      "aria-label",
+      labelsVisible ? "Hide paddock names on the map" : "Show paddock names on the map"
+    );
+    labelToggleButton.title = labelsVisible ? "Hide paddock names" : "Show paddock names";
+  }
+
+  function togglePaddockLabels() {
+    labelsVisible = !labelsVisible;
+    syncPaddockLabelVisibility();
+    updateLabelToggleButton();
+  }
+
+  const LabelToggleControl = L.Control.extend({
+    options: {
+      position: "topright",
+    },
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar map-label-toggle-control");
+      labelToggleButton = L.DomUtil.create("button", "map-control-button map-label-toggle", container);
+      labelToggleButton.type = "button";
+      updateLabelToggleButton();
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(labelToggleButton, "click", function (event) {
+        L.DomEvent.stop(event);
+        togglePaddockLabels();
+      });
+      return container;
+    },
+  });
+
   const FullscreenControl = L.Control.extend({
     options: {
       position: "topright",
     },
     onAdd: function () {
       const container = L.DomUtil.create("div", "leaflet-bar map-fullscreen-control");
-      fullscreenButton = L.DomUtil.create("button", "map-fullscreen-toggle", container);
+      fullscreenButton = L.DomUtil.create("button", "map-control-button map-fullscreen-toggle", container);
       fullscreenButton.type = "button";
       updateFullscreenButton();
       L.DomEvent.disableClickPropagation(container);
@@ -355,6 +410,7 @@
     },
   });
 
+  map.addControl(new LabelToggleControl());
   map.addControl(new FullscreenControl());
 
   document.addEventListener("fullscreenchange", function () {
@@ -396,7 +452,7 @@
         return;
       }
 
-      const paddockLabelLayer = L.layerGroup().addTo(map);
+      paddockLabelLayer = L.layerGroup().addTo(map);
       const stockFloatLayer = L.layerGroup().addTo(map);
       const layer = L.geoJSON(payload, {
         style: styleForFeature,
@@ -406,6 +462,8 @@
           addStockFloatMarker(feature, geoLayer, stockFloatLayer);
         },
       }).addTo(map);
+      syncPaddockLabelVisibility();
+      updateLabelToggleButton();
 
       const bounds = layer.getBounds();
       if (bounds.isValid()) {

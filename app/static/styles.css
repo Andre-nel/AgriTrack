@@ -251,7 +251,7 @@ a { color: #1b5f49; }
   border-radius: 0;
 }
 
-.map-fullscreen-control .map-fullscreen-toggle {
+.map-control-button {
   display: block;
   min-width: 5.4rem;
   height: 2rem;
@@ -266,11 +266,16 @@ a { color: #1b5f49; }
   cursor: pointer;
 }
 
-.map-fullscreen-control .map-fullscreen-toggle:hover {
+.map-control-button:hover {
   background: #f3f7f4;
 }
 
-.map-fullscreen-control .map-fullscreen-toggle:focus-visible {
+.map-control-button[aria-pressed="true"] {
+  background: #214339;
+  color: #fff;
+}
+
+.map-control-button:focus-visible {
   outline: 2px solid #214339;
   outline-offset: -2px;
 }
