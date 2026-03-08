@@ -273,6 +273,30 @@
     ].join("");
   }
 
+  function getFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function requestMapFullscreen() {
+    if (typeof mapElement.requestFullscreen === "function") {
+      return mapElement.requestFullscreen();
+    }
+    if (typeof mapElement.webkitRequestFullscreen === "function") {
+      return mapElement.webkitRequestFullscreen();
+    }
+    return Promise.reject(new Error("Full-screen mode is not supported in this browser."));
+  }
+
+  function exitFullscreen() {
+    if (typeof document.exitFullscreen === "function") {
+      return document.exitFullscreen();
+    }
+    if (typeof document.webkitExitFullscreen === "function") {
+      return document.webkitExitFullscreen();
+    }
+    return Promise.reject(new Error("Full-screen mode is not supported in this browser."));
+  }
+
   const map = L.map(mapElement, { scrollWheelZoom: true });
   map.createPane("paddockLabelPane");
   map.getPane("paddockLabelPane").style.zIndex = "640";
@@ -287,6 +311,60 @@
   }).addTo(map);
 
   map.setView([-32.9102, 25.449], 13);
+
+  let fullscreenButton = null;
+
+  function isMapFullscreen() {
+    return getFullscreenElement() === mapElement;
+  }
+
+  function refreshMapSize() {
+    window.requestAnimationFrame(() => map.invalidateSize(false));
+    window.setTimeout(() => map.invalidateSize(false), 180);
+  }
+
+  function updateFullscreenButton() {
+    if (!fullscreenButton) {
+      return;
+    }
+    const isFullscreen = isMapFullscreen();
+    fullscreenButton.textContent = isFullscreen ? "Exit" : "Expand";
+    fullscreenButton.setAttribute("aria-label", isFullscreen ? "Exit full screen map" : "Open full screen map");
+    fullscreenButton.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
+    fullscreenButton.title = isFullscreen ? "Exit full screen" : "Open full screen";
+  }
+
+  const FullscreenControl = L.Control.extend({
+    options: {
+      position: "topright",
+    },
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar map-fullscreen-control");
+      fullscreenButton = L.DomUtil.create("button", "map-fullscreen-toggle", container);
+      fullscreenButton.type = "button";
+      updateFullscreenButton();
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(fullscreenButton, "click", function (event) {
+        L.DomEvent.stop(event);
+        const action = isMapFullscreen() ? exitFullscreen() : requestMapFullscreen();
+        Promise.resolve(action).catch((error) => {
+          setStatus(error.message);
+        });
+      });
+      return container;
+    },
+  });
+
+  map.addControl(new FullscreenControl());
+
+  document.addEventListener("fullscreenchange", function () {
+    updateFullscreenButton();
+    refreshMapSize();
+  });
+  document.addEventListener("webkitfullscreenchange", function () {
+    updateFullscreenButton();
+    refreshMapSize();
+  });
 
   fetch(dataUrl, { headers: { Accept: "application/json" } })
     .then((response) => {
