@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}{{ space.key }} | Tasks | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-page-actions">
+  <a class="btn btn-secondary" href="{{ url_for('tasks.index', farm_id=space.farm_id) }}">Back To Tasks</a>
+</div>
+
+<section class="card task-page-header">
+  <div>
+    <p class="space-key">{{ space.key }}</p>
+    <h1>{{ space.name }}</h1>
+    <p class="muted">Farm: {{ space.farm.name }} ({{ space.farm.timezone }})</p>
+    <p class="text-body">{{ space.description }}</p>
+  </div>
+  <div class="task-summary-grid">
+    <div><span>Tasks</span><strong>{{ summary.task_count }}</strong></div>
+    <div><span>Open</span><strong>{{ summary.open_count }}</strong></div>
+    <div><span>Closed</span><strong>{{ summary.closed_count }}</strong></div>
+    <div><span>Overdue</span><strong>{{ summary.overdue_count }}</strong></div>
+  </div>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Edit Space</h2>
+    <form method="post" action="{{ url_for('tasks.edit_space', space_id=space.id) }}" class="grid-form">
+      <label>Farm
+        <select name="farm_id" required>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if farm.id == space.farm_id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="grid-two">
+        <label>Key
+          <input name="key" value="{{ space.key }}" required />
+        </label>
+        <label>Name
+          <input name="name" value="{{ space.name }}" required />
+        </label>
+      </div>
+      <label>Description
+        <textarea name="description" rows="6" required>{{ space.description }}</textarea>
+      </label>
+      <button type="submit" class="btn">Save Space</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Create Task</h2>
+    <form method="post" action="{{ url_for('tasks.create_task', space_id=space.id) }}" class="grid-form">
+      <label>Heading
+        <input name="heading" placeholder="Task heading" required />
+      </label>
+      <label>Description
+        <textarea name="description" rows="6" placeholder="Describe the task, expected outcome, and constraints." required></textarea>
+      </label>
+      <div class="grid-two">
+        <label>Reporter
+          <input name="reporter_name" placeholder="Reporter name" required />
+        </label>
+        <label>Assignee
+          <input name="assignee_name" placeholder="Assignee name" />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Status
+          <select name="status" required>
+            {% for option in create_status_options %}
+            <option value="{{ option }}">{{ option.replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Priority
+          <select name="priority" required>
+            {% for option in priority_options %}
+            <option value="{{ option }}">{{ priority_labels[option] }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Original Estimate (days)
+          <input type="number" step="0.01" min="0.01" name="original_estimate_days" />
+        </label>
+        <label>Due Date
+          <input type="date" name="due_date" />
+        </label>
+      </div>
+      <label>Tags
+        <input name="tags" placeholder="operations, fencing, supplies" />
+      </label>
+      <button type="submit" class="btn">Create Task</button>
+    </form>
+  </article>
+</section>
+
+<section>
+  <div class="task-section-heading">
+    <h2>Board</h2>
+    <p class="muted">Status changes happen from the task detail page to keep history explicit.</p>
+  </div>
+  <div class="task-board">
+    {% for column in board_columns %}
+    <section class="task-column">
+      <div class="task-column-header">
+        <h3>{{ column.label }}</h3>
+        <span class="count-pill">{{ column.count }}</span>
+      </div>
+      {% for task in column.tasks %}
+      <article class="task-card">
+        <div class="task-card-topline">
+          <a class="task-key" href="{{ url_for('tasks.task_detail', task_id=task.id) }}">{{ task.display_key }}</a>
+          <span class="priority-pill priority-{{ task.priority }}">{{ task.priority_label }}</span>
+        </div>
+        <h4><a href="{{ url_for('tasks.task_detail', task_id=task.id) }}">{{ task.heading }}</a></h4>
+        <p class="text-body task-card-text">{{ task.description }}</p>
+        <div class="task-chip-row">
+          <span class="status-pill status-{{ task.status }}">{{ task.status_label }}</span>
+          {% if task.is_overdue %}
+          <span class="priority-pill priority-high">Overdue</span>
+          {% endif %}
+          {% for tag in task.tags %}
+          <span class="tag-pill">{{ tag }}</span>
+          {% endfor %}
+        </div>
+        <dl class="task-meta-compact">
+          <div><dt>Assignee</dt><dd>{{ task.assignee_name or "-" }}</dd></div>
+          <div><dt>Reporter</dt><dd>{{ task.reporter_name }}</dd></div>
+          <div><dt>Due</dt><dd>{{ task.due_date or "-" }}</dd></div>
+          <div><dt>Estimate</dt><dd>{{ task.original_estimate_days or "-" }}</dd></div>
+          <div><dt>Start</dt><dd>{{ task.started_at or "-" }}</dd></div>
+          <div><dt>End</dt><dd>{{ task.closed_at or "-" }}</dd></div>
+        </dl>
+        {% if task.duration %}
+        <p class="muted">Duration: {{ task.duration }}</p>
+        {% endif %}
+      </article>
+      {% else %}
+      <div class="task-empty-state">No tasks in this status.</div>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Space Links</h2>
+    <form method="post" action="{{ url_for('tasks.create_space_link', space_id=space.id) }}" class="grid-form">
+      <label>Link Type
+        <select name="link_type" required>
+          {% for option in link_type_options %}
+          <option value="{{ option }}">{{ link_type_labels[option] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Target Space
+        <select name="target_space_id">
+          <option value="">Select a space</option>
+          {% for target_space in available_spaces %}
+          <option value="{{ target_space.id }}">{{ target_space.key }} - {{ target_space.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Target Task Key
+        <input name="target_task_key" placeholder="OPS-12" />
+      </label>
+      <label>Note
+        <textarea name="note" rows="4" placeholder="Optional reason for the link."></textarea>
+      </label>
+      <button type="submit" class="btn">Add Link</button>
+    </form>
+    <ul class="link-list-clean">
+      {% for link in link_rows %}
+      <li class="link-card">
+        <span class="link-pill">{{ link.direction }}</span>
+        <span class="status-pill">{{ link.type_label }}</span>
+        <a href="{{ link.other.url }}">{{ link.other.label }}</a>
+        {% if link.note %}
+        <p class="muted text-body">{{ link.note }}</p>
+        {% endif %}
+      </li>
+      {% else %}
+      <li class="task-empty-state">No links yet.</li>
+      {% endfor %}
+    </ul>
+  </article>
+
+  <article class="card">
+    <h2>Space Comments</h2>
+    <form method="post" action="{{ url_for('tasks.create_space_comment', space_id=space.id) }}" class="grid-form">
+      <label>Author
+        <input name="author_name" placeholder="Comment author" required />
+      </label>
+      <label>Comment
+        <textarea name="body" rows="5" placeholder="Add context or coordination notes." required></textarea>
+      </label>
+      <button type="submit" class="btn">Add Comment</button>
+    </form>
+    <div class="comment-thread">
+      {% for comment in comment_rows %}
+      <article class="comment-card">
+        <div class="task-card-topline">
+          <strong>{{ comment.author_name }}</strong>
+          <span class="muted">{{ comment.created_at }}</span>
+        </div>
+        <p class="text-body">{{ comment.body }}</p>
+      </article>
+      {% else %}
+      <div class="task-empty-state">No comments yet.</div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endblock %}

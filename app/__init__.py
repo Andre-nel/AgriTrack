@@ -5,6 +5,7 @@ from app.blueprints.farms.routes import bp as farms_api_bp
 from app.blueprints.mobs.routes import bp as mobs_api_bp
 from app.blueprints.paddocks.routes import bp as paddocks_api_bp
 from app.blueprints.reports.routes import bp as web_bp
+from app.blueprints.tasks.routes import bp as tasks_bp
 from app.cli import init_cli
 from app.config import Config, get_config
 import app.models  # noqa: F401
@@ -20,6 +21,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     init_cli(app)
 
     app.register_blueprint(web_bp)
+    app.register_blueprint(tasks_bp)
     app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
 
     # Backward-compatible API prefixes.

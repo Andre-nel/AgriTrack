@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}{{ task.display_key }} | Tasks | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-page-actions">
+  <a class="btn btn-secondary" href="{{ url_for('tasks.space_detail', space_id=task.space.id) }}">Back To {{ task.space.key }}</a>
+</div>
+
+<section class="card task-page-header">
+  <div>
+    <p class="space-key">{{ task_card.display_key }}</p>
+    <h1>{{ task.heading }}</h1>
+    <div class="task-chip-row">
+      <span class="status-pill status-{{ task_card.status }}">{{ task_card.status_label }}</span>
+      <span class="priority-pill priority-{{ task_card.priority }}">{{ task_card.priority_label }}</span>
+      {% if task_card.is_overdue %}
+      <span class="priority-pill priority-high">Overdue</span>
+      {% endif %}
+      {% for tag in task_card.tags %}
+      <span class="tag-pill">{{ tag }}</span>
+      {% endfor %}
+    </div>
+    <p class="text-body">{{ task.description }}</p>
+  </div>
+  <dl class="task-detail-grid">
+    <div><dt>Assignee</dt><dd>{{ task_card.assignee_name or "-" }}</dd></div>
+    <div><dt>Reporter</dt><dd>{{ task_card.reporter_name }}</dd></div>
+    <div><dt>Due Date</dt><dd>{{ task_card.due_date or "-" }}</dd></div>
+    <div><dt>Original Estimate</dt><dd>{{ task_card.original_estimate_days or "-" }}</dd></div>
+    <div><dt>Start Date</dt><dd>{{ task_card.started_at or "-" }}</dd></div>
+    <div><dt>End Date</dt><dd>{{ task_card.closed_at or "-" }}</dd></div>
+    <div><dt>Duration</dt><dd>{{ task_card.duration or "-" }}</dd></div>
+    <div><dt>Space</dt><dd><a href="{{ url_for('tasks.space_detail', space_id=task.space.id) }}">{{ task.space.key }} {{ task.space.name }}</a></dd></div>
+  </dl>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Edit Task</h2>
+    <form method="post" action="{{ url_for('tasks.edit_task', task_id=task.id) }}" class="grid-form">
+      <label>Heading
+        <input name="heading" value="{{ task.heading }}" required />
+      </label>
+      <label>Description
+        <textarea name="description" rows="7" required>{{ task.description }}</textarea>
+      </label>
+      <div class="grid-two">
+        <label>Reporter
+          <input name="reporter_name" value="{{ task.reporter_name }}" required />
+        </label>
+        <label>Assignee
+          <input name="assignee_name" value="{{ task.assignee_name or '' }}" />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Priority
+          <select name="priority" required>
+            {% for option in priority_options %}
+            <option value="{{ option }}" {% if option == task.priority %}selected{% endif %}>{{ priority_labels[option] }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Due Date
+          <input type="date" name="due_date" value="{{ task.due_date.isoformat() if task.due_date else '' }}" />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Original Estimate (days)
+          <input type="number" step="0.01" min="0.01" name="original_estimate_days" value="{{ task.original_estimate_days if task.original_estimate_days is not none else '' }}" />
+        </label>
+        <label>Tags
+          <input name="tags" value="{{ task.tags_csv }}" />
+        </label>
+      </div>
+      <button type="submit" class="btn">Save Task</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Transition Status</h2>
+    <form method="post" action="{{ url_for('tasks.update_task_status', task_id=task.id) }}" class="grid-form">
+      <label>New Status
+        <select name="status" required>
+          {% for option in status_options %}
+          <option value="{{ option }}">{{ status_labels[option] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Changed By
+        <input name="changed_by_name" placeholder="Who moved the task?" required />
+      </label>
+      <label>Note
+        <textarea name="note" rows="5" placeholder="Optional note about this transition."></textarea>
+      </label>
+      <button type="submit" class="btn">Update Status</button>
+    </form>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Status History</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Changed At</th>
+        <th>From</th>
+        <th>To</th>
+        <th>By</th>
+        <th>Note</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for transition in transitions %}
+      <tr>
+        <td>{{ transition.changed_at }}</td>
+        <td>{{ transition.from_status_label }}</td>
+        <td>{{ transition.to_status_label }}</td>
+        <td>{{ transition.changed_by_name }}</td>
+        <td>{{ transition.note or "-" }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">No status history.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Links</h2>
+    <form method="post" action="{{ url_for('tasks.create_task_link', task_id=task.id) }}" class="grid-form">
+      <label>Link Type
+        <select name="link_type" required>
+          {% for option in link_type_options %}
+          <option value="{{ option }}">{{ link_type_labels[option] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Target Space
+        <select name="target_space_id">
+          <option value="">Select a space</option>
+          {% for target_space in available_spaces %}
+          <option value="{{ target_space.id }}">{{ target_space.key }} - {{ target_space.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Target Task Key
+        <input name="target_task_key" placeholder="OPS-12" />
+      </label>
+      <label>Note
+        <textarea name="note" rows="4" placeholder="Optional reason for the link."></textarea>
+      </label>
+      <button type="submit" class="btn">Add Link</button>
+    </form>
+    <ul class="link-list-clean">
+      {% for link in link_rows %}
+      <li class="link-card">
+        <span class="link-pill">{{ link.direction }}</span>
+        <span class="status-pill">{{ link.type_label }}</span>
+        <a href="{{ link.other.url }}">{{ link.other.label }}</a>
+        {% if link.note %}
+        <p class="muted text-body">{{ link.note }}</p>
+        {% endif %}
+      </li>
+      {% else %}
+      <li class="task-empty-state">No links yet.</li>
+      {% endfor %}
+    </ul>
+  </article>
+
+  <article class="card">
+    <h2>Comments</h2>
+    <form method="post" action="{{ url_for('tasks.create_task_comment', task_id=task.id) }}" class="grid-form">
+      <label>Author
+        <input name="author_name" placeholder="Comment author" required />
+      </label>
+      <label>Comment
+        <textarea name="body" rows="5" placeholder="Add implementation notes, blockers, or verification context." required></textarea>
+      </label>
+      <button type="submit" class="btn">Add Comment</button>
+    </form>
+    <div class="comment-thread">
+      {% for comment in comment_rows %}
+      <article class="comment-card">
+        <div class="task-card-topline">
+          <strong>{{ comment.author_name }}</strong>
+          <span class="muted">{{ comment.created_at }}</span>
+        </div>
+        <p class="text-body">{{ comment.body }}</p>
+      </article>
+      {% else %}
+      <div class="task-empty-state">No comments yet.</div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endblock %}

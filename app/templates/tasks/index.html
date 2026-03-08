@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Tasks | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Tasks Workspace</h1>
+  <p>Organize work by farm, break it into spaces, and track task flow from TO DO through Closed.</p>
+</section>
+
+<div class="cards">
+  <article class="card stat"><h2>Spaces</h2><p>{{ summary.space_count }}</p></article>
+  <article class="card stat"><h2>Open Tasks</h2><p>{{ summary.open_task_count }}</p></article>
+  <article class="card stat"><h2>Impeded</h2><p>{{ summary.impeded_task_count }}</p></article>
+  <article class="card stat"><h2>Overdue</h2><p>{{ summary.overdue_task_count }}</p></article>
+</div>
+
+<section class="split">
+  <article class="card">
+    <h2>Filter Spaces</h2>
+    <form method="get" action="{{ url_for('tasks.index') }}" class="grid-form">
+      <label>Farm
+        <select name="farm_id">
+          <option value="">All farms</option>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if selected_farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn">Apply Filter</button>
+        <a class="btn btn-secondary" href="{{ url_for('tasks.index') }}">Clear</a>
+      </div>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Create Space</h2>
+    <form method="post" action="{{ url_for('tasks.create_space') }}" class="grid-form">
+      <label>Farm
+        <select name="farm_id" required>
+          <option value="">Select a farm</option>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if selected_farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="grid-two">
+        <label>Key
+          <input name="key" placeholder="OPS" required />
+        </label>
+        <label>Name
+          <input name="name" placeholder="Operations Backlog" required />
+        </label>
+      </div>
+      <label>Description
+        <textarea name="description" rows="5" placeholder="What this space is responsible for..." required></textarea>
+      </label>
+      <button type="submit" class="btn">Create Space</button>
+    </form>
+  </article>
+</section>
+
+<section>
+  <h2>Task Spaces</h2>
+  {% for group in grouped_spaces %}
+  <section class="task-group">
+    <div class="task-section-heading">
+      <h3>{{ group.farm_name }}</h3>
+      <p class="muted">{{ group.spaces|length }} spaces</p>
+    </div>
+    <div class="cards farm-grid">
+      {% for space in group.spaces %}
+      <article class="card task-space-card">
+        <p class="space-key">{{ space.key }}</p>
+        <h3><a href="{{ url_for('tasks.space_detail', space_id=space.id) }}">{{ space.name }}</a></h3>
+        <p class="muted text-body">{{ space.description }}</p>
+        <div class="task-mini-metrics">
+          <div><strong>{{ space.summary.open_count }}</strong><span>Open</span></div>
+          <div><strong>{{ space.summary.closed_count }}</strong><span>Closed</span></div>
+          <div><strong>{{ space.summary.overdue_count }}</strong><span>Overdue</span></div>
+        </div>
+        <a class="btn btn-secondary" href="{{ url_for('tasks.space_detail', space_id=space.id) }}">Open Board</a>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <article class="card">
+    <h3>No task spaces yet</h3>
+    <p class="muted">Create the first space to start grouping related work.</p>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}
