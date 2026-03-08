@@ -8,6 +8,38 @@
 </p>
 
 <section class="card">
+  <h2>Add Journal Entry</h2>
+  <form method="post" action="{{ url_for('web.analytics_journal_create_form') }}" class="grid-form">
+    <div class="grid-two">
+      <label>Farm
+        <select name="farm_id" required>
+          <option value="">Choose farm</option>
+          {% for farm in filter_options.farms %}
+          <option value="{{ farm.id }}" {% if selected_filters.farm_id == farm.id %}selected{% endif %}>
+            {{ farm.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Date & Time
+        <input type="datetime-local" name="event_at" value="{{ journal_new_entry_event_at }}" />
+      </label>
+    </div>
+    <label>Tags (comma separated)
+      <input name="tags" placeholder="e.g. planning, supplementation, labour" required />
+    </label>
+    <label>Long Description
+      <textarea name="description" rows="6" placeholder="Detailed journal note..." required></textarea>
+    </label>
+    <input type="hidden" name="return_farm_id" value="{{ selected_filters.farm_id }}" />
+    <input type="hidden" name="return_tag" value="{{ selected_filters.tag }}" />
+    <input type="hidden" name="return_start_date" value="{{ start_date }}" />
+    <input type="hidden" name="return_end_date" value="{{ end_date }}" />
+    <button type="submit" class="btn">Save Journal Entry</button>
+  </form>
+</section>
+
+<section class="card">
   <h2>Filters</h2>
   <form method="get" action="{{ url_for('web.analytics_journal') }}" class="grid-form">
     <div class="grid-two">

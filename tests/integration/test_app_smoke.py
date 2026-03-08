@@ -5,6 +5,7 @@ from app.models import (
     AnimalGroupBalance,
     AnimalGroupType,
     Farm,
+    JournalEntry,
     Mob,
     MobEvent,
     MovementEvent,
@@ -46,6 +47,40 @@ def test_analytics_pages_load(client):
     response = client.get("/analytics/journal")
     assert response.status_code == 200
     assert b"Journal" in response.data
+
+
+def test_journal_page_can_create_manual_entry(client, app):
+    with app.app_context():
+        farm = Farm(name="Manual Journal Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    response = client.post(
+        "/analytics/journal",
+        data={
+            "farm_id": farm_id,
+            "event_at": "2026-03-06T09:45",
+            "tags": "planning,feed order",
+            "description": "Ordered supplementary feed and scheduled pickup for Monday.",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        entry = JournalEntry.query.filter_by(farm_id=farm_id).first()
+        assert entry is not None
+        assert "planning" in entry.tags_csv
+        assert "feed order" in entry.tags_csv
+        assert "supplementary feed" in entry.description
+
+    page = client.get(
+        f"/analytics/journal?farm_id={farm_id}&start_date=2026-03-01&end_date=2026-03-10"
+    )
+    assert page.status_code == 200
+    body = page.data.decode("utf-8")
+    assert "Ordered supplementary feed and scheduled pickup for Monday." in body
+    assert "planning" in body
 
 
 def test_stock_tracking_renders_series(client, app):

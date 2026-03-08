@@ -1,6 +1,7 @@
 from app.models.animal_group import AnimalGroupBalance, AnimalGroupType
 from app.models.farm import Farm
 from app.models.grazing import GrazingAllocation, GrazingSession
+from app.models.journal import JournalEntry
 from app.models.mob import Mob
 from app.models.mob_event import MobEvent
 from app.models.movement import MobLineage, MovementEvent, MovementEventMob
@@ -17,6 +18,7 @@ __all__ = [
     "Farm",
     "GrazingAllocation",
     "GrazingSession",
+    "JournalEntry",
     "Mob",
     "MobEvent",
     "MobLineage",

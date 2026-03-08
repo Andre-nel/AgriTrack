@@ -14,6 +14,7 @@ from app.models import (
     Farm,
     GrazingAllocation,
     GrazingSession,
+    JournalEntry,
     Mob,
     MobEvent,
     MovementEvent,
@@ -288,6 +289,30 @@ def _build_analytics_journal_entries(
     entries = []
     start_dt = datetime.combine(start_date, time.min)
     end_dt = datetime.combine(end_date + timedelta(days=1), time.min)
+
+    journal_query = (
+        db.session.query(JournalEntry, Farm.name.label("farm_name"))
+        .join(Farm, JournalEntry.farm_id == Farm.id)
+        .filter(JournalEntry.event_at >= start_dt, JournalEntry.event_at < end_dt)
+    )
+    if farm_id:
+        journal_query = journal_query.filter(JournalEntry.farm_id == farm_id)
+
+    for entry, farm_name in journal_query.all():
+        tags = MobEventService.tags_from_csv(entry.tags_csv)
+        if not tags:
+            tags = _normalize_journal_tags(["journal", f"farm {farm_name}"])
+        entries.append(
+            {
+                "id": f"journal:{entry.id}",
+                "event_at": _normalize_journal_datetime(entry.event_at),
+                "source_label": "Journal",
+                "farm_name": farm_name,
+                "mob_name": "",
+                "tags": tags,
+                "description": entry.description,
+            }
+        )
 
     mob_event_query = (
         db.session.query(MobEvent, Farm.name.label("farm_name"), Mob.name.label("mob_name"))
@@ -888,9 +913,69 @@ def analytics_journal():
         selected_filters=selected_filters,
         start_date=start_date,
         end_date=end_date,
+        journal_new_entry_event_at=datetime.utcnow().strftime("%Y-%m-%dT%H:%M"),
         journal_days=journal_days,
         total_entries=total_entries,
     )
+
+
+@bp.post("/analytics/journal")
+def analytics_journal_create_form():
+    farm_id = (request.form.get("farm_id") or "").strip()
+    tags_raw = request.form.get("tags")
+    description = (request.form.get("description") or "").strip()
+    event_at_raw = (request.form.get("event_at") or "").strip()
+
+    redirect_kwargs = {}
+    return_farm_id = (request.form.get("return_farm_id") or "").strip()
+    return_tag = (request.form.get("return_tag") or "").strip()
+    return_start_date = (request.form.get("return_start_date") or "").strip()
+    return_end_date = (request.form.get("return_end_date") or "").strip()
+    if return_farm_id:
+        redirect_kwargs["farm_id"] = return_farm_id
+    if return_tag:
+        redirect_kwargs["tag"] = return_tag
+    if return_start_date:
+        redirect_kwargs["start_date"] = return_start_date
+    if return_end_date:
+        redirect_kwargs["end_date"] = return_end_date
+
+    farm = Farm.query.filter_by(id=farm_id).first()
+    if not farm:
+        flash("Journal entry farm is required", "error")
+        return redirect(url_for("web.analytics_journal", **redirect_kwargs))
+
+    try:
+        tags = MobEventService.parse_tags(tags_raw)
+        if not description:
+            raise ValueError("Description is required")
+        if len(description) > MobEventService.MAX_DESCRIPTION_LENGTH:
+            raise ValueError(
+                f"Description must be {MobEventService.MAX_DESCRIPTION_LENGTH} characters or fewer"
+            )
+
+        if event_at_raw:
+            event_at = datetime.fromisoformat(event_at_raw)
+            if event_at.tzinfo is None:
+                event_at = event_at.replace(tzinfo=timezone.utc)
+        else:
+            event_at = datetime.now(timezone.utc)
+
+        db.session.add(
+            JournalEntry(
+                farm_id=farm.id,
+                event_at=event_at,
+                tags_csv=MobEventService.tags_to_csv(tags),
+                description=description,
+            )
+        )
+        db.session.commit()
+        flash("Journal entry recorded", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+
+    return redirect(url_for("web.analytics_journal", **redirect_kwargs))
 
 
 @bp.route("/setup", methods=["GET", "POST"])
