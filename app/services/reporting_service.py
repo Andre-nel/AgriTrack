@@ -195,6 +195,64 @@ class ReportingService:
 
         return lsu_days
 
+    @classmethod
+    def paddock_continuous_activity(cls, paddock, *, as_of: datetime | None = None) -> dict:
+        now_dt = cls._normalize_datetime(as_of or datetime.utcnow())
+        rows = (
+            GrazingAllocation.query.join(GrazingSession)
+            .filter(
+                GrazingAllocation.paddock_id == paddock.id,
+                GrazingSession.start_at <= now_dt,
+            )
+            .order_by(GrazingSession.start_at.asc(), GrazingSession.end_at.asc())
+            .all()
+        )
+
+        merged_intervals: list[list[datetime]] = []
+        for allocation in rows:
+            session = allocation.grazing_session
+            interval_start = cls._normalize_datetime(session.start_at)
+            interval_end = cls._normalize_datetime(session.end_at) if session.end_at else now_dt
+            if interval_end > now_dt:
+                interval_end = now_dt
+            if interval_end <= interval_start:
+                continue
+
+            if not merged_intervals or interval_start > merged_intervals[-1][1]:
+                merged_intervals.append([interval_start, interval_end])
+            else:
+                merged_intervals[-1][1] = max(merged_intervals[-1][1], interval_end)
+
+        if merged_intervals and merged_intervals[-1][1] >= now_dt:
+            current_activity_state = "grazed"
+            streak_start = merged_intervals[-1][0]
+        else:
+            current_activity_state = "rested"
+            if merged_intervals:
+                streak_start = merged_intervals[-1][1]
+            else:
+                created_at = getattr(paddock, "created_at", None)
+                streak_start = cls._normalize_datetime(created_at) if created_at else now_dt
+                if streak_start > now_dt:
+                    streak_start = now_dt
+
+        current_activity_days = max(0.0, (now_dt - streak_start).total_seconds() / 86400.0)
+        return {
+            "current_activity_state": current_activity_state,
+            "current_activity_label": (
+                "Days Grazed Continuously"
+                if current_activity_state == "grazed"
+                else "Days Rested Continuously"
+            ),
+            "current_activity_days": current_activity_days,
+            "days_grazed_continuously": (
+                current_activity_days if current_activity_state == "grazed" else None
+            ),
+            "days_rested_continuously": (
+                current_activity_days if current_activity_state == "rested" else None
+            ),
+        }
+
     @staticmethod
     def mob_timeline(mob_id: str, limit: int = 50):
         return (

@@ -666,6 +666,9 @@ def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict)
     )
 
     active = active_snapshot.get(str(paddock.id), {})
+    current_lsu = active.get("current_lsu", 0.0)
+    paddock_ha_per_current_lsu = (area_ha / current_lsu) if current_lsu > 0 else None
+    current_activity = ReportingService.paddock_continuous_activity(paddock)
     return {
         "feature_type": "paddock",
         "farm_id": str(farm.id),
@@ -681,7 +684,17 @@ def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict)
         "grazing_capacity_sdh": _round_float(grazing_capacity_sdh, 4),
         "sdh_used_this_year": _round_float(sdh_used_this_year, 4),
         "grazing_pressure_ratio": _round_float(grazing_pressure_ratio, 4),
-        "current_lsu": active.get("current_lsu", 0.0),
+        "current_lsu": current_lsu,
+        "paddock_ha_per_current_lsu": _round_float(paddock_ha_per_current_lsu, 2),
+        "current_activity_state": current_activity["current_activity_state"],
+        "current_activity_label": current_activity["current_activity_label"],
+        "current_activity_days": _round_float(current_activity["current_activity_days"], 2),
+        "days_grazed_continuously": _round_float(
+            current_activity["days_grazed_continuously"], 2
+        ),
+        "days_rested_continuously": _round_float(
+            current_activity["days_rested_continuously"], 2
+        ),
         "mobs": active.get("mobs", []),
         "species_heads": active.get("species_heads", []),
     }
@@ -2003,6 +2016,10 @@ def paddock_detail(paddock_id):
     grazing_capacity_sdh = (365.0 / effective_stocking_rate) if effective_stocking_rate > 0 else 0.0
 
     current_lsu = ReportingService.paddock_current_lsu_breakdown(paddock_id)
+    current_activity = ReportingService.paddock_continuous_activity(paddock)
+    paddock_ha_per_current_lsu = (
+        area_ha / current_lsu["total_lsu"] if current_lsu["total_lsu"] > 0 else None
+    )
     current_stocking_density = (
         current_lsu["total_lsu"] / effective_area_ha if effective_area_ha > 0 else None
     )
@@ -2078,7 +2095,10 @@ def paddock_detail(paddock_id):
         paddock=paddock,
         stock_summary=stock_summary,
         history=history,
+        area_ha=area_ha,
         current_lsu=current_lsu,
+        current_activity=current_activity,
+        paddock_ha_per_current_lsu=paddock_ha_per_current_lsu,
         effective_stocking_rate=effective_stocking_rate,
         farm_stocking_rate=farm_stocking_rate,
         paddock_override_rate=paddock_override_rate,

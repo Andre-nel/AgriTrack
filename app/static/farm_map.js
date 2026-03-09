@@ -256,13 +256,16 @@
       props.grazing_pressure_ratio === null || props.grazing_pressure_ratio === undefined
         ? "-"
         : formatNumber(props.grazing_pressure_ratio * 100, 1) + "%";
+    const currentActivityLabel = escapeHtml(props.current_activity_label || "Current Activity");
 
     return [
       farmLine,
       "<strong>" + name + "</strong>",
       '<table class="map-popup-table">',
-      "<tr><td>Status</td><td>" + escapeHtml(props.status || "-") + "</td></tr>",
+      "<tr><td>" + currentActivityLabel + "</td><td>" + formatNumber(props.current_activity_days, 1) + "</td></tr>",
+      "<tr><td>Paddock Area (ha)</td><td>" + formatNumber(props.area_ha, 2) + "</td></tr>",
       "<tr><td>Current LSU</td><td>" + formatNumber(props.current_lsu, 2) + "</td></tr>",
+      "<tr><td>Grazing Intensity (Hectares/LSU)</td><td>" + formatNumber(props.paddock_ha_per_current_lsu, 2) + "</td></tr>",
       "<tr><td>Used SDH</td><td>" + formatNumber(props.sdh_used_this_year, 3) + "</td></tr>",
       "<tr><td>Capacity SDH</td><td>" + formatNumber(props.grazing_capacity_sdh, 3) + "</td></tr>",
       "<tr><td>Pressure</td><td>" + pressureText + "</td></tr>",

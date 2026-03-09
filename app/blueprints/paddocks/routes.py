@@ -65,12 +65,16 @@ def create_paddock():
 @bp.get("/<paddock_id>")
 def get_paddock(paddock_id):
     paddock = Paddock.query.get_or_404(paddock_id)
+    area_ha = float(paddock.area_ha or 0)
+    current_lsu = ReportingService.paddock_current_lsu_breakdown(paddock_id)["total_lsu"]
+    paddock_ha_per_current_lsu = (area_ha / current_lsu) if current_lsu > 0 else None
+    current_activity = ReportingService.paddock_continuous_activity(paddock)
     return jsonify(
         {
             "id": str(paddock.id),
             "farm_id": paddock.farm_id,
             "name": paddock.name,
-            "area_ha": float(paddock.area_ha),
+            "area_ha": area_ha,
             "grazeable_area_ha": float(paddock.grazeable_area_ha),
             "status": paddock.status,
             "stocking_rate_ha_per_lsu_override": (
@@ -80,6 +84,25 @@ def get_paddock(paddock_id):
             ),
             "effective_stocking_rate_ha_per_lsu": float(
                 paddock.stocking_rate_ha_per_lsu_override or paddock.farm.default_stocking_rate_ha_per_lsu
+            ),
+            "current_lsu": round(current_lsu, 3),
+            "paddock_ha_per_current_lsu": (
+                round(paddock_ha_per_current_lsu, 2)
+                if paddock_ha_per_current_lsu is not None
+                else None
+            ),
+            "current_activity_state": current_activity["current_activity_state"],
+            "current_activity_label": current_activity["current_activity_label"],
+            "current_activity_days": round(current_activity["current_activity_days"], 2),
+            "days_grazed_continuously": (
+                round(current_activity["days_grazed_continuously"], 2)
+                if current_activity["days_grazed_continuously"] is not None
+                else None
+            ),
+            "days_rested_continuously": (
+                round(current_activity["days_rested_continuously"], 2)
+                if current_activity["days_rested_continuously"] is not None
+                else None
             ),
         }
     )

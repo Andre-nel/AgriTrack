@@ -1,20 +1,50 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from app.extensions import db
 from app.models import (
     AnimalGroupBalance,
     AnimalGroupType,
     Farm,
+    GrazingAllocation,
+    GrazingSession,
     JournalEntry,
     Mob,
     MobEvent,
     MovementEvent,
     MovementEventMob,
+    Paddock,
     RainfallRecord,
     StockLedgerEntry,
 )
 from app.models.movement import MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
+
+
+def _write_farm_kml(app, farm_name: str, placemark_name: str):
+    maps_dir = Path(app.instance_path) / "maps"
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    (maps_dir / f"{farm_name}.kml").write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>{placemark_name}</name>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              25.0000,-32.0000,0 25.0100,-32.0000,0 25.0100,-32.0100,0 25.0000,-32.0100,0 25.0000,-32.0000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>
+""",
+        encoding="utf-8",
+    )
 
 
 def test_health_endpoint(client):
@@ -267,6 +297,124 @@ def test_journal_aggregates_entries_with_original_and_auto_tags(client, app):
     filtered_body = filtered.data.decode("utf-8")
     assert "Vaccinated and weighed goats." in filtered_body
     assert "Manual stock correction after counting." not in filtered_body
+
+
+def test_paddock_api_includes_rest_days_and_area_per_current_lsu(client, app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        farm = Farm(name="Rest Metrics Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+
+        paddock = Paddock(farm_id=farm.id, name="Rest Camp", area_ha=15, grazeable_area_ha=12)
+        db.session.add(paddock)
+        db.session.flush()
+
+        mob = Mob(farm_id=farm.id, name="Rest Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=now - timedelta(days=9),
+            end_at=now - timedelta(days=4),
+        )
+        db.session.add(session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=session.id,
+                paddock_id=paddock.id,
+                allocation_fraction=1,
+            )
+        )
+        db.session.commit()
+        paddock_id = str(paddock.id)
+
+    response = client.get(f"/api/paddocks/{paddock_id}")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_activity_state"] == "rested"
+    assert payload["current_activity_label"] == "Days Rested Continuously"
+    assert payload["current_activity_days"] > 3.9
+    assert payload["days_grazed_continuously"] is None
+    assert payload["days_rested_continuously"] > 3.9
+    assert payload["current_lsu"] == 0.0
+    assert payload["paddock_ha_per_current_lsu"] is None
+
+
+def test_paddock_page_and_map_data_show_grazed_days_and_area_per_current_lsu(client, app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        farm = Farm(name="Mapped Metrics Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        farm_id = str(farm.id)
+
+        paddock = Paddock(farm_id=farm.id, name="North 1", area_ha=12, grazeable_area_ha=10)
+        db.session.add(paddock)
+        db.session.flush()
+        paddock_id = str(paddock.id)
+
+        mob = Mob(farm_id=farm.id, name="Map Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+
+        group = AnimalGroupType(species="Cattle", breed="Angus", sex="cow", age_class="adult")
+        db.session.add(group)
+        db.session.flush()
+
+        db.session.add(
+            AnimalGroupBalance(
+                mob_id=mob.id,
+                animal_group_type_id=group.id,
+                head_count=6,
+            )
+        )
+
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=now - timedelta(days=3),
+            end_at=None,
+        )
+        db.session.add(session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=session.id,
+                paddock_id=paddock.id,
+                allocation_fraction=1,
+            )
+        )
+        db.session.commit()
+
+    _write_farm_kml(app, "Mapped Metrics Farm", "North 1")
+
+    response = client.get(f"/paddocks/{paddock_id}")
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "Days Grazed Continuously" in body
+    assert "Paddock Area (ha)" in body
+    assert "Grazing Intensity (Hectares/LSU)" in body
+    assert "Current total LSU on paddock: 6.00" in body
+    assert ">12.00<" in body
+    assert ">2.00<" in body
+
+    response = client.get(f"/farms/{farm_id}/map-data")
+    assert response.status_code == 200
+    payload = response.get_json()
+    feature = next(item for item in payload["features"] if item["properties"]["name"] == "North 1")
+    properties = feature["properties"]
+    assert properties["current_activity_state"] == "grazed"
+    assert properties["current_activity_label"] == "Days Grazed Continuously"
+    assert properties["current_activity_days"] > 2.9
+    assert properties["days_grazed_continuously"] > 2.9
+    assert properties["days_rested_continuously"] is None
+    assert properties["area_ha"] == 12.0
+    assert properties["paddock_ha_per_current_lsu"] == 2.0
+    assert properties["current_lsu"] == 6.0
 
 
 def test_mob_balance_edit_reclassifies_and_records_change(client, app):
