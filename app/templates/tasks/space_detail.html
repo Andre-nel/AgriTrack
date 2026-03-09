@@ -14,7 +14,9 @@
   </div>
   <div class="task-summary-grid">
     <div><span>Tasks</span><strong>{{ summary.task_count }}</strong></div>
-    <div><span>Open</span><strong>{{ summary.open_count }}</strong></div>
+    <div><span>TO DO</span><strong>{{ summary.todo_count }}</strong></div>
+    <div><span>Open</span><strong>{{ summary.active_open_count }}</strong></div>
+    <div><span>Impeded</span><strong>{{ summary.impeded_count }}</strong></div>
     <div><span>Closed</span><strong>{{ summary.closed_count }}</strong></div>
     <div><span>Overdue</span><strong>{{ summary.overdue_count }}</strong></div>
   </div>
@@ -108,34 +110,39 @@
         <span class="count-pill">{{ column.count }}</span>
       </div>
       {% for task in column.tasks %}
-      <article class="task-card">
-        <div class="task-card-topline">
-          <a class="task-key" href="{{ url_for('tasks.task_detail', task_id=task.id) }}">{{ task.display_key }}</a>
-          <span class="priority-pill priority-{{ task.priority }}">{{ task.priority_label }}</span>
-        </div>
-        <h4><a href="{{ url_for('tasks.task_detail', task_id=task.id) }}">{{ task.heading }}</a></h4>
-        <p class="text-body task-card-text">{{ task.description }}</p>
-        <div class="task-chip-row">
-          <span class="status-pill status-{{ task.status }}">{{ task.status_label }}</span>
-          {% if task.is_overdue %}
-          <span class="priority-pill priority-high">Overdue</span>
+      <details class="task-card">
+        <summary class="task-card-summary">
+          <span class="task-card-title">{{ task.heading }}</span>
+        </summary>
+        <div class="task-card-details">
+          <div class="task-card-topline">
+            <a class="task-key" href="{{ url_for('tasks.task_detail', task_id=task.id) }}">{{ task.display_key }}</a>
+            <span class="priority-pill priority-{{ task.priority }}">{{ task.priority_label }}</span>
+          </div>
+          <p class="text-body task-card-text">{{ task.description }}</p>
+          <div class="task-chip-row">
+            <span class="status-pill status-{{ task.status }}">{{ task.status_label }}</span>
+            {% if task.is_overdue %}
+            <span class="priority-pill priority-high">Overdue</span>
+            {% endif %}
+            {% for tag in task.tags %}
+            <span class="tag-pill">{{ tag }}</span>
+            {% endfor %}
+          </div>
+          <dl class="task-meta-compact">
+            <div><dt>Assignee</dt><dd>{{ task.assignee_name or "-" }}</dd></div>
+            <div><dt>Reporter</dt><dd>{{ task.reporter_name }}</dd></div>
+            <div><dt>Due</dt><dd>{{ task.due_date or "-" }}</dd></div>
+            <div><dt>Estimate</dt><dd>{{ task.original_estimate_days or "-" }}</dd></div>
+            <div><dt>Start</dt><dd>{{ task.started_at or "-" }}</dd></div>
+            <div><dt>End</dt><dd>{{ task.closed_at or "-" }}</dd></div>
+          </dl>
+          {% if task.duration %}
+          <p class="muted">Duration: {{ task.duration }}</p>
           {% endif %}
-          {% for tag in task.tags %}
-          <span class="tag-pill">{{ tag }}</span>
-          {% endfor %}
+          <a class="btn btn-secondary task-card-link" href="{{ url_for('tasks.task_detail', task_id=task.id) }}">Open Task</a>
         </div>
-        <dl class="task-meta-compact">
-          <div><dt>Assignee</dt><dd>{{ task.assignee_name or "-" }}</dd></div>
-          <div><dt>Reporter</dt><dd>{{ task.reporter_name }}</dd></div>
-          <div><dt>Due</dt><dd>{{ task.due_date or "-" }}</dd></div>
-          <div><dt>Estimate</dt><dd>{{ task.original_estimate_days or "-" }}</dd></div>
-          <div><dt>Start</dt><dd>{{ task.started_at or "-" }}</dd></div>
-          <div><dt>End</dt><dd>{{ task.closed_at or "-" }}</dd></div>
-        </dl>
-        {% if task.duration %}
-        <p class="muted">Duration: {{ task.duration }}</p>
-        {% endif %}
-      </article>
+      </details>
       {% else %}
       <div class="task-empty-state">No tasks in this status.</div>
       {% endfor %}

@@ -7,10 +7,11 @@
 </section>
 
 <div class="cards">
-  <article class="card stat"><h2>Spaces</h2><p>{{ summary.space_count }}</p></article>
-  <article class="card stat"><h2>Open Tasks</h2><p>{{ summary.open_task_count }}</p></article>
-  <article class="card stat"><h2>Impeded</h2><p>{{ summary.impeded_task_count }}</p></article>
-  <article class="card stat"><h2>Overdue</h2><p>{{ summary.overdue_task_count }}</p></article>
+  <article class="card stat"><h2>TO DO</h2><p>{{ summary.todo_count }}</p></article>
+  <article class="card stat"><h2>Open</h2><p>{{ summary.active_open_count }}</p></article>
+  <article class="card stat"><h2>Impeded</h2><p>{{ summary.impeded_count }}</p></article>
+  <article class="card stat"><h2>Closed</h2><p>{{ summary.closed_count }}</p></article>
+  <article class="card stat"><h2>Overdue</h2><p>{{ summary.overdue_count }}</p></article>
 </div>
 
 <section class="split">
@@ -74,7 +75,9 @@
         <h3><a href="{{ url_for('tasks.space_detail', space_id=space.id) }}">{{ space.name }}</a></h3>
         <p class="muted text-body">{{ space.description }}</p>
         <div class="task-mini-metrics">
-          <div><strong>{{ space.summary.open_count }}</strong><span>Open</span></div>
+          <div><strong>{{ space.summary.todo_count }}</strong><span>TO DO</span></div>
+          <div><strong>{{ space.summary.active_open_count }}</strong><span>Open</span></div>
+          <div><strong>{{ space.summary.impeded_count }}</strong><span>Impeded</span></div>
           <div><strong>{{ space.summary.closed_count }}</strong><span>Closed</span></div>
           <div><strong>{{ space.summary.overdue_count }}</strong><span>Overdue</span></div>
         </div>

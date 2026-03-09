@@ -17,6 +17,7 @@ from app.services.task_service import (
 )
 
 bp = Blueprint("tasks", __name__)
+TASK_SUMMARY_OPEN_STATUSES = {"selected_for_execution", "in_progress", "ready_for_verification"}
 
 
 def _space_redirect(space: TaskSpace):
@@ -100,6 +101,8 @@ def _build_task_card(task: Task, tz_name: str) -> dict:
 def _build_space_summary(tasks: list[Task], tz_name: str) -> dict:
     return {
         "open_count": len([task for task in tasks if task.status != "closed"]),
+        "todo_count": len([task for task in tasks if task.status == "todo"]),
+        "active_open_count": len([task for task in tasks if task.status in TASK_SUMMARY_OPEN_STATUSES]),
         "closed_count": len([task for task in tasks if task.status == "closed"]),
         "overdue_count": len([task for task in tasks if TaskService.is_task_overdue(task, tz_name=tz_name)]),
         "impeded_count": len([task for task in tasks if task.status == "impeded"]),
@@ -166,17 +169,21 @@ def index():
     grouped = defaultdict(list)
     summary = {
         "space_count": 0,
-        "open_task_count": 0,
-        "impeded_task_count": 0,
-        "overdue_task_count": 0,
+        "todo_count": 0,
+        "active_open_count": 0,
+        "impeded_count": 0,
+        "closed_count": 0,
+        "overdue_count": 0,
     }
     for space in spaces:
         card = _build_space_card(space)
         grouped[space.farm.name if space.farm else "Unassigned"].append(card)
         summary["space_count"] += 1
-        summary["open_task_count"] += card["summary"]["open_count"]
-        summary["impeded_task_count"] += card["summary"]["impeded_count"]
-        summary["overdue_task_count"] += card["summary"]["overdue_count"]
+        summary["todo_count"] += card["summary"]["todo_count"]
+        summary["active_open_count"] += card["summary"]["active_open_count"]
+        summary["impeded_count"] += card["summary"]["impeded_count"]
+        summary["closed_count"] += card["summary"]["closed_count"]
+        summary["overdue_count"] += card["summary"]["overdue_count"]
 
     grouped_spaces = [
         {"farm_name": farm_name, "spaces": grouped[farm_name]}

@@ -101,6 +101,8 @@ def test_space_page_can_create_task_and_show_board(client, app):
     assert "Install new fence strainers" in body
     assert "In Progress" in body
     assert "boundary" in body
+    assert 'class="task-card-summary"' in body
+    assert "Open Task" in body
 
     with app.app_context():
         task = Task.query.join(TaskSpace).filter(TaskSpace.key == "BRD").first()
@@ -163,7 +165,19 @@ def test_task_workspace_supports_comments_links_and_counts(client, app):
         farm = _create_farm("Coordination Farm")
         source_space = _create_space(farm, "OPS", "Operations")
         target_space = _create_space(farm, "PLN", "Planning")
-        source_task = _create_task(source_space, "Order fence wire", status="impeded", priority="highest", due_date=overdue_date)
+        source_task = _create_task(
+            source_space,
+            "Order fence wire",
+            status="impeded",
+            priority="highest",
+            due_date=overdue_date,
+        )
+        _create_task(source_space, "Review trough checklist", status="todo")
+        _create_task(source_space, "Load new posts", status="selected_for_execution")
+        _create_task(source_space, "String hotwire", status="in_progress")
+        _create_task(source_space, "Verify gate repair", status="ready_for_verification")
+        closed_task = _create_task(source_space, "Archive supplier follow-up", status="selected_for_execution")
+        TaskService.apply_status_transition(closed_task, "closed", "Reporter")
         target_task = _create_task(target_space, "Approve budget", status="todo")
         db.session.commit()
         source_space_id = str(source_space.id)
@@ -179,6 +193,13 @@ def test_task_workspace_supports_comments_links_and_counts(client, app):
     assert response.status_code == 200
     assert b"Waiting on supplier confirmation." in response.data
     assert b"Overdue" in response.data
+    response_body = response.data.decode("utf-8")
+    assert "<span>Tasks</span><strong>6</strong>" in response_body
+    assert "<span>TO DO</span><strong>1</strong>" in response_body
+    assert "<span>Open</span><strong>3</strong>" in response_body
+    assert "<span>Impeded</span><strong>1</strong>" in response_body
+    assert "<span>Closed</span><strong>1</strong>" in response_body
+    assert "<span>Overdue</span><strong>1</strong>" in response_body
 
     response = client.post(
         f"/tasks/{source_task_id}/comments",
@@ -220,8 +241,16 @@ def test_task_workspace_supports_comments_links_and_counts(client, app):
     landing = client.get("/tasks")
     assert landing.status_code == 200
     landing_body = landing.data.decode("utf-8")
+    assert "<h2>TO DO</h2><p>2</p>" in landing_body
+    assert "<h2>Open</h2><p>3</p>" in landing_body
     assert "<h2>Impeded</h2><p>1</p>" in landing_body
+    assert "<h2>Closed</h2><p>1</p>" in landing_body
     assert "<h2>Overdue</h2><p>1</p>" in landing_body
+    assert "<strong>1</strong><span>TO DO</span>" in landing_body
+    assert "<strong>3</strong><span>Open</span>" in landing_body
+    assert "<strong>1</strong><span>Impeded</span>" in landing_body
+    assert "<strong>1</strong><span>Closed</span>" in landing_body
+    assert "<strong>1</strong><span>Overdue</span>" in landing_body
 
 
 def test_task_workspace_validation_errors_are_reported(client, app):
