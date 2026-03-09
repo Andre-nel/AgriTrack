@@ -314,6 +314,17 @@ def test_paddock_api_includes_rest_days_and_area_per_current_lsu(client, app):
         db.session.add(mob)
         db.session.flush()
 
+        group = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add(group)
+        db.session.flush()
+        db.session.add(
+            AnimalGroupBalance(
+                mob_id=mob.id,
+                animal_group_type_id=group.id,
+                head_count=10,
+            )
+        )
+
         session = GrazingSession(
             farm_id=farm.id,
             mob_id=mob.id,
@@ -342,6 +353,83 @@ def test_paddock_api_includes_rest_days_and_area_per_current_lsu(client, app):
     assert payload["days_rested_continuously"] > 3.9
     assert payload["current_lsu"] == 0.0
     assert payload["paddock_ha_per_current_lsu"] is None
+
+
+def test_zero_lsu_allocations_do_not_mark_paddock_as_grazed(client, app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        farm = Farm(name="Zero LSU Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+
+        paddock = Paddock(farm_id=farm.id, name="Quiet Camp", area_ha=10, grazeable_area_ha=8)
+        db.session.add(paddock)
+        db.session.flush()
+
+        grazed_mob = Mob(farm_id=farm.id, name="Historic Mob", status="active")
+        db.session.add(grazed_mob)
+        db.session.flush()
+
+        group = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add(group)
+        db.session.flush()
+
+        db.session.add(
+            AnimalGroupBalance(
+                mob_id=grazed_mob.id,
+                animal_group_type_id=group.id,
+                head_count=12,
+            )
+        )
+
+        grazed_session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=grazed_mob.id,
+            start_at=now - timedelta(days=9),
+            end_at=now - timedelta(days=4),
+        )
+        db.session.add(grazed_session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=grazed_session.id,
+                paddock_id=paddock.id,
+                allocation_fraction=1,
+            )
+        )
+
+        archived_mob = Mob(farm_id=farm.id, name="Deprecated Mob", status="archived")
+        db.session.add(archived_mob)
+        db.session.flush()
+
+        zero_lsu_session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=archived_mob.id,
+            start_at=now - timedelta(days=2),
+            end_at=None,
+        )
+        db.session.add(zero_lsu_session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=zero_lsu_session.id,
+                paddock_id=paddock.id,
+                allocation_fraction=1,
+            )
+        )
+
+        db.session.commit()
+        paddock_id = str(paddock.id)
+
+    response = client.get(f"/api/paddocks/{paddock_id}")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["current_lsu"] == 0.0
+    assert payload["current_activity_state"] == "rested"
+    assert payload["current_activity_label"] == "Days Rested Continuously"
+    assert payload["current_activity_days"] > 3.9
+    assert payload["days_grazed_continuously"] is None
+    assert payload["days_rested_continuously"] > 3.9
 
 
 def test_paddock_page_and_map_data_show_grazed_days_and_area_per_current_lsu(client, app):
@@ -397,7 +485,7 @@ def test_paddock_page_and_map_data_show_grazed_days_and_area_per_current_lsu(cli
     body = response.data.decode("utf-8")
     assert "Days Grazed Continuously" in body
     assert "Paddock Area (ha)" in body
-    assert "Grazing Intensity (Hectares/LSU)" in body
+    assert "Paddock Hectares per Current LSU" in body
     assert "Current total LSU on paddock: 6.00" in body
     assert ">12.00<" in body
     assert ">2.00<" in body

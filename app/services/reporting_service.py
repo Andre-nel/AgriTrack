@@ -210,6 +210,8 @@ class ReportingService:
 
         merged_intervals: list[list[datetime]] = []
         for allocation in rows:
+            if cls.allocation_lsu(allocation) <= 0.0:
+                continue
             session = allocation.grazing_session
             interval_start = cls._normalize_datetime(session.start_at)
             interval_end = cls._normalize_datetime(session.end_at) if session.end_at else now_dt
