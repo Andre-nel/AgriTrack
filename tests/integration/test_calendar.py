@@ -72,6 +72,8 @@ def test_calendar_page_loads_with_empty_state(client):
     assert response.status_code == 200
     assert b"Calendar" in response.data
     assert b"Create Activity" in response.data
+    assert b"calendar-create-panel" in response.data
+    assert b"calendar-activity-modal" in response.data
 
 
 def test_calendar_can_create_one_off_activity_and_render_in_year_and_month_views(client, app):
@@ -322,6 +324,20 @@ def test_due_dated_tasks_appear_and_activity_shortcut_prefills_new_task_form(cli
         created_task = Task.query.filter(Task.id != task_id, Task.heading == "Ram check").first()
         assert created_task is not None
         assert created_task.due_date.isoformat() == "2026-04-22"
+
+
+def test_month_view_has_day_level_create_activity_button_with_prefilled_date(client, app):
+    with app.app_context():
+        farm = _create_farm("Popup Farm")
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    response = client.get(f"/calendar?view=month&year=2026&month=4&farm_id={farm_id}")
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert 'data-open-activity-modal' in body
+    assert 'data-start-date="2026-04-01"' in body
+    assert 'id="calendar-activity-modal-form"' in body
 
 
 def test_year_view_hover_text_includes_day_item_names(client, app):

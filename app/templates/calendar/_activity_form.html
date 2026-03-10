@@ -1,0 +1,55 @@
+{% macro render_activity_form(form_state, farms, repeat_units, selected_view, selected_year, selected_month, selected_date, form_id="", form_class="grid-form", submit_label="Create Activity", sync_selected_date=true) -%}
+<form
+  method="post"
+  action="{{ url_for('calendar.create_activity') }}"
+  class="{{ form_class }}"
+  {% if form_id %}id="{{ form_id }}"{% endif %}
+  data-activity-form
+>
+  <input type="hidden" name="view" value="{{ selected_view }}" />
+  <input type="hidden" name="year" value="{{ selected_year }}" />
+  <input type="hidden" name="month" value="{{ selected_month }}" />
+  <input
+    type="hidden"
+    name="selected_date"
+    value="{{ selected_date.isoformat() if selected_date else form_state.start_date }}"
+    {% if sync_selected_date %}data-selected-date-input{% endif %}
+  />
+  <label>Farm
+    <select name="farm_id" required>
+      <option value="">Choose farm</option>
+      {% for farm in farms %}
+      <option value="{{ farm.id }}" {% if form_state.farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Title
+    <input name="title" value="{{ form_state.title }}" placeholder="Vaccination round, drench, scanning..." required />
+  </label>
+  <label>Description
+    <textarea name="description" rows="5" placeholder="Optional planning detail, notes, or constraints.">{{ form_state.description }}</textarea>
+  </label>
+  <div class="grid-two">
+    <label>Start Date
+      <input type="date" name="start_date" value="{{ form_state.start_date }}" required data-start-date-input />
+    </label>
+    <label>Repeat Every
+      <input type="number" min="1" name="repeat_interval" value="{{ form_state.repeat_interval }}" placeholder="Leave blank for one-off" />
+    </label>
+  </div>
+  <div class="grid-two">
+    <label>Repeat Unit
+      <select name="repeat_unit">
+        <option value="">No recurrence</option>
+        {% for unit in repeat_units %}
+        <option value="{{ unit }}" {% if form_state.repeat_unit == unit %}selected{% endif %}>{{ unit|title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Repeat Until
+      <input type="date" name="repeat_until" value="{{ form_state.repeat_until }}" />
+    </label>
+  </div>
+  <button type="submit" class="btn">{{ submit_label }}</button>
+</form>
+{%- endmacro %}

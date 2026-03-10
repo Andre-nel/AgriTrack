@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "calendar/_activity_form.html" import render_activity_form %}
 {% block title %}Calendar | AgriTrack{% endblock %}
 {% block content %}
 <section class="hero">
@@ -67,53 +68,24 @@
     </form>
   </article>
 
-  <article class="card">
-    <h2>Create Activity</h2>
-    <form method="post" action="{{ url_for('calendar.create_activity') }}" class="grid-form">
-      <input type="hidden" name="view" value="{{ selected_view }}" />
-      <input type="hidden" name="year" value="{{ selected_year }}" />
-      <input type="hidden" name="month" value="{{ selected_month }}" />
-      {% if selected_date %}
-      <input type="hidden" name="selected_date" value="{{ selected_date.isoformat() }}" />
-      {% endif %}
-      <label>Farm
-        <select name="farm_id" required>
-          <option value="">Choose farm</option>
-          {% for farm in farms %}
-          <option value="{{ farm.id }}" {% if create_activity_defaults.farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Title
-        <input name="title" value="{{ create_activity_defaults.title }}" placeholder="Vaccination round, drench, scanning..." required />
-      </label>
-      <label>Description
-        <textarea name="description" rows="5" placeholder="Optional planning detail, notes, or constraints.">{{ create_activity_defaults.description }}</textarea>
-      </label>
-      <div class="grid-two">
-        <label>Start Date
-          <input type="date" name="start_date" value="{{ create_activity_defaults.start_date }}" required />
-        </label>
-        <label>Repeat Every
-          <input type="number" min="1" name="repeat_interval" value="{{ create_activity_defaults.repeat_interval }}" placeholder="Leave blank for one-off" />
-        </label>
-      </div>
-      <div class="grid-two">
-        <label>Repeat Unit
-          <select name="repeat_unit">
-            <option value="">No recurrence</option>
-            {% for unit in repeat_units %}
-            <option value="{{ unit }}" {% if create_activity_defaults.repeat_unit == unit %}selected{% endif %}>{{ unit|title }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>Repeat Until
-          <input type="date" name="repeat_until" value="{{ create_activity_defaults.repeat_until }}" />
-        </label>
-      </div>
-      <button type="submit" class="btn">Create Activity</button>
-    </form>
-  </article>
+  <details class="card calendar-create-panel">
+    <summary class="calendar-create-panel-summary">
+      <span>Create Activity</span>
+      <span class="muted">Open planner form</span>
+    </summary>
+    <div class="calendar-create-panel-body">
+      <p class="muted">Open this to create a one-off or recurring activity without using the day popup.</p>
+      {{ render_activity_form(
+        create_activity_defaults,
+        farms,
+        repeat_units,
+        selected_view,
+        selected_year,
+        selected_month,
+        selected_date
+      ) }}
+    </div>
+  </details>
 </section>
 
 {% if selected_view == "year" %}
@@ -166,7 +138,17 @@
       <div class="calendar-day-header">
         <a class="calendar-day-link" href="{{ day.month_url }}">{{ day.day_number }}</a>
         {% if day.in_month %}
-        <a class="btn btn-secondary calendar-create-link" href="{{ day.create_task_url }}">Create Task</a>
+        <div class="calendar-day-actions">
+          <button
+            type="button"
+            class="btn btn-secondary calendar-create-link"
+            data-open-activity-modal
+            data-start-date="{{ day.date.isoformat() }}"
+          >
+            Create Activity
+          </button>
+          <a class="btn btn-secondary calendar-create-link" href="{{ day.create_task_url }}">Create Task</a>
+        </div>
         {% endif %}
       </div>
       <div class="calendar-entry-list">
@@ -189,4 +171,118 @@
   </div>
 </section>
 {% endif %}
+
+<dialog id="calendar-activity-modal" class="calendar-activity-modal">
+  <div class="calendar-modal-header">
+    <div>
+      <p class="space-key">Quick Plan</p>
+      <h2>Create Activity</h2>
+      <p class="muted">Start date: <span data-modal-start-date>{{ create_activity_defaults.start_date }}</span></p>
+    </div>
+    <button type="button" class="btn btn-secondary" data-close-activity-modal>Close</button>
+  </div>
+  {{ render_activity_form(
+    create_activity_defaults,
+    farms,
+    repeat_units,
+    selected_view,
+    selected_year,
+    selected_month,
+    selected_date,
+    form_id="calendar-activity-modal-form"
+  ) }}
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+  (() => {
+    const syncSelectedDate = (form) => {
+      const startDateInput = form.querySelector("[data-start-date-input]");
+      const selectedDateInput = form.querySelector("[data-selected-date-input]");
+      if (!startDateInput || !selectedDateInput) {
+        return;
+      }
+
+      const sync = () => {
+        selectedDateInput.value = startDateInput.value;
+      };
+
+      startDateInput.addEventListener("change", sync);
+      startDateInput.addEventListener("input", sync);
+    };
+
+    document.querySelectorAll("[data-activity-form]").forEach(syncSelectedDate);
+
+    const dialog = document.getElementById("calendar-activity-modal");
+    if (!dialog) {
+      return;
+    }
+
+    const modalForm = dialog.querySelector("form");
+    const modalStartDate = dialog.querySelector("[data-start-date-input]");
+    const modalSelectedDate = dialog.querySelector("[data-selected-date-input]");
+    const modalDateLabel = dialog.querySelector("[data-modal-start-date]");
+
+    const setModalDate = (value) => {
+      if (!modalForm || !modalStartDate || !modalSelectedDate || !value) {
+        return;
+      }
+      modalStartDate.value = value;
+      modalSelectedDate.value = value;
+      if (modalDateLabel) {
+        modalDateLabel.textContent = value;
+      }
+    };
+
+    if (modalStartDate) {
+      modalStartDate.addEventListener("change", () => {
+        if (modalDateLabel) {
+          modalDateLabel.textContent = modalStartDate.value;
+        }
+      });
+      modalStartDate.addEventListener("input", () => {
+        if (modalDateLabel) {
+          modalDateLabel.textContent = modalStartDate.value;
+        }
+      });
+    }
+
+    document.querySelectorAll("[data-open-activity-modal]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setModalDate(button.dataset.startDate);
+        if (typeof dialog.showModal === "function") {
+          dialog.showModal();
+        } else {
+          dialog.setAttribute("open", "open");
+        }
+      });
+    });
+
+    dialog.querySelectorAll("[data-close-activity-modal]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (typeof dialog.close === "function") {
+          dialog.close();
+        } else {
+          dialog.removeAttribute("open");
+        }
+      });
+    });
+
+    dialog.addEventListener("click", (event) => {
+      const rect = dialog.getBoundingClientRect();
+      const inside =
+        rect.top <= event.clientY &&
+        event.clientY <= rect.top + rect.height &&
+        rect.left <= event.clientX &&
+        event.clientX <= rect.left + rect.width;
+      if (!inside) {
+        if (typeof dialog.close === "function") {
+          dialog.close();
+        } else {
+          dialog.removeAttribute("open");
+        }
+      }
+    });
+  })();
+</script>
 {% endblock %}
