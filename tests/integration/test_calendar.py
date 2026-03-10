@@ -322,3 +322,19 @@ def test_due_dated_tasks_appear_and_activity_shortcut_prefills_new_task_form(cli
         created_task = Task.query.filter(Task.id != task_id, Task.heading == "Ram check").first()
         assert created_task is not None
         assert created_task.due_date.isoformat() == "2026-04-22"
+
+
+def test_year_view_hover_text_includes_day_item_names(client, app):
+    with app.app_context():
+        farm = _create_farm("Hover Farm")
+        space = _create_space(farm, "HOV", "Hover Space")
+        _create_activity(farm, title="Shearing prep", start_date=date(2026, 6, 12))
+        _create_task(space, "Book shearers", date(2026, 6, 12))
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    response = client.get(f"/calendar?view=year&year=2026&farm_id={farm_id}")
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert 'title="Activity: Shearing prep' in body
+    assert "TO DO: Book shearers" in body

@@ -131,7 +131,11 @@
     <div class="calendar-mini-grid">
       {% for week in month.weeks %}
       {% for day in week %}
-      <a class="calendar-day calendar-day-mini {% if not day.in_month %}is-outside{% endif %} {% if day.is_selected %}is-selected{% endif %}" href="{{ day.month_url }}">
+      <a
+        class="calendar-day calendar-day-mini {% if not day.in_month %}is-outside{% endif %} {% if day.is_selected %}is-selected{% endif %}"
+        href="{{ day.month_url }}"
+        {% if day["hover_text"] %}title="{{ day['hover_text'] }}"{% endif %}
+      >
         <span class="calendar-day-number">{{ day.day_number }}</span>
         <div class="calendar-mini-list">
           {% for item in day["items"] %}

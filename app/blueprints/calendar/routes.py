@@ -107,8 +107,8 @@ def _build_day_cell(
     selected_date: date | None,
     mini_mode: bool,
 ) -> dict:
-    items = item_lookup.get(day, [])
-    visible_items = items[:2] if mini_mode else items
+    all_items = item_lookup.get(day, [])
+    visible_items = all_items[:2] if mini_mode else all_items
     create_task_url = url_for(
         "tasks.new_task_page",
         due_date=day.isoformat(),
@@ -120,7 +120,9 @@ def _build_day_cell(
         "in_month": day.month == display_month,
         "is_selected": selected_date == day,
         "items": visible_items,
-        "overflow_count": max(len(items) - len(visible_items), 0),
+        "all_items": all_items,
+        "hover_text": "\n".join(f"{item['badge_text']}: {item['title']}" for item in all_items),
+        "overflow_count": max(len(all_items) - len(visible_items), 0),
         "month_url": _calendar_url(
             view="month",
             year=day.year,
