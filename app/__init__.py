@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, render_template, request
 
 from app.api.v1.routes import bp as api_v1_bp
+from app.blueprints.calendar.routes import bp as calendar_bp
 from app.blueprints.farms.routes import bp as farms_api_bp
 from app.blueprints.mobs.routes import bp as mobs_api_bp
 from app.blueprints.paddocks.routes import bp as paddocks_api_bp
@@ -22,6 +23,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
 
     app.register_blueprint(web_bp)
     app.register_blueprint(tasks_bp)
+    app.register_blueprint(calendar_bp)
     app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
 
     # Backward-compatible API prefixes.

@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Calendar | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Calendar</h1>
+  <p>Plan the year, schedule predictable work, and keep due-dated tasks visible alongside recurring activities.</p>
+</section>
+
+<section class="card calendar-toolbar">
+  <div>
+    <p class="space-key">Planner</p>
+    <h2>{{ page_heading }}</h2>
+  </div>
+  <div class="calendar-toolbar-actions">
+    <a class="btn btn-secondary" href="{{ previous_url }}">Previous</a>
+    <a class="btn btn-secondary" href="{{ next_url }}">Next</a>
+    <div class="calendar-view-links">
+      <a class="btn {% if selected_view != 'year' %}btn-secondary{% endif %}" href="{{ switch_to_year_url }}">Year</a>
+      <a class="btn {% if selected_view != 'month' %}btn-secondary{% endif %}" href="{{ switch_to_month_url }}">Month</a>
+    </div>
+  </div>
+</section>
+
+<div class="cards">
+  <article class="card stat"><h2>Activities</h2><p>{{ stats.activity_count }}</p></article>
+  <article class="card stat"><h2>Recurring Series</h2><p>{{ stats.recurring_series_count }}</p></article>
+  <article class="card stat"><h2>Dated Tasks</h2><p>{{ stats.task_count }}</p></article>
+  <article class="card stat"><h2>Total Items</h2><p>{{ stats.total_count }}</p></article>
+</div>
+
+<section class="split">
+  <article class="card">
+    <h2>Filters</h2>
+    <form method="get" action="{{ url_for('calendar.index') }}" class="grid-form">
+      <div class="grid-two">
+        <label>View
+          <select name="view">
+            <option value="year" {% if selected_view == "year" %}selected{% endif %}>Year</option>
+            <option value="month" {% if selected_view == "month" %}selected{% endif %}>Month</option>
+          </select>
+        </label>
+        <label>Year
+          <input type="number" min="1" max="9999" name="year" value="{{ selected_year }}" />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Month
+          <select name="month">
+            {% for month in month_choices %}
+            <option value="{{ month.number }}" {% if selected_month == month.number %}selected{% endif %}>{{ month.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Farm
+          <select name="farm_id">
+            <option value="">All farms</option>
+            {% for farm in farms %}
+            <option value="{{ farm.id }}" {% if selected_farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="row-actions">
+        <button type="submit" class="btn">Apply</button>
+        <a class="btn btn-secondary" href="{{ url_for('calendar.index') }}">Clear</a>
+      </div>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Create Activity</h2>
+    <form method="post" action="{{ url_for('calendar.create_activity') }}" class="grid-form">
+      <input type="hidden" name="view" value="{{ selected_view }}" />
+      <input type="hidden" name="year" value="{{ selected_year }}" />
+      <input type="hidden" name="month" value="{{ selected_month }}" />
+      {% if selected_date %}
+      <input type="hidden" name="selected_date" value="{{ selected_date.isoformat() }}" />
+      {% endif %}
+      <label>Farm
+        <select name="farm_id" required>
+          <option value="">Choose farm</option>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if create_activity_defaults.farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Title
+        <input name="title" value="{{ create_activity_defaults.title }}" placeholder="Vaccination round, drench, scanning..." required />
+      </label>
+      <label>Description
+        <textarea name="description" rows="5" placeholder="Optional planning detail, notes, or constraints.">{{ create_activity_defaults.description }}</textarea>
+      </label>
+      <div class="grid-two">
+        <label>Start Date
+          <input type="date" name="start_date" value="{{ create_activity_defaults.start_date }}" required />
+        </label>
+        <label>Repeat Every
+          <input type="number" min="1" name="repeat_interval" value="{{ create_activity_defaults.repeat_interval }}" placeholder="Leave blank for one-off" />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Repeat Unit
+          <select name="repeat_unit">
+            <option value="">No recurrence</option>
+            {% for unit in repeat_units %}
+            <option value="{{ unit }}" {% if create_activity_defaults.repeat_unit == unit %}selected{% endif %}>{{ unit|title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Repeat Until
+          <input type="date" name="repeat_until" value="{{ create_activity_defaults.repeat_until }}" />
+        </label>
+      </div>
+      <button type="submit" class="btn">Create Activity</button>
+    </form>
+  </article>
+</section>
+
+{% if selected_view == "year" %}
+<section class="calendar-year-grid">
+  {% for month in year_months %}
+  <article class="card calendar-mini-month">
+    <div class="calendar-month-card-header">
+      <h2><a href="{{ month.month_url }}">{{ month.month_label }}</a></h2>
+    </div>
+    <div class="calendar-weekdays calendar-weekdays-mini">
+      {% for name in day_names %}
+      <span>{{ name }}</span>
+      {% endfor %}
+    </div>
+    <div class="calendar-mini-grid">
+      {% for week in month.weeks %}
+      {% for day in week %}
+      <a class="calendar-day calendar-day-mini {% if not day.in_month %}is-outside{% endif %} {% if day.is_selected %}is-selected{% endif %}" href="{{ day.month_url }}">
+        <span class="calendar-day-number">{{ day.day_number }}</span>
+        <div class="calendar-mini-list">
+          {% for item in day["items"] %}
+          <span class="calendar-mini-chip {{ item.css_class }}">{{ item.title }}</span>
+          {% endfor %}
+          {% if day.overflow_count %}
+          <span class="calendar-mini-overflow">+{{ day.overflow_count }}</span>
+          {% endif %}
+        </div>
+      </a>
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="card">
+  <div class="calendar-weekdays">
+    {% for name in day_names %}
+    <span>{{ name }}</span>
+    {% endfor %}
+  </div>
+  <div class="calendar-month-grid">
+    {% for week in month_grid %}
+    {% for day in week %}
+    <article class="calendar-day calendar-day-full {% if not day.in_month %}is-outside{% endif %} {% if day.is_selected %}is-selected{% endif %}">
+      <div class="calendar-day-header">
+        <a class="calendar-day-link" href="{{ day.month_url }}">{{ day.day_number }}</a>
+        {% if day.in_month %}
+        <a class="btn btn-secondary calendar-create-link" href="{{ day.create_task_url }}">Create Task</a>
+        {% endif %}
+      </div>
+      <div class="calendar-entry-list">
+        {% for item in day["items"] %}
+        <article class="calendar-entry {{ item.css_class }}">
+          <div class="calendar-entry-topline">
+            <span class="calendar-entry-badge">{{ item.badge_text }}</span>
+            <a href="{{ item.detail_url }}">{{ item.title }}</a>
+          </div>
+          <p class="muted calendar-entry-subtitle">{{ item.subtitle }}</p>
+          {% if item.create_task_url %}
+          <a class="calendar-entry-action" href="{{ item.create_task_url }}">Create Task From Activity</a>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

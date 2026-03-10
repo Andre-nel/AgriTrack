@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}{{ activity.title }} | Calendar | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-page-actions">
+  <a class="btn btn-secondary" href="{{ back_url }}">Back To Calendar</a>
+</div>
+
+<section class="card task-page-header">
+  <div>
+    <p class="space-key">Calendar Activity</p>
+    <h1>{{ activity.title }}</h1>
+    <p class="muted">Farm: {{ activity.farm.name }}</p>
+    <p class="muted">Starts: {{ activity.start_date.isoformat() }} | {{ recurrence_summary }}</p>
+    <p class="text-body">{{ activity.description or "No extra planning notes." }}</p>
+  </div>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Edit Activity</h2>
+    <form method="post" action="{{ url_for('calendar.edit_activity', activity_id=activity.id) }}" class="grid-form">
+      <label>Farm
+        <select name="farm_id" required>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if farm.id == activity.farm_id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Title
+        <input name="title" value="{{ activity.title }}" required />
+      </label>
+      <label>Description
+        <textarea name="description" rows="6">{{ activity.description or '' }}</textarea>
+      </label>
+      <div class="grid-two">
+        <label>Start Date
+          <input type="date" name="start_date" value="{{ activity.start_date.isoformat() }}" required />
+        </label>
+        <label>Repeat Every
+          <input type="number" min="1" name="repeat_interval" value="{{ activity.repeat_interval or '' }}" />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Repeat Unit
+          <select name="repeat_unit">
+            <option value="">No recurrence</option>
+            {% for unit in repeat_units %}
+            <option value="{{ unit }}" {% if activity.repeat_unit == unit %}selected{% endif %}>{{ unit|title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Repeat Until
+          <input type="date" name="repeat_until" value="{{ activity.repeat_until.isoformat() if activity.repeat_until else '' }}" />
+        </label>
+      </div>
+      <button type="submit" class="btn">Save Activity</button>
+    </form>
+  </article>
+
+  <article class="card calendar-danger-card">
+    <h2>Delete Activity</h2>
+    <p class="muted">Deleting the series removes all of its future planning entries and occurrence overrides.</p>
+    <form method="post" action="{{ url_for('calendar.delete_activity', activity_id=activity.id) }}">
+      <button type="submit" class="btn btn-danger">Delete Activity</button>
+    </form>
+  </article>
+</section>
+
+<section class="card">
+  <div class="task-section-heading">
+    <h2>Next 24 Months</h2>
+    <p class="muted">Manage one-off schedule changes without rewriting the full series.</p>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Occurrence</th>
+        <th>Planned Date</th>
+        <th>Status</th>
+        <th>Note</th>
+        <th>Create Task</th>
+        <th>Skip</th>
+        <th>Move</th>
+        <th>Clear</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in occurrence_rows %}
+      <tr>
+        <td>{{ row.original_date.isoformat() }}</td>
+        <td>{{ row.date.isoformat() }}</td>
+        <td>
+          {% if row.is_skipped %}
+          <span class="badge warn">Skipped</span>
+          {% elif row.is_moved %}
+          <span class="badge ok">Moved</span>
+          {% else %}
+          <span class="badge ok">Scheduled</span>
+          {% endif %}
+        </td>
+        <td>{{ row.exception_note or "-" }}</td>
+        <td><a class="btn btn-secondary" href="{{ row.create_task_url }}">Create Task</a></td>
+        <td>
+          <form method="post" action="{{ url_for('calendar.create_occurrence_exception', activity_id=activity.id) }}" class="calendar-inline-form">
+            <input type="hidden" name="occurrence_date" value="{{ row.original_date.isoformat() }}" />
+            <input type="hidden" name="action" value="skip" />
+            <input type="hidden" name="rescheduled_date" value="" />
+            <input name="note" value="{{ row.exception_note if row.is_skipped else '' }}" placeholder="Optional note" />
+            <button type="submit" class="btn btn-secondary">Skip</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('calendar.create_occurrence_exception', activity_id=activity.id) }}" class="calendar-inline-form">
+            <input type="hidden" name="occurrence_date" value="{{ row.original_date.isoformat() }}" />
+            <input type="hidden" name="action" value="move" />
+            <input type="date" name="rescheduled_date" value="{{ row.exception_rescheduled_date.isoformat() if row.exception_rescheduled_date else row.date.isoformat() }}" required />
+            <input name="note" value="{{ row.exception_note or '' }}" placeholder="Optional note" />
+            <button type="submit" class="btn">Move</button>
+          </form>
+        </td>
+        <td>
+          {% if row.exception_action %}
+          <form method="post" action="{{ url_for('calendar.clear_occurrence_exception', activity_id=activity.id, occurrence_date=row.original_date.isoformat()) }}">
+            <button type="submit" class="btn btn-secondary">Clear</button>
+          </form>
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8">No upcoming occurrences in the next 24 months.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

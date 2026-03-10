@@ -5,7 +5,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db
-from app.models import Farm, Task, TaskComment, TaskLink, TaskSpace, TaskSpaceComment, TaskStatusTransition
+from app.models import (
+    CalendarActivity,
+    Farm,
+    Task,
+    TaskComment,
+    TaskLink,
+    TaskSpace,
+    TaskSpaceComment,
+    TaskStatusTransition,
+)
 from app.services.task_service import (
     TASK_LINK_TYPE_LABELS,
     TASK_LINK_TYPES,
@@ -137,6 +146,85 @@ def _load_task(task_id: str) -> Task:
     )
 
 
+def _load_optional_activity(activity_id: str | None) -> CalendarActivity | None:
+    normalized = (activity_id or "").strip()
+    if not normalized:
+        return None
+    return (
+        CalendarActivity.query.options(selectinload(CalendarActivity.farm))
+        .filter_by(id=normalized)
+        .first()
+    )
+
+
+def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
+    source_activity = _load_optional_activity(source.get("source_activity_id"))
+    selected_space_id = (source.get("space_id") or "").strip()
+    selected_farm_id = (source.get("farm_id") or "").strip()
+
+    selected_space = None
+    if selected_space_id:
+        selected_space = TaskSpace.query.options(selectinload(TaskSpace.farm)).filter_by(id=selected_space_id).first()
+
+    if not selected_farm_id and source_activity is not None:
+        selected_farm_id = source_activity.farm_id
+    if not selected_farm_id and selected_space is not None:
+        selected_farm_id = selected_space.farm_id
+
+    due_date = (source.get("due_date") or "").strip()
+    occurrence_date = (source.get("occurrence_date") or "").strip()
+    if not due_date and occurrence_date:
+        due_date = occurrence_date
+
+    heading = (source.get("heading") or "").strip()
+    if not heading and source_activity is not None:
+        heading = source_activity.title
+
+    description = (source.get("description") or "").strip()
+    if not description and source_activity is not None and source_activity.description:
+        description = source_activity.description
+
+    return (
+        {
+            "farm_id": selected_farm_id,
+            "space_id": selected_space_id,
+            "heading": heading,
+            "description": description,
+            "reporter_name": (source.get("reporter_name") or "").strip(),
+            "assignee_name": (source.get("assignee_name") or "").strip(),
+            "status": (source.get("status") or "todo").strip() or "todo",
+            "priority": (source.get("priority") or "low").strip() or "low",
+            "original_estimate_days": (source.get("original_estimate_days") or "").strip(),
+            "due_date": due_date,
+            "tags": (source.get("tags") or "").strip(),
+            "source_activity_id": (source.get("source_activity_id") or "").strip(),
+            "occurrence_date": occurrence_date,
+        },
+        source_activity,
+    )
+
+
+def _render_new_task_form(*, form_values: dict, source_activity: CalendarActivity | None, status_code: int = 200):
+    farms = Farm.query.order_by(Farm.name).all()
+    space_query = TaskSpace.query.options(selectinload(TaskSpace.farm)).order_by(TaskSpace.key)
+    if form_values["farm_id"]:
+        space_query = space_query.filter(TaskSpace.farm_id == form_values["farm_id"])
+    spaces = space_query.all()
+    return (
+        render_template(
+            "tasks/new.html",
+            farms=farms,
+            spaces=spaces,
+            form_values=form_values,
+            source_activity=source_activity,
+            create_status_options=[status for status in TASK_STATUSES if status != "closed"],
+            priority_options=TASK_PRIORITIES,
+            priority_labels=TASK_PRIORITY_LABELS,
+        ),
+        status_code,
+    )
+
+
 def _resolve_link_target(raw_space_id: str | None, raw_task_key: str | None):
     target_space_id = (raw_space_id or "").strip()
     target_task_key = (raw_task_key or "").strip()
@@ -196,6 +284,45 @@ def index():
         selected_farm_id=selected_farm_id,
         summary=summary,
     )
+
+
+@bp.get("/tasks/new")
+def new_task_page():
+    form_values, source_activity = _build_new_task_form_values(request.args)
+    return _render_new_task_form(form_values=form_values, source_activity=source_activity)
+
+
+@bp.post("/tasks/new")
+def create_task_from_page():
+    form_values, source_activity = _build_new_task_form_values(request.form)
+    try:
+        space_id = form_values["space_id"]
+        selected_space = TaskSpace.query.options(selectinload(TaskSpace.farm)).filter_by(id=space_id).first()
+        if selected_space is None:
+            raise ValueError("Task space is required")
+        if form_values["farm_id"] and selected_space.farm_id != form_values["farm_id"]:
+            raise ValueError("Task space must belong to the selected farm")
+
+        task = TaskService.create_task(
+            space=selected_space,
+            heading=request.form.get("heading"),
+            description=request.form.get("description"),
+            raw_tags=request.form.get("tags"),
+            reporter_name=request.form.get("reporter_name"),
+            assignee_name=request.form.get("assignee_name"),
+            status=request.form.get("status") or "todo",
+            priority=request.form.get("priority"),
+            original_estimate_days=request.form.get("original_estimate_days"),
+            due_date=request.form.get("due_date"),
+        )
+        db.session.commit()
+        due_label = task.due_date.isoformat() if task.due_date else "no due date"
+        flash(f"Task {task.display_key} created for {due_label}", "success")
+        return redirect(url_for("tasks.task_detail", task_id=task.id))
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return _render_new_task_form(form_values=form_values, source_activity=source_activity, status_code=200)
 
 
 @bp.post("/tasks/spaces")

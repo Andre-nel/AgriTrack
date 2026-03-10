@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Create Task | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-page-actions">
+  <a class="btn btn-secondary" href="{{ url_for('tasks.index', farm_id=form_values.farm_id) }}">Back To Tasks</a>
+  {% if source_activity %}
+  <a class="btn btn-secondary" href="{{ url_for('calendar.activity_detail', activity_id=source_activity.id) }}">Back To Activity</a>
+  {% endif %}
+</div>
+
+<section class="hero">
+  <h1>Create Task</h1>
+  <p>Use this form to turn a scheduled calendar item into actionable work without leaving the planner.</p>
+</section>
+
+{% if source_activity %}
+<section class="card calendar-source-card">
+  <h2>Planned From Activity</h2>
+  <p>
+    <a href="{{ url_for('calendar.activity_detail', activity_id=source_activity.id) }}">{{ source_activity.title }}</a>
+    on {{ form_values.occurrence_date or form_values.due_date or source_activity.start_date.isoformat() }}
+  </p>
+  <p class="muted">{{ source_activity.farm.name }} | {{ source_activity.start_date.isoformat() }}</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <form method="post" action="{{ url_for('tasks.create_task_from_page') }}" class="grid-form">
+    <input type="hidden" name="source_activity_id" value="{{ form_values.source_activity_id }}" />
+    <input type="hidden" name="occurrence_date" value="{{ form_values.occurrence_date }}" />
+    <div class="grid-two">
+      <label>Farm
+        <select name="farm_id">
+          <option value="">All farms</option>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if form_values.farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Task Space
+        <select name="space_id" required>
+          <option value="">Choose a space</option>
+          {% for space in spaces %}
+          <option value="{{ space.id }}" {% if form_values.space_id == space.id %}selected{% endif %}>{{ space.key }} - {{ space.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>Heading
+      <input name="heading" value="{{ form_values.heading }}" required />
+    </label>
+    <label>Description
+      <textarea name="description" rows="6" required>{{ form_values.description }}</textarea>
+    </label>
+    <div class="grid-two">
+      <label>Reporter
+        <input name="reporter_name" value="{{ form_values.reporter_name }}" placeholder="Reporter name" required />
+      </label>
+      <label>Assignee
+        <input name="assignee_name" value="{{ form_values.assignee_name }}" placeholder="Assignee name" />
+      </label>
+    </div>
+    <div class="grid-two">
+      <label>Status
+        <select name="status" required>
+          {% for option in create_status_options %}
+          <option value="{{ option }}" {% if form_values.status == option %}selected{% endif %}>{{ option.replace('_', ' ')|title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Priority
+        <select name="priority" required>
+          {% for option in priority_options %}
+          <option value="{{ option }}" {% if form_values.priority == option %}selected{% endif %}>{{ priority_labels[option] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label>Original Estimate (days)
+        <input type="number" step="0.01" min="0.01" name="original_estimate_days" value="{{ form_values.original_estimate_days }}" />
+      </label>
+      <label>Due Date
+        <input type="date" name="due_date" value="{{ form_values.due_date }}" />
+      </label>
+    </div>
+    <label>Tags
+      <input name="tags" value="{{ form_values.tags }}" placeholder="operations, animal health, feed" />
+    </label>
+    <button type="submit" class="btn">Create Task</button>
+  </form>
+</section>
+{% endblock %}
