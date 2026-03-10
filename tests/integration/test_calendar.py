@@ -383,6 +383,7 @@ def test_month_view_has_day_level_create_activity_button_with_prefilled_date(cli
     assert 'data-open-activity-modal' in body
     assert 'data-start-date="2026-04-01"' in body
     assert 'id="calendar-activity-modal-form"' in body
+    assert 'class="btn btn-activity calendar-create-link"' in body
 
 
 def test_year_view_hover_text_includes_day_item_names(client, app):
@@ -413,3 +414,24 @@ def test_current_day_is_highlighted_in_month_and_year_views(client):
     assert year_response.status_code == 200
     year_body = year_response.data.decode("utf-8")
     assert year_body.count("is-today") == 1
+
+
+def test_selected_day_detail_view_renders_items_and_actions(client, app):
+    with app.app_context():
+        farm = _create_farm("Selected Day Farm")
+        space = _create_space(farm, "DAY", "Day Space")
+        _create_activity(farm, title="Pasture walk", start_date=date(2026, 4, 12))
+        _create_task(space, "Check troughs", date(2026, 4, 12))
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    response = client.get(
+        f"/calendar?view=month&year=2026&month=4&farm_id={farm_id}&selected_date=2026-04-12"
+    )
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "Selected Day" in body
+    assert "2026-04-12 | 2 scheduled items | 1 activity | 1 task" in body
+    assert "Pasture walk" in body
+    assert "Check troughs" in body
+    assert "Close Day" in body

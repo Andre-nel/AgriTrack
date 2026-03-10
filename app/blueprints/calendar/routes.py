@@ -51,6 +51,15 @@ def _month_end(year: int, month: int) -> date:
     return date(year, month, calendar_lib.monthrange(year, month)[1])
 
 
+def _day_heading(day: date) -> str:
+    return f"{calendar_lib.day_name[day.weekday()]}, {calendar_lib.month_name[day.month]} {day.day}, {day.year}"
+
+
+def _item_count_label(count: int, singular: str, plural: str | None = None) -> str:
+    item_label = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count} {item_label}"
+
+
 def _calendar_url(
     *,
     view: str,
@@ -253,6 +262,26 @@ def index():
         selected_date=state["selected_date"],
         mini_mode=False,
     )
+    selected_day = None
+    if state["selected_date"] is not None and range_start <= state["selected_date"] <= range_end:
+        selected_day = _build_day_cell(
+            state["selected_date"],
+            display_month=state["selected_date"].month,
+            item_lookup=calendar_data["items_by_date"],
+            selected_farm_id=state["farm_id"],
+            selected_date=state["selected_date"],
+            mini_mode=False,
+        )
+        activity_count = sum(1 for item in selected_day["all_items"] if item["kind"] == "activity")
+        task_count = sum(1 for item in selected_day["all_items"] if item["kind"] == "task")
+        total_count = len(selected_day["all_items"])
+        selected_day["heading"] = _day_heading(selected_day["date"])
+        selected_day["summary"] = (
+            f"{selected_day['date'].isoformat()} | "
+            f"{_item_count_label(total_count, 'scheduled item')} | "
+            f"{_item_count_label(activity_count, 'activity')} | "
+            f"{_item_count_label(task_count, 'task')}"
+        )
 
     return render_template(
         "calendar/index.html",
@@ -293,6 +322,13 @@ def index():
             "repeat_unit": "months",
             "repeat_until": "",
         },
+        selected_day=selected_day,
+        clear_selected_day_url=_calendar_url(
+            view=state["view"],
+            year=state["year"],
+            month=state["month"] if state["view"] == "month" else None,
+            farm_id=state["farm_id"] or None,
+        ),
     )
 
 

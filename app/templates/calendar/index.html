@@ -88,6 +88,48 @@
   </details>
 </section>
 
+{% if selected_day %}
+<section class="card calendar-day-detail" data-selected-day-detail>
+  <div class="calendar-day-detail-header">
+    <div>
+      <p class="space-key">Selected Day</p>
+      <h2>{{ selected_day.heading }}</h2>
+      <p class="muted">{{ selected_day.summary }}</p>
+    </div>
+    <div class="calendar-day-detail-actions">
+      <button
+        type="button"
+        class="btn btn-activity calendar-create-link"
+        data-open-activity-modal
+        data-start-date="{{ selected_day.date.isoformat() }}"
+      >
+        Create Activity
+      </button>
+      <a class="btn btn-secondary calendar-create-link" href="{{ selected_day.create_task_url }}">Create Task</a>
+      <a class="btn btn-secondary" href="{{ clear_selected_day_url }}">Close Day</a>
+    </div>
+  </div>
+  {% if selected_day.all_items %}
+  <div class="calendar-entry-list calendar-day-detail-list">
+    {% for item in selected_day.all_items %}
+    <article class="calendar-entry {{ item.css_class }}">
+      <div class="calendar-entry-topline">
+        <span class="calendar-entry-badge">{{ item.badge_text }}</span>
+        <a href="{{ item.detail_url }}">{{ item.title }}</a>
+      </div>
+      <p class="muted calendar-entry-subtitle">{{ item.subtitle }}</p>
+      {% if item.create_task_url %}
+      <a class="calendar-entry-action" href="{{ item.create_task_url }}">Create Task From Activity</a>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="task-empty-state">No tasks or activities are scheduled for this day yet.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if selected_view == "year" %}
 <section class="calendar-year-grid">
   {% for month in year_months %}
@@ -141,7 +183,7 @@
         <div class="calendar-day-actions">
           <button
             type="button"
-            class="btn btn-secondary calendar-create-link"
+            class="btn btn-activity calendar-create-link"
             data-open-activity-modal
             data-start-date="{{ day.date.isoformat() }}"
           >
