@@ -118,10 +118,18 @@ def _build_day_cell(
         "date": day,
         "day_number": day.day,
         "in_month": day.month == display_month,
+        "is_today": day == date.today() and day.month == display_month,
         "is_selected": selected_date == day,
         "items": visible_items,
         "all_items": all_items,
-        "hover_text": "\n".join(f"{item['badge_text']}: {item['title']}" for item in all_items),
+        "hover_text": "\n".join(
+            (
+                f"{item['badge_text']}: {item['title']} ({item['duration_text']})"
+                if item.get("duration_text")
+                else f"{item['badge_text']}: {item['title']}"
+            )
+            for item in all_items
+        ),
         "overflow_count": max(len(all_items) - len(visible_items), 0),
         "month_url": _calendar_url(
             view="month",
@@ -280,6 +288,7 @@ def index():
             "title": "",
             "description": "",
             "start_date": create_start_date.isoformat(),
+            "duration_days": "1",
             "repeat_interval": "",
             "repeat_unit": "months",
             "repeat_until": "",
@@ -301,6 +310,7 @@ def create_activity():
             title=request.form.get("title"),
             description=request.form.get("description"),
             start_date=request.form.get("start_date"),
+            duration_days=request.form.get("duration_days"),
             repeat_interval=request.form.get("repeat_interval"),
             repeat_unit=request.form.get("repeat_unit"),
             repeat_until=request.form.get("repeat_until"),
@@ -338,6 +348,7 @@ def activity_detail(activity_id: str):
         activity=activity,
         farms=Farm.query.order_by(Farm.name).all(),
         repeat_units=CALENDAR_REPEAT_UNITS,
+        duration_summary=CalendarService.format_duration_days(activity.duration_days),
         recurrence_summary=CalendarService.recurrence_summary(activity),
         occurrence_rows=occurrence_rows,
         back_url=_calendar_url(
@@ -363,6 +374,7 @@ def edit_activity(activity_id: str):
             title=request.form.get("title"),
             description=request.form.get("description"),
             start_date=request.form.get("start_date"),
+            duration_days=request.form.get("duration_days"),
             repeat_interval=request.form.get("repeat_interval"),
             repeat_unit=request.form.get("repeat_unit"),
             repeat_until=request.form.get("repeat_until"),

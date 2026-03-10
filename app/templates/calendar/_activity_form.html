@@ -33,11 +33,14 @@
     <label>Start Date
       <input type="date" name="start_date" value="{{ form_state.start_date }}" required data-start-date-input />
     </label>
-    <label>Repeat Every
-      <input type="number" min="1" name="repeat_interval" value="{{ form_state.repeat_interval }}" placeholder="Leave blank for one-off" />
+    <label>Duration (days)
+      <input type="number" min="0.25" step="0.25" name="duration_days" value="{{ form_state.duration_days }}" required />
     </label>
   </div>
   <div class="grid-two">
+    <label>Repeat Every
+      <input type="number" min="1" name="repeat_interval" value="{{ form_state.repeat_interval }}" placeholder="Leave blank for one-off" />
+    </label>
     <label>Repeat Unit
       <select name="repeat_unit">
         <option value="">No recurrence</option>

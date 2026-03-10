@@ -10,7 +10,7 @@
     <p class="space-key">Calendar Activity</p>
     <h1>{{ activity.title }}</h1>
     <p class="muted">Farm: {{ activity.farm.name }}</p>
-    <p class="muted">Starts: {{ activity.start_date.isoformat() }} | {{ recurrence_summary }}</p>
+    <p class="muted">Starts: {{ activity.start_date.isoformat() }} | Duration: {{ duration_summary }} | {{ recurrence_summary }}</p>
     <p class="text-body">{{ activity.description or "No extra planning notes." }}</p>
   </div>
 </section>
@@ -36,11 +36,14 @@
         <label>Start Date
           <input type="date" name="start_date" value="{{ activity.start_date.isoformat() }}" required />
         </label>
-        <label>Repeat Every
-          <input type="number" min="1" name="repeat_interval" value="{{ activity.repeat_interval or '' }}" />
+        <label>Duration (days)
+          <input type="number" min="0.25" step="0.25" name="duration_days" value="{{ activity.duration_days }}" required />
         </label>
       </div>
       <div class="grid-two">
+        <label>Repeat Every
+          <input type="number" min="1" name="repeat_interval" value="{{ activity.repeat_interval or '' }}" />
+        </label>
         <label>Repeat Unit
           <select name="repeat_unit">
             <option value="">No recurrence</option>

@@ -9,6 +9,7 @@ class CalendarActivity(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
     start_date = db.Column(db.Date, nullable=False, index=True)
+    duration_days = db.Column(db.Numeric(6, 2), nullable=False, default=1)
     repeat_interval = db.Column(db.Integer)
     repeat_unit = db.Column(db.String(10))
     repeat_until = db.Column(db.Date, index=True)
@@ -21,6 +22,10 @@ class CalendarActivity(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     )
 
     __table_args__ = (
+        db.CheckConstraint(
+            "duration_days > 0",
+            name="ck_calendar_activities_duration_positive",
+        ),
         db.CheckConstraint(
             (
                 "(repeat_interval IS NULL AND repeat_unit IS NULL AND repeat_until IS NULL) "

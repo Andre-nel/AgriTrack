@@ -1,7 +1,7 @@
 from datetime import date
 
 from app.extensions import db
-from app.models import Farm, Task, TaskSpace
+from app.models import CalendarActivity, Farm, Task, TaskSpace
 from app.services.calendar_service import CalendarService
 from app.services.task_service import TaskService
 
@@ -25,6 +25,7 @@ def _create_activity(
     *,
     title: str,
     start_date: date,
+    duration_days: str | int | float | None = None,
     repeat_interval: int | None = None,
     repeat_unit: str | None = None,
     repeat_until: date | None = None,
@@ -35,6 +36,7 @@ def _create_activity(
         title=title,
         description=description,
         start_date=start_date,
+        duration_days=duration_days,
         repeat_interval=repeat_interval,
         repeat_unit=repeat_unit,
         repeat_until=repeat_until,
@@ -74,6 +76,8 @@ def test_calendar_page_loads_with_empty_state(client):
     assert b"Create Activity" in response.data
     assert b"calendar-create-panel" in response.data
     assert b"calendar-activity-modal" in response.data
+    assert b'name="duration_days"' in response.data
+    assert b'value="1"' in response.data
 
 
 def test_calendar_can_create_one_off_activity_and_render_in_year_and_month_views(client, app):
@@ -92,6 +96,7 @@ def test_calendar_can_create_one_off_activity_and_render_in_year_and_month_views
             "title": "Pregnancy scanning",
             "description": "Annual scanning block.",
             "start_date": "2026-04-15",
+            "duration_days": "1",
             "repeat_interval": "",
             "repeat_unit": "",
             "repeat_until": "",
@@ -106,6 +111,7 @@ def test_calendar_can_create_one_off_activity_and_render_in_year_and_month_views
     assert month_page.status_code == 200
     month_body = month_page.data.decode("utf-8")
     assert "Pregnancy scanning" in month_body
+    assert "1 day" in month_body
     assert "Create Task From Activity" in month_body
 
 
@@ -326,6 +332,45 @@ def test_due_dated_tasks_appear_and_activity_shortcut_prefills_new_task_form(cli
         assert created_task.due_date.isoformat() == "2026-04-22"
 
 
+def test_calendar_activity_duration_defaults_to_one_day_and_can_be_customized(client, app):
+    with app.app_context():
+        farm = _create_farm("Duration Farm")
+        activity = _create_activity(
+            farm,
+            title="Water system service",
+            start_date=date(2026, 7, 14),
+            duration_days="2.5",
+        )
+        default_activity = _create_activity(
+            farm,
+            title="General yard work",
+            start_date=date(2026, 7, 15),
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        activity_id = str(activity.id)
+        default_activity_id = str(default_activity.id)
+
+    month_page = client.get(f"/calendar?view=month&year=2026&month=7&farm_id={farm_id}")
+    assert month_page.status_code == 200
+    month_body = month_page.data.decode("utf-8")
+    assert "2.5 days | One-off activity" in month_body
+    assert "1 day | One-off activity" in month_body
+
+    detail_page = client.get(f"/calendar/activities/{activity_id}")
+    assert detail_page.status_code == 200
+    detail_body = detail_page.data.decode("utf-8")
+    assert "Duration: 2.5 days" in detail_body
+
+    with app.app_context():
+        refreshed_activity = CalendarActivity.query.filter_by(id=activity_id).first()
+        refreshed_default_activity = CalendarActivity.query.filter_by(id=default_activity_id).first()
+        assert refreshed_activity is not None
+        assert refreshed_default_activity is not None
+        assert str(refreshed_activity.duration_days) == "2.50"
+        assert str(refreshed_default_activity.duration_days) == "1.00"
+
+
 def test_month_view_has_day_level_create_activity_button_with_prefilled_date(client, app):
     with app.app_context():
         farm = _create_farm("Popup Farm")
@@ -352,5 +397,19 @@ def test_year_view_hover_text_includes_day_item_names(client, app):
     response = client.get(f"/calendar?view=year&year=2026&farm_id={farm_id}")
     assert response.status_code == 200
     body = response.data.decode("utf-8")
-    assert 'title="Activity: Shearing prep' in body
+    assert 'title="Activity: Shearing prep (1 day)' in body
     assert "TO DO: Book shearers" in body
+
+
+def test_current_day_is_highlighted_in_month_and_year_views(client):
+    today = date.today()
+
+    month_response = client.get(f"/calendar?view=month&year={today.year}&month={today.month}")
+    assert month_response.status_code == 200
+    month_body = month_response.data.decode("utf-8")
+    assert month_body.count("is-today") == 1
+
+    year_response = client.get(f"/calendar?view=year&year={today.year}")
+    assert year_response.status_code == 200
+    year_body = year_response.data.decode("utf-8")
+    assert year_body.count("is-today") == 1

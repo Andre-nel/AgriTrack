@@ -1,6 +1,7 @@
 from calendar import monthrange
 from collections import defaultdict
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 
 from flask import url_for
 from sqlalchemy import and_, or_
@@ -17,6 +18,7 @@ CALENDAR_EXCEPTION_ACTIONS = ("skip", "move")
 class CalendarService:
     MAX_TITLE_LENGTH = 200
     MAX_DESCRIPTION_LENGTH = 5000
+    DEFAULT_DURATION_DAYS = Decimal("1")
 
     @staticmethod
     def require_text(value: str | None, field_name: str, max_length: int) -> str:
@@ -70,6 +72,21 @@ class CalendarService:
             raise ValueError(f"{field_name} must be greater than 0")
         return value
 
+    @classmethod
+    def parse_duration_days(cls, raw_value: str | int | float | Decimal | None) -> Decimal:
+        if raw_value is None or raw_value == "":
+            return cls.DEFAULT_DURATION_DAYS
+        if isinstance(raw_value, Decimal):
+            value = raw_value
+        else:
+            try:
+                value = Decimal(str(raw_value).strip())
+            except (InvalidOperation, ValueError) as exc:
+                raise ValueError("Duration days must be a valid number") from exc
+        if value <= 0:
+            raise ValueError("Duration days must be greater than 0")
+        return value.quantize(Decimal("0.01"))
+
     @staticmethod
     def validate_repeat_unit(raw_value: str | None) -> str | None:
         text = " ".join((raw_value or "").strip().lower().split())
@@ -117,6 +134,7 @@ class CalendarService:
         title: str | None,
         description: str | None,
         start_date: str | date | None,
+        duration_days: str | int | float | Decimal | None,
         repeat_interval: str | int | None,
         repeat_unit: str | None,
         repeat_until: str | date | None,
@@ -133,6 +151,7 @@ class CalendarService:
             title=cls.require_text(title, "Title", cls.MAX_TITLE_LENGTH),
             description=cls.optional_text(description, cls.MAX_DESCRIPTION_LENGTH),
             start_date=parsed_start_date,
+            duration_days=cls.parse_duration_days(duration_days),
             repeat_interval=normalized_interval,
             repeat_unit=normalized_unit,
             repeat_until=normalized_until,
@@ -151,6 +170,7 @@ class CalendarService:
         title: str | None,
         description: str | None,
         start_date: str | date | None,
+        duration_days: str | int | float | Decimal | None,
         repeat_interval: str | int | None,
         repeat_unit: str | None,
         repeat_until: str | date | None,
@@ -170,6 +190,7 @@ class CalendarService:
         activity.title = cls.require_text(title, "Title", cls.MAX_TITLE_LENGTH)
         activity.description = cls.optional_text(description, cls.MAX_DESCRIPTION_LENGTH)
         activity.start_date = parsed_start_date
+        activity.duration_days = cls.parse_duration_days(duration_days)
         activity.repeat_interval = normalized_interval
         activity.repeat_unit = normalized_unit
         activity.repeat_until = normalized_until
@@ -244,6 +265,18 @@ class CalendarService:
         if activity.repeat_until:
             summary = f"{summary} until {activity.repeat_until.isoformat()}"
         return summary
+
+    @staticmethod
+    def format_duration_days(value: Decimal | int | float | None) -> str:
+        if value is None:
+            return "1 day"
+        normalized = Decimal(str(value))
+        if normalized == normalized.to_integral():
+            duration_label = int(normalized)
+        else:
+            duration_label = f"{normalized.normalize()}"
+        suffix = "day" if normalized == Decimal("1") else "days"
+        return f"{duration_label} {suffix}"
 
     @staticmethod
     def _shift_months(value: date, months: int) -> date:
@@ -530,6 +563,7 @@ class CalendarService:
                     "farm_name": farm_name,
                     "detail_url": url_for("tasks.task_detail", task_id=task.id),
                     "create_task_url": None,
+                    "duration_text": None,
                     "badge_text": TASK_STATUS_LABELS.get(task.status, "Task"),
                     "css_class": "calendar-item-task",
                 }
@@ -561,7 +595,8 @@ class CalendarService:
                         "kind": "activity",
                         "date": row["date"],
                         "title": activity.title,
-                        "subtitle": cls.recurrence_summary(activity),
+                        "subtitle": f"{cls.format_duration_days(activity.duration_days)} | {cls.recurrence_summary(activity)}",
+                        "duration_text": cls.format_duration_days(activity.duration_days),
                         "farm_name": farm_name,
                         "detail_url": url_for("calendar.activity_detail", activity_id=activity.id),
                         "create_task_url": url_for(

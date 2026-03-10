@@ -104,7 +104,7 @@
       {% for week in month.weeks %}
       {% for day in week %}
       <a
-        class="calendar-day calendar-day-mini {% if not day.in_month %}is-outside{% endif %} {% if day.is_selected %}is-selected{% endif %}"
+        class="calendar-day calendar-day-mini {% if not day.in_month %}is-outside{% endif %} {% if day.is_today %}is-today{% endif %} {% if day.is_selected %}is-selected{% endif %}"
         href="{{ day.month_url }}"
         {% if day["hover_text"] %}title="{{ day['hover_text'] }}"{% endif %}
       >
@@ -134,13 +134,12 @@
   <div class="calendar-month-grid">
     {% for week in month_grid %}
     {% for day in week %}
-    <article class="calendar-day calendar-day-full {% if not day.in_month %}is-outside{% endif %} {% if day.is_selected %}is-selected{% endif %}">
+    <article class="calendar-day calendar-day-full {% if not day.in_month %}is-outside{% endif %} {% if day.is_today %}is-today{% endif %} {% if day.is_selected %}is-selected{% endif %}">
       <div class="calendar-day-header">
         <a class="calendar-day-link" href="{{ day.month_url }}">{{ day.day_number }}</a>
         {% if day.in_month %}
         <div class="calendar-day-actions">
           <button
-            style="color: blue;"
             type="button"
             class="btn btn-secondary calendar-create-link"
             data-open-activity-modal
