@@ -74,6 +74,10 @@ def test_analytics_pages_load(client):
     assert response.status_code == 200
     assert b"Stock Tracking" in response.data
 
+    response = client.get("/analytics/grazing-management")
+    assert response.status_code == 200
+    assert b"Grazing Management" in response.data
+
     response = client.get("/analytics/journal")
     assert response.status_code == 200
     assert b"Journal" in response.data

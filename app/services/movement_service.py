@@ -6,6 +6,7 @@ from app.models import Farm, Mob, MobEvent, MovementEvent, MovementEventMob, Pad
 from app.models.animal_group import AnimalGroupBalance
 from app.models.movement import MobLineage, MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
+from app.services.grazing_history_service import GrazingHistoryService
 from app.services.grazing_service import GrazingService
 from app.services.stock_service import StockService
 from app.services.validation_service import ValidationService
@@ -161,7 +162,9 @@ class MovementService:
         transfers: list[dict],
         destination_farm_id: str | None = None,
         note: str | None = None,
+        when=None,
     ) -> None:
+        when = when or datetime.now(timezone.utc)
         if not transfers:
             raise ValueError("At least one transfer row is required")
         if str(source_mob.id) == str(destination_mob.id):
@@ -216,6 +219,8 @@ class MovementService:
                 event_type=StockEventType.transfer_out,
                 quantity=quantity,
                 note=source_note,
+                event_time=when,
+                sync_grazing_history=False,
             )
             StockService.adjust_stock(
                 mob_id=destination_mob.id,
@@ -224,7 +229,12 @@ class MovementService:
                 event_type=StockEventType.transfer_in,
                 quantity=quantity,
                 note=destination_note,
+                event_time=when,
+                sync_grazing_history=False,
             )
+
+        GrazingHistoryService.sync_live_history_for_mob(source_mob, effective_at=when)
+        GrazingHistoryService.sync_live_history_for_mob(destination_mob, effective_at=when)
 
     @staticmethod
     def split_mob(source_mob: Mob, splits: list[dict], when=None):
@@ -281,6 +291,8 @@ class MovementService:
                     event_type=StockEventType.transfer_out,
                     quantity=qty,
                     note="split out",
+                    event_time=when,
+                    sync_grazing_history=False,
                 )
                 StockService.adjust_stock(
                     mob_id=new_mob.id,
@@ -289,8 +301,13 @@ class MovementService:
                     event_type=StockEventType.transfer_in,
                     quantity=qty,
                     note="split in",
+                    event_time=when,
+                    sync_grazing_history=False,
                 )
 
+        GrazingHistoryService.sync_live_history_for_mob(source_mob, effective_at=when)
+        for mob in created:
+            GrazingHistoryService.sync_live_history_for_mob(mob, effective_at=when)
         return created
 
     @staticmethod
@@ -337,6 +354,8 @@ class MovementService:
                     event_type=StockEventType.transfer_out,
                     quantity=balance.head_count,
                     note="merge out",
+                    event_time=when,
+                    sync_grazing_history=False,
                 )
                 StockService.adjust_stock(
                     mob_id=result_mob.id,
@@ -345,7 +364,12 @@ class MovementService:
                     event_type=StockEventType.transfer_in,
                     quantity=balance.head_count,
                     note="merge in",
+                    event_time=when,
+                    sync_grazing_history=False,
                 )
             source.status = "archived"
 
+        for source in source_mobs:
+            GrazingHistoryService.sync_live_history_for_mob(source, effective_at=when)
+        GrazingHistoryService.sync_live_history_for_mob(result_mob, effective_at=when)
         return result_mob

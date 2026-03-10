@@ -4,6 +4,7 @@ from flask import Flask
 
 from app.extensions import db
 from app.models import Farm, Mob, Paddock
+from app.services.grazing_history_service import GrazingHistoryService
 
 
 def init_cli(app: Flask) -> None:
@@ -25,3 +26,14 @@ def init_cli(app: Flask) -> None:
         db.session.commit()
 
         print(f"Seed complete for {date.today().isoformat()}")
+
+    @app.cli.command("backfill-grazing-lsu-history")
+    def backfill_grazing_lsu_history() -> None:
+        """Rebuild persisted paddock LSU history from stock ledger and grazing allocations."""
+        summary = GrazingHistoryService.backfill_all_from_ledger()
+        db.session.commit()
+        print(
+            "Backfill complete: "
+            f"{summary['mobs_backfilled']} mob(s), "
+            f"{summary['rows_created']} history row(s)"
+        )

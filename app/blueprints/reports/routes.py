@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql import func
 
 from app.extensions import db
 from app.models import (
@@ -13,6 +14,7 @@ from app.models import (
     AnimalGroupType,
     Farm,
     GrazingAllocation,
+    GrazingAllocationLsuHistory,
     GrazingSession,
     JournalEntry,
     Mob,
@@ -25,6 +27,7 @@ from app.models import (
 )
 from app.models.stock_ledger import StockEventType
 from app.services.mob_event_service import MobEventService
+from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
 from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
@@ -52,6 +55,29 @@ ANALYTICS_STOCK_OUT_TYPES = {
     StockEventType.missing,
     StockEventType.transfer_out,
     StockEventType.adjustment_out,
+}
+GRAZING_ANALYTICS_METRIC_LABELS = {
+    "current_lsu": "Current LSU",
+    "lsu_per_ha": "LSU/ha",
+    "ha_per_lsu": "ha/LSU",
+    "pressure_pct": "Pressure (%)",
+}
+GRAZING_ANALYTICS_METRIC_AXIS_LABELS = {
+    "current_lsu": "LSU",
+    "lsu_per_ha": "LSU/ha",
+    "ha_per_lsu": "ha/LSU",
+    "pressure_pct": "Pressure (%)",
+}
+GRAZING_ANALYTICS_METRIC_ORDER = ("current_lsu", "lsu_per_ha", "ha_per_lsu", "pressure_pct")
+GRAZING_ANALYTICS_DEFAULT_METRICS = ("current_lsu",)
+GRAZING_ANALYTICS_SPLIT_MODES = {"metric", "paddock"}
+GRAZING_ANALYTICS_POINT_FILTER_OPERATORS = {
+    "gt": "Greater Than",
+    "lt": "Less Than",
+}
+GRAZING_ANALYTICS_POINT_FILTER_MATCH_MODES = {
+    "has_any": "Has Matching Points",
+    "has_none": "Has No Matching Points",
 }
 
 
@@ -257,6 +283,203 @@ def _build_stock_tracking_chart_data(
 
     latest_totals.sort(key=lambda row: (-row["head_count"], row["label"].lower()))
     return {"labels": labels, "datasets": datasets}, latest_totals
+
+
+def _normalize_grazing_metric_selection(raw_values: list[str]) -> list[str]:
+    selected = []
+    seen = set()
+    for raw in raw_values:
+        value = (raw or "").strip().lower()
+        if value not in GRAZING_ANALYTICS_METRIC_LABELS or value in seen:
+            continue
+        selected.append(value)
+        seen.add(value)
+    if not selected:
+        return list(GRAZING_ANALYTICS_DEFAULT_METRICS)
+    return selected
+
+
+def _normalize_grazing_split_mode(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate not in GRAZING_ANALYTICS_SPLIT_MODES:
+        return "metric"
+    return candidate
+
+
+def _normalize_grazing_point_filter_metric(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate not in GRAZING_ANALYTICS_METRIC_LABELS:
+        return GRAZING_ANALYTICS_DEFAULT_METRICS[0]
+    return candidate
+
+
+def _normalize_grazing_point_filter_operator(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate not in GRAZING_ANALYTICS_POINT_FILTER_OPERATORS:
+        return "gt"
+    return candidate
+
+
+def _normalize_grazing_point_filter_match_mode(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate not in GRAZING_ANALYTICS_POINT_FILTER_MATCH_MODES:
+        return "has_any"
+    return candidate
+
+
+def _paddock_matches_grazing_point_filter(
+    *,
+    paddock_payload: dict,
+    metric: str,
+    operator: str,
+    threshold_value: float,
+) -> bool:
+    values = paddock_payload.get("metrics", {}).get(metric, [])
+    if operator == "lt":
+        return any(value is not None and float(value) < threshold_value for value in values)
+    return any(value is not None and float(value) > threshold_value for value in values)
+
+
+def _filter_grazing_paddocks_by_point_rule(
+    paddocks: list[Paddock],
+    analytics_payload: dict,
+    *,
+    metric: str,
+    operator: str,
+    threshold_value: float | None,
+    match_mode: str,
+) -> list[Paddock]:
+    if threshold_value is None:
+        return list(paddocks)
+
+    filtered = []
+    for paddock in paddocks:
+        paddock_payload = analytics_payload["paddocks"].get(str(paddock.id), {})
+        has_match = _paddock_matches_grazing_point_filter(
+            paddock_payload=paddock_payload,
+            metric=metric,
+            operator=operator,
+            threshold_value=threshold_value,
+        )
+        if match_mode == "has_none":
+            if not has_match:
+                filtered.append(paddock)
+            continue
+        if has_match:
+            filtered.append(paddock)
+    return filtered
+
+
+def _grazing_paddock_series_label(paddock: Paddock, include_farm_name: bool) -> str:
+    if include_farm_name:
+        return f"{paddock.farm.name} | {paddock.name}"
+    return paddock.name
+
+
+def _flatten_grazing_periods(
+    paddocks: list[Paddock],
+    analytics_payload: dict,
+) -> tuple[list[dict], dict | None]:
+    periods = []
+    for paddock in paddocks:
+        paddock_id = str(paddock.id)
+        paddock_payload = analytics_payload["paddocks"].get(paddock_id, {})
+        for period in paddock_payload.get("periods", []):
+            periods.append(
+                {
+                    "paddock_id": paddock_id,
+                    "paddock_name": paddock.name,
+                    "period": period,
+                }
+            )
+    initial_period = periods[0] if periods else None
+    return periods, initial_period
+
+
+def _build_grazing_chart_panels(
+    *,
+    paddocks: list[Paddock],
+    analytics_payload: dict,
+    selected_metrics: list[str],
+    split_mode: str,
+) -> list[dict]:
+    if not paddocks:
+        return []
+
+    panels = []
+    include_farm_name = len({str(paddock.farm_id) for paddock in paddocks}) > 1
+
+    if split_mode == "metric":
+        for metric in selected_metrics:
+            datasets = []
+            for paddock in paddocks:
+                paddock_payload = analytics_payload["paddocks"].get(str(paddock.id), {})
+                datasets.append(
+                    {
+                        "key": f"paddock:{paddock.id}",
+                        "label": _grazing_paddock_series_label(paddock, include_farm_name),
+                        "values": paddock_payload.get("metrics", {}).get(metric, []),
+                    }
+                )
+            panels.append(
+                {
+                    "id": f"metric-{metric}",
+                    "title": GRAZING_ANALYTICS_METRIC_LABELS[metric],
+                    "metric": metric,
+                    "y_axis_label": GRAZING_ANALYTICS_METRIC_AXIS_LABELS[metric],
+                    "datasets": datasets,
+                }
+            )
+        return panels
+
+    for paddock in paddocks:
+        paddock_payload = analytics_payload["paddocks"].get(str(paddock.id), {})
+        metric_panels = []
+        for metric in selected_metrics:
+            metric_panels.append(
+                {
+                    "id": f"paddock-{paddock.id}-{metric}",
+                    "title": GRAZING_ANALYTICS_METRIC_LABELS[metric],
+                    "metric": metric,
+                    "y_axis_label": GRAZING_ANALYTICS_METRIC_AXIS_LABELS[metric],
+                    "datasets": [
+                        {
+                            "key": f"metric:{metric}",
+                            "label": GRAZING_ANALYTICS_METRIC_LABELS[metric],
+                            "values": paddock_payload.get("metrics", {}).get(metric, []),
+                        }
+                    ],
+                }
+            )
+        panels.append(
+            {
+                "id": f"paddock-{paddock.id}",
+                "group_title": _grazing_paddock_series_label(paddock, include_farm_name),
+                "metric_panels": metric_panels,
+            }
+        )
+    return panels
+
+
+def _grazing_uncovered_paddocks_in_range(
+    paddocks: list[Paddock],
+    analytics_payload: dict,
+    *,
+    start_date: date,
+) -> list[str]:
+    uncovered = []
+    for paddock in paddocks:
+        coverage = analytics_payload["paddocks"].get(str(paddock.id), {}).get("coverage", {})
+        earliest_session = coverage.get("earliest_session")
+        earliest_history = coverage.get("earliest_history")
+        if earliest_session is None:
+            continue
+        if earliest_history is None:
+            uncovered.append(paddock.name)
+            continue
+        if start_date < earliest_history.date() and earliest_session < earliest_history:
+            uncovered.append(paddock.name)
+    return uncovered
 
 
 def _normalize_journal_tag(value: str | None) -> str:
@@ -653,8 +876,8 @@ def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict)
     )
     grazing_capacity_sdh = (365.0 / effective_stocking_rate) if effective_stocking_rate > 0 else None
 
-    year_lsu_days = ReportingService.paddock_lsu_days_for_period(
-        paddock_id=str(paddock.id),
+    year_lsu_days = GrazingHistoryService.paddock_lsu_days_for_period(
+        paddock,
         period_start=year_start_dt,
         period_end=now_dt,
     )
@@ -781,6 +1004,181 @@ def dashboard():
 @bp.get("/analytics")
 def analytics_landing():
     return render_template("analytics/index.html")
+
+
+@bp.get("/analytics/grazing-management")
+def analytics_grazing_management():
+    selected_filters = {
+        "farm_id": (request.args.get("farm_id") or "").strip(),
+    }
+    requested_paddock_ids = {
+        (value or "").strip() for value in request.args.getlist("paddock_id") if (value or "").strip()
+    }
+    selected_metrics = _normalize_grazing_metric_selection(request.args.getlist("metric"))
+    split_mode = _normalize_grazing_split_mode(request.args.get("split_mode"))
+    point_filter = {
+        "metric": _normalize_grazing_point_filter_metric(request.args.get("point_filter_metric")),
+        "operator": _normalize_grazing_point_filter_operator(request.args.get("point_filter_operator")),
+        "match_mode": _normalize_grazing_point_filter_match_mode(
+            request.args.get("point_filter_match_mode")
+        ),
+        "raw_value": (request.args.get("point_filter_value") or "").strip(),
+        "value": None,
+        "is_active": False,
+        "summary": None,
+    }
+    today = date.today()
+
+    try:
+        end_date = _parse_query_date(request.args.get("end_date")) or today
+        start_date = _parse_query_date(request.args.get("start_date"))
+    except ValueError:
+        flash("Grazing Management dates must be valid (YYYY-MM-DD)", "error")
+        return redirect(url_for("web.analytics_grazing_management"))
+
+    if point_filter["raw_value"]:
+        try:
+            point_filter["value"] = float(Decimal(point_filter["raw_value"]))
+            point_filter["is_active"] = True
+        except (InvalidOperation, ValueError):
+            flash("Trend chart filter value must be a valid number", "error")
+            return redirect(url_for("web.analytics_grazing_management"))
+
+    if start_date is not None and end_date < start_date:
+        flash("Grazing Management end date must be on or after the start date", "error")
+        return redirect(url_for("web.analytics_grazing_management"))
+
+    farms = Farm.query.order_by(Farm.name).all()
+    paddock_query = Paddock.query.join(Farm).order_by(Farm.name.asc(), Paddock.name.asc())
+    if selected_filters["farm_id"]:
+        paddock_query = paddock_query.filter(Paddock.farm_id == selected_filters["farm_id"])
+    scope_paddocks = paddock_query.all()
+    valid_scope_ids = {str(paddock.id) for paddock in scope_paddocks}
+
+    if requested_paddock_ids:
+        selected_paddocks = [
+            paddock for paddock in scope_paddocks if str(paddock.id) in requested_paddock_ids & valid_scope_ids
+        ]
+        if not selected_paddocks:
+            selected_paddocks = scope_paddocks
+    else:
+        selected_paddocks = scope_paddocks
+
+    earliest_covered_row = None
+    if selected_paddocks:
+        earliest_covered_row = (
+            db.session.query(func.min(GrazingAllocationLsuHistory.effective_from))
+            .filter(GrazingAllocationLsuHistory.paddock_id.in_([str(paddock.id) for paddock in selected_paddocks]))
+            .scalar()
+        )
+
+    if start_date is None:
+        rolling_start = today - timedelta(days=364)
+        if earliest_covered_row is not None:
+            start_date = max(rolling_start, earliest_covered_row.date())
+        else:
+            start_date = rolling_start
+
+    analytics_payload = GrazingHistoryService.build_paddock_daily_metrics(
+        selected_paddocks,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    visible_paddocks = _filter_grazing_paddocks_by_point_rule(
+        selected_paddocks,
+        analytics_payload,
+        metric=point_filter["metric"],
+        operator=point_filter["operator"],
+        threshold_value=point_filter["value"],
+        match_mode=point_filter["match_mode"],
+    )
+    if point_filter["is_active"]:
+        metric_label = GRAZING_ANALYTICS_METRIC_LABELS[point_filter["metric"]]
+        operator_label = GRAZING_ANALYTICS_POINT_FILTER_OPERATORS[point_filter["operator"]].lower()
+        match_text = (
+            "with any matching points"
+            if point_filter["match_mode"] == "has_any"
+            else "with no matching points"
+        )
+        point_filter["summary"] = (
+            f"Showing {len(visible_paddocks)} of {len(selected_paddocks)} paddock(s) {match_text} "
+            f"for {metric_label} {operator_label} {point_filter['raw_value']} in the selected date range."
+        )
+
+    timeline_periods, initial_period = _flatten_grazing_periods(visible_paddocks, analytics_payload)
+    chart_panels = _build_grazing_chart_panels(
+        paddocks=visible_paddocks,
+        analytics_payload=analytics_payload,
+        selected_metrics=selected_metrics,
+        split_mode=split_mode,
+    )
+    uncovered_paddocks = _grazing_uncovered_paddocks_in_range(
+        visible_paddocks,
+        analytics_payload,
+        start_date=start_date,
+    )
+
+    include_farm_name = len({str(paddock.farm_id) for paddock in scope_paddocks}) > 1
+    filter_options = {
+        "farms": [{"id": str(farm.id), "name": farm.name} for farm in farms],
+        "paddocks": [
+            {
+                "id": str(paddock.id),
+                "label": _grazing_paddock_series_label(paddock, include_farm_name),
+                "farm_name": paddock.farm.name,
+            }
+            for paddock in scope_paddocks
+        ],
+        "metrics": [
+            {"value": metric, "label": GRAZING_ANALYTICS_METRIC_LABELS[metric]}
+            for metric in GRAZING_ANALYTICS_METRIC_ORDER
+        ],
+        "point_filter_operators": [
+            {"value": value, "label": label}
+            for value, label in GRAZING_ANALYTICS_POINT_FILTER_OPERATORS.items()
+        ],
+        "point_filter_match_modes": [
+            {"value": value, "label": label}
+            for value, label in GRAZING_ANALYTICS_POINT_FILTER_MATCH_MODES.items()
+        ],
+        "split_modes": [
+            {"value": "metric", "label": "Split By Metric"},
+            {"value": "paddock", "label": "Split By Paddock"},
+        ],
+    }
+    timeline_rows = [
+        {
+            "paddock_id": str(paddock.id),
+            "paddock_name": _grazing_paddock_series_label(paddock, include_farm_name),
+            "segments": analytics_payload["paddocks"].get(str(paddock.id), {}).get("periods", []),
+        }
+        for paddock in visible_paddocks
+    ]
+    chart_payload = {
+        "labels": analytics_payload["labels"],
+        "split_mode": split_mode,
+        "panels": chart_panels,
+    }
+
+    return render_template(
+        "analytics/grazing_management.html",
+        filter_options=filter_options,
+        selected_filters=selected_filters,
+        selected_paddock_ids=[str(paddock.id) for paddock in selected_paddocks],
+        selected_metrics=selected_metrics,
+        split_mode=split_mode,
+        point_filter=point_filter,
+        start_date=start_date,
+        end_date=end_date,
+        chart_payload=chart_payload,
+        timeline_rows=timeline_rows,
+        timeline_ticks=analytics_payload["ticks"],
+        initial_period=initial_period,
+        uncovered_paddocks=uncovered_paddocks,
+        total_periods=len(timeline_periods),
+        selected_paddock_count=len(selected_paddocks),
+        visible_paddock_count=len(visible_paddocks),
+    )
 
 
 @bp.get("/analytics/stock-tracking")
@@ -1571,6 +1969,7 @@ def mob_edit_balance_form(mob_id):
                 f"Balance head updated for {source_label}: {source_head} -> {target_head}."
             )
             event_tags = "stock,balance edit,head adjustment"
+            change_time = datetime.now(timezone.utc)
             StockService.adjust_stock(
                 mob_id=mob.id,
                 farm_id=mob.farm_id,
@@ -1578,6 +1977,7 @@ def mob_edit_balance_form(mob_id):
                 event_type=event_type,
                 quantity=quantity,
                 note=f"{description} Note: {note_text}" if note_text else description,
+                event_time=change_time,
             )
         else:
             description = (
@@ -1586,6 +1986,7 @@ def mob_edit_balance_form(mob_id):
             )
             event_tags = "stock,balance edit,reclassification"
             ledger_note = f"{description} Note: {note_text}" if note_text else description
+            change_time = datetime.now(timezone.utc)
             StockService.adjust_stock(
                 mob_id=mob.id,
                 farm_id=mob.farm_id,
@@ -1593,6 +1994,8 @@ def mob_edit_balance_form(mob_id):
                 event_type=StockEventType.adjustment_out,
                 quantity=source_head,
                 note=ledger_note,
+                event_time=change_time,
+                sync_grazing_history=False,
             )
             StockService.adjust_stock(
                 mob_id=mob.id,
@@ -1601,7 +2004,10 @@ def mob_edit_balance_form(mob_id):
                 event_type=StockEventType.adjustment_in,
                 quantity=target_head,
                 note=ledger_note,
+                event_time=change_time,
+                sync_grazing_history=False,
             )
+            GrazingHistoryService.sync_live_history_for_mob(mob, effective_at=change_time)
 
         event_description = f"{description} Note: {note_text}" if note_text else description
         MobEventService.create_event(
@@ -1609,6 +2015,7 @@ def mob_edit_balance_form(mob_id):
             farm_id=mob.farm_id,
             description=event_description,
             raw_tags=event_tags,
+            event_at=change_time,
         )
         db.session.commit()
         flash("Balance line updated", "success")
@@ -2024,8 +2431,8 @@ def paddock_detail(paddock_id):
         current_lsu["total_lsu"] / effective_area_ha if effective_area_ha > 0 else None
     )
 
-    year_lsu_days = ReportingService.paddock_lsu_days_for_period(
-        paddock_id=paddock_id,
+    year_lsu_days = GrazingHistoryService.paddock_lsu_days_for_period(
+        paddock,
         period_start=this_year_start_dt,
         period_end=current_dt,
     )
@@ -2034,8 +2441,8 @@ def paddock_detail(paddock_id):
         grazing_capacity_sdh - sdh_used_this_year if sdh_used_this_year is not None else None
     )
 
-    period_lsu_days = ReportingService.paddock_lsu_days_for_period(
-        paddock_id=paddock_id,
+    period_lsu_days = GrazingHistoryService.paddock_lsu_days_for_period(
+        paddock,
         period_start=period_start_dt,
         period_end=period_end_dt,
     )

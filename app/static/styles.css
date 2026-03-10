@@ -482,6 +482,170 @@ a { color: #1b5f49; }
   min-height: 360px;
 }
 
+.analytics-multi-select {
+  min-height: 12rem;
+}
+
+.grazing-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0.9rem;
+}
+
+.grazing-chart-group-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.grazing-chart-card h3,
+.grazing-chart-card h4 {
+  margin-top: 0;
+}
+
+.grazing-timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.grazing-timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.grazing-timeline-legend .swatch {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 3px;
+  border: 1px solid rgba(31, 51, 45, 0.2);
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 0.25rem;
+}
+
+.grazing-legend-rest {
+  background: #2f7a5c;
+}
+
+.grazing-legend-mid {
+  background: #2c6fb0;
+}
+
+.grazing-legend-high {
+  background: #c53b3b;
+}
+
+.grazing-timeline-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.grazing-timeline-axis,
+.grazing-timeline-track {
+  position: relative;
+  min-width: 720px;
+}
+
+.grazing-timeline-axis {
+  height: 1.6rem;
+  margin-left: 11rem;
+  margin-bottom: 0.45rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.grazing-timeline-tick {
+  position: absolute;
+  top: 0.2rem;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.grazing-timeline-rows {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.grazing-timeline-row {
+  display: grid;
+  grid-template-columns: 10rem minmax(720px, 1fr);
+  gap: 1rem;
+  align-items: center;
+}
+
+.grazing-timeline-label {
+  font-weight: 600;
+}
+
+.grazing-timeline-track {
+  height: 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #edf2ee;
+  overflow: hidden;
+}
+
+.grazing-period-button {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.grazing-period-button:hover,
+.grazing-period-button:focus-visible,
+.grazing-period-button.is-selected {
+  opacity: 1;
+  outline: 2px solid #163a2d;
+  outline-offset: -2px;
+}
+
+.grazing-period-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.7rem;
+}
+
+.grazing-period-detail div {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfa;
+  padding: 0.65rem 0.75rem;
+}
+
+.grazing-period-detail span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.grazing-period-detail strong {
+  display: block;
+  margin-top: 0.22rem;
+  font-size: 0.96rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .journal-entry-list {
   display: grid;
   gap: 0.7rem;
@@ -919,5 +1083,17 @@ a { color: #1b5f49; }
 
   .analytics-chart-wrap {
     min-height: 300px;
+  }
+
+  .grazing-timeline-header {
+    flex-direction: column;
+  }
+
+  .grazing-timeline-axis {
+    margin-left: 0;
+  }
+
+  .grazing-timeline-row {
+    grid-template-columns: 1fr;
   }
 }

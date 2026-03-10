@@ -86,6 +86,8 @@ class StockService:
         event_type: StockEventType,
         quantity: int,
         note: str | None = None,
+        event_time: datetime | None = None,
+        sync_grazing_history: bool = True,
     ) -> StockLedgerEntry:
         if event_type == StockEventType.count:
             raise ValueError("Count events must be resolved to adjustment_in or missing before posting.")
@@ -98,7 +100,7 @@ class StockService:
             animal_group_type_id=animal_group_type_id,
             event_type=event_type,
             quantity=quantity,
-            event_time=datetime.now(timezone.utc),
+            event_time=event_time or datetime.now(timezone.utc),
             note=note,
         )
         db.session.add(ledger)
@@ -123,4 +125,9 @@ class StockService:
             db.session.delete(balance)
         else:
             balance.head_count = next_balance
+
+        if sync_grazing_history:
+            from app.services.grazing_history_service import GrazingHistoryService
+
+            GrazingHistoryService.sync_live_history_for_mob(mob_id, effective_at=ledger.event_time)
         return ledger

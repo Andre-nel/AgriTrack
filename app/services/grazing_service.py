@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from app.extensions import db
 from app.models import GrazingAllocation, GrazingSession
+from app.services.grazing_history_service import GrazingHistoryService
 from app.services.validation_service import ValidationService
 
 
@@ -28,6 +29,9 @@ class GrazingService:
                 )
             )
 
+        db.session.flush()
+        GrazingHistoryService.sync_live_history_for_mob(mob_id, effective_at=start_at)
+
         return session
 
     @staticmethod
@@ -36,4 +40,5 @@ class GrazingService:
         current = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).first()
         if current:
             current.end_at = end_at
+            GrazingHistoryService.close_open_history_for_session(current, end_at=end_at)
         return current
