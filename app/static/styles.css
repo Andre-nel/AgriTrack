@@ -1051,6 +1051,12 @@ a { color: #1b5f49; }
   gap: 0.9rem;
 }
 
+.calendar-mini-month {
+  background:
+    radial-gradient(circle at top right, rgba(47, 122, 92, 0.08), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 249, 0.98));
+}
+
 .calendar-weekdays {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -1082,6 +1088,7 @@ a { color: #1b5f49; }
   border-radius: 12px;
   background: #fbfcfa;
   min-height: 84px;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
 
 .calendar-day.is-outside {
@@ -1108,6 +1115,11 @@ a { color: #1b5f49; }
   box-shadow:
     0 0 0 2px rgba(23, 62, 48, 0.18),
     0 0 0 4px rgba(47, 122, 92, 0.12);
+}
+
+.calendar-day:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(31, 51, 45, 0.08);
 }
 
 .calendar-day-mini {
@@ -1149,6 +1161,68 @@ a { color: #1b5f49; }
   flex-wrap: wrap;
   gap: 0.4rem;
   justify-content: flex-end;
+}
+
+.calendar-occupancy-list {
+  display: grid;
+  gap: 0.24rem;
+  margin: 0.45rem 0 0.5rem;
+}
+
+.calendar-occupancy-list-mini {
+  margin-top: 0.28rem;
+  margin-bottom: 0.35rem;
+}
+
+.calendar-occupancy-marker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(201, 143, 61, 0.22);
+  background: rgba(255, 224, 171, 0.28);
+  color: #80561b;
+  text-decoration: none;
+  padding: 0.12rem 0.42rem;
+  font-size: 0.72rem;
+  line-height: 1.15;
+}
+
+.calendar-occupancy-marker.is-start,
+.calendar-occupancy-marker.is-single {
+  background: rgba(255, 224, 171, 0.38);
+  border-color: rgba(201, 143, 61, 0.3);
+}
+
+.calendar-occupancy-marker.is-middle,
+.calendar-occupancy-marker.is-end {
+  background: rgba(255, 224, 171, 0.2);
+  border-color: rgba(201, 143, 61, 0.18);
+}
+
+.calendar-occupancy-list-mini .calendar-occupancy-marker {
+  min-height: 0.72rem;
+  padding: 0.08rem 0.34rem;
+  font-size: 0.64rem;
+}
+
+.calendar-occupancy-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-occupancy-duration {
+  color: rgba(128, 86, 27, 0.82);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.calendar-occupancy-overflow {
+  color: rgba(128, 86, 27, 0.7);
+  font-size: 0.68rem;
+  font-weight: 700;
 }
 
 .calendar-mini-list,
@@ -1306,6 +1380,27 @@ a { color: #1b5f49; }
   gap: 0.5rem;
   align-items: center;
   justify-content: flex-end;
+}
+
+.calendar-day-detail-section + .calendar-day-detail-section {
+  margin-top: 1rem;
+}
+
+.calendar-day-detail-section h3 {
+  margin: 0 0 0.6rem;
+}
+
+.calendar-day-occupancy-list {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.calendar-day-occupancy-list .calendar-occupancy-marker {
+  padding: 0.42rem 0.58rem;
+  font-size: 0.82rem;
+}
+
+.calendar-day-occupancy-list .calendar-occupancy-duration {
+  font-size: 0.74rem;
 }
 
 .calendar-day-detail-list {

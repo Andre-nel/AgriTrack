@@ -1,10 +1,10 @@
 from calendar import monthrange
 from collections import defaultdict
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
 from flask import url_for
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db
@@ -279,6 +279,26 @@ class CalendarService:
         return f"{duration_label} {suffix}"
 
     @staticmethod
+    def occupied_day_count(value: Decimal | int | float | None) -> int:
+        if value is None:
+            return 1
+        normalized = Decimal(str(value))
+        return max(int(normalized.to_integral_value(rounding=ROUND_CEILING)), 1)
+
+    @classmethod
+    def activity_end_date(cls, start_date: date, duration_days: Decimal | int | float | None) -> date:
+        return start_date + timedelta(days=cls.occupied_day_count(duration_days) - 1)
+
+    @classmethod
+    def _calendar_query_start(cls, range_start: date, farm_id: str | None = None) -> date:
+        duration_query = db.session.query(func.max(CalendarActivity.duration_days))
+        if farm_id:
+            duration_query = duration_query.filter(CalendarActivity.farm_id == farm_id)
+        max_duration = duration_query.scalar()
+        lookback_days = cls.occupied_day_count(max_duration) - 1
+        return range_start - timedelta(days=lookback_days)
+
+    @staticmethod
     def _shift_months(value: date, months: int) -> date:
         month_index = value.month - 1 + months
         year = value.year + (month_index // 12)
@@ -482,7 +502,7 @@ class CalendarService:
     def _calendar_activity_query(
         cls,
         *,
-        range_start: date,
+        query_start: date,
         range_end: date,
         farm_id: str | None = None,
     ) -> list[CalendarActivity]:
@@ -497,15 +517,15 @@ class CalendarService:
             or_(
                 and_(
                     CalendarActivity.repeat_interval.is_(None),
-                    CalendarActivity.start_date >= range_start,
                     CalendarActivity.start_date <= range_end,
+                    CalendarActivity.start_date >= query_start,
                 ),
                 and_(
                     CalendarActivity.repeat_interval.is_not(None),
                     CalendarActivity.start_date <= range_end,
                     or_(
                         CalendarActivity.repeat_until.is_(None),
-                        CalendarActivity.repeat_until >= range_start,
+                        CalendarActivity.repeat_until >= query_start,
                     ),
                 ),
             )
@@ -519,7 +539,7 @@ class CalendarService:
             move_query = move_query.filter(CalendarActivity.farm_id == farm_id)
         move_query = move_query.filter(
             CalendarActivityException.action == "move",
-            CalendarActivityException.rescheduled_date >= range_start,
+            CalendarActivityException.rescheduled_date >= query_start,
             CalendarActivityException.rescheduled_date <= range_end,
         )
 
@@ -579,38 +599,73 @@ class CalendarService:
         farm_id: str | None = None,
     ) -> dict:
         items_by_date: dict[date, list[dict]] = defaultdict(list)
+        occupancy_by_date: dict[date, list[dict]] = defaultdict(list)
         activity_occurrence_count = 0
         recurring_series_ids = set()
+        query_start = cls._calendar_query_start(range_start, farm_id=farm_id)
 
-        activities = cls._calendar_activity_query(range_start=range_start, range_end=range_end, farm_id=farm_id)
+        activities = cls._calendar_activity_query(query_start=query_start, range_end=range_end, farm_id=farm_id)
         for activity in activities:
-            occurrence_rows = cls.expand_activity_for_calendar(activity, range_start=range_start, range_end=range_end)
+            occurrence_rows = cls.expand_activity_for_calendar(activity, range_start=query_start, range_end=range_end)
             for row in occurrence_rows:
-                activity_occurrence_count += 1
-                if cls.is_recurring(activity):
-                    recurring_series_ids.add(activity.id)
                 farm_name = activity.farm.name if activity.farm else "Unassigned"
-                items_by_date[row["date"]].append(
-                    {
-                        "kind": "activity",
-                        "date": row["date"],
-                        "title": activity.title,
-                        "subtitle": f"{cls.format_duration_days(activity.duration_days)} | {cls.recurrence_summary(activity)}",
-                        "duration_text": cls.format_duration_days(activity.duration_days),
-                        "farm_name": farm_name,
-                        "detail_url": url_for("calendar.activity_detail", activity_id=activity.id),
-                        "create_task_url": url_for(
-                            "tasks.new_task_page",
-                            farm_id=activity.farm_id,
-                            due_date=row["date"].isoformat(),
-                            heading=activity.title,
-                            source_activity_id=activity.id,
-                            occurrence_date=row["original_date"].isoformat(),
-                        ),
-                        "badge_text": "Recurring" if cls.is_recurring(activity) else "Activity",
-                        "css_class": "calendar-item-activity",
-                    }
+                duration_text = cls.format_duration_days(activity.duration_days)
+                detail_url = url_for("calendar.activity_detail", activity_id=activity.id)
+                create_task_url = url_for(
+                    "tasks.new_task_page",
+                    farm_id=activity.farm_id,
+                    due_date=row["date"].isoformat(),
+                    heading=activity.title,
+                    source_activity_id=activity.id,
+                    occurrence_date=row["original_date"].isoformat(),
                 )
+                occupied_day_count = cls.occupied_day_count(activity.duration_days)
+                occupied_end_date = cls.activity_end_date(row["date"], activity.duration_days)
+                visible_occupancy_start = max(row["date"], range_start)
+                visible_occupancy_end = min(occupied_end_date, range_end)
+                if visible_occupancy_start <= visible_occupancy_end and cls.is_recurring(activity):
+                    recurring_series_ids.add(activity.id)
+
+                if range_start <= row["date"] <= range_end:
+                    activity_occurrence_count += 1
+                    items_by_date[row["date"]].append(
+                        {
+                            "kind": "activity",
+                            "date": row["date"],
+                            "title": activity.title,
+                            "subtitle": f"{duration_text} | {cls.recurrence_summary(activity)}",
+                            "duration_text": duration_text,
+                            "farm_name": farm_name,
+                            "detail_url": detail_url,
+                            "create_task_url": create_task_url,
+                            "badge_text": "Recurring" if cls.is_recurring(activity) else "Activity",
+                            "css_class": "calendar-item-activity",
+                        }
+                    )
+
+                occupancy_start_date = max(row["date"] + timedelta(days=1), visible_occupancy_start)
+                if occupied_day_count > 1 and occupancy_start_date <= visible_occupancy_end:
+                    occupied_date = occupancy_start_date
+                    while occupied_date <= visible_occupancy_end:
+                        if occupied_date == occupied_end_date:
+                            position = "end"
+                        else:
+                            position = "middle"
+                        occupancy_by_date[occupied_date].append(
+                            {
+                                "date": occupied_date,
+                                "title": activity.title,
+                                "farm_name": farm_name,
+                                "detail_url": detail_url,
+                                "duration_text": duration_text,
+                                "position": position,
+                                "is_start": False,
+                                "is_visible_start": occupied_date == occupancy_start_date,
+                                "is_end": occupied_date == occupied_end_date,
+                                "is_moved": row["is_moved"],
+                            }
+                        )
+                        occupied_date += timedelta(days=1)
 
         task_items = cls._task_items(range_start=range_start, range_end=range_end, farm_id=farm_id)
         for item in task_items:
@@ -618,9 +673,18 @@ class CalendarService:
 
         for day_items in items_by_date.values():
             day_items.sort(key=lambda item: (item["kind"], item["title"].lower(), item["farm_name"].lower()))
+        for day_occupancy in occupancy_by_date.values():
+            day_occupancy.sort(
+                key=lambda occupancy: (
+                    not occupancy["is_visible_start"],
+                    occupancy["title"].lower(),
+                    occupancy["farm_name"].lower(),
+                )
+            )
 
         return {
             "items_by_date": dict(items_by_date),
+            "occupancy_by_date": dict(occupancy_by_date),
             "stats": {
                 "activity_count": activity_occurrence_count,
                 "recurring_series_count": len(recurring_series_ids),

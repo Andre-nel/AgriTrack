@@ -356,6 +356,9 @@ def test_calendar_activity_duration_defaults_to_one_day_and_can_be_customized(cl
     month_body = month_page.data.decode("utf-8")
     assert "2.5 days | One-off activity" in month_body
     assert "1 day | One-off activity" in month_body
+    assert 'data-occupancy-date="2026-07-15"' in month_body
+    assert 'data-occupancy-date="2026-07-16"' in month_body
+    assert 'data-occupancy-title="Water system service"' in month_body
 
     detail_page = client.get(f"/calendar/activities/{activity_id}")
     assert detail_page.status_code == 200
@@ -390,7 +393,7 @@ def test_year_view_hover_text_includes_day_item_names(client, app):
     with app.app_context():
         farm = _create_farm("Hover Farm")
         space = _create_space(farm, "HOV", "Hover Space")
-        _create_activity(farm, title="Shearing prep", start_date=date(2026, 6, 12))
+        _create_activity(farm, title="Shearing prep", start_date=date(2026, 6, 12), duration_days="2")
         _create_task(space, "Book shearers", date(2026, 6, 12))
         db.session.commit()
         farm_id = str(farm.id)
@@ -398,7 +401,8 @@ def test_year_view_hover_text_includes_day_item_names(client, app):
     response = client.get(f"/calendar?view=year&year=2026&farm_id={farm_id}")
     assert response.status_code == 200
     body = response.data.decode("utf-8")
-    assert 'title="Activity: Shearing prep (1 day)' in body
+    assert 'title="Activity: Shearing prep (2 days)' in body
+    assert "Occupied: Shearing prep (2 days)" in body
     assert "TO DO: Book shearers" in body
 
 
@@ -420,7 +424,7 @@ def test_selected_day_detail_view_renders_items_and_actions(client, app):
     with app.app_context():
         farm = _create_farm("Selected Day Farm")
         space = _create_space(farm, "DAY", "Day Space")
-        _create_activity(farm, title="Pasture walk", start_date=date(2026, 4, 12))
+        _create_activity(farm, title="Pasture walk", start_date=date(2026, 4, 12), duration_days="2")
         _create_task(space, "Check troughs", date(2026, 4, 12))
         db.session.commit()
         farm_id = str(farm.id)
@@ -435,3 +439,25 @@ def test_selected_day_detail_view_renders_items_and_actions(client, app):
     assert "Pasture walk" in body
     assert "Check troughs" in body
     assert "Close Day" in body
+
+
+def test_selected_day_detail_shows_continuing_occupancy_without_new_start_item(client, app):
+    with app.app_context():
+        farm = _create_farm("Continuation Farm")
+        _create_activity(
+            farm,
+            title="Lambing watch",
+            start_date=date(2026, 8, 9),
+            duration_days="3",
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    response = client.get(
+        f"/calendar?view=month&year=2026&month=8&farm_id={farm_id}&selected_date=2026-08-10"
+    )
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "1 occupying activity" in body
+    assert "Lambing watch" in body
+    assert "No tasks or activities start or are due on this day." in body

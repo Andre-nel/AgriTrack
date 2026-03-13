@@ -95,6 +95,9 @@
       <p class="space-key">Selected Day</p>
       <h2>{{ selected_day.heading }}</h2>
       <p class="muted">{{ selected_day.summary }}</p>
+      {% if selected_day.occupancy_summary %}
+      <p class="muted">{{ selected_day.occupancy_summary }}</p>
+      {% endif %}
     </div>
     <div class="calendar-day-detail-actions">
       <button
@@ -109,23 +112,48 @@
       <a class="btn btn-secondary" href="{{ clear_selected_day_url }}">Close Day</a>
     </div>
   </div>
+  {% if selected_day.all_occupancy %}
+  <div class="calendar-day-detail-section">
+    <h3>Occupying This Day</h3>
+    <div class="calendar-occupancy-list calendar-day-occupancy-list">
+      {% for occupancy in selected_day.all_occupancy %}
+      <a
+        class="calendar-occupancy-marker is-{{ occupancy.position }} is-detailed"
+        href="{{ occupancy.detail_url }}"
+        title="{{ occupancy.title }} | {{ occupancy.duration_text }}"
+        data-occupancy-date="{{ selected_day.date.isoformat() }}"
+        data-occupancy-title="{{ occupancy.title }}"
+      >
+        <span class="calendar-occupancy-label">{{ occupancy.title }}</span>
+        <span class="calendar-occupancy-duration">{{ occupancy.duration_text }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   {% if selected_day.all_items %}
-  <div class="calendar-entry-list calendar-day-detail-list">
-    {% for item in selected_day.all_items %}
-    <article class="calendar-entry {{ item.css_class }}">
-      <div class="calendar-entry-topline">
-        <span class="calendar-entry-badge">{{ item.badge_text }}</span>
-        <a href="{{ item.detail_url }}">{{ item.title }}</a>
-      </div>
-      <p class="muted calendar-entry-subtitle">{{ item.subtitle }}</p>
-      {% if item.create_task_url %}
-      <a class="calendar-entry-action" href="{{ item.create_task_url }}">Create Task From Activity</a>
-      {% endif %}
-    </article>
-    {% endfor %}
+  <div class="calendar-day-detail-section">
+    <h3>Starting Or Due On This Day</h3>
+    <div class="calendar-entry-list calendar-day-detail-list">
+      {% for item in selected_day.all_items %}
+      <article class="calendar-entry {{ item.css_class }}">
+        <div class="calendar-entry-topline">
+          <span class="calendar-entry-badge">{{ item.badge_text }}</span>
+          <a href="{{ item.detail_url }}">{{ item.title }}</a>
+        </div>
+        <p class="muted calendar-entry-subtitle">{{ item.subtitle }}</p>
+        {% if item.create_task_url %}
+        <a class="calendar-entry-action" href="{{ item.create_task_url }}">Create Task From Activity</a>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
   </div>
   {% else %}
-  <p class="task-empty-state">No tasks or activities are scheduled for this day yet.</p>
+  <div class="calendar-day-detail-section">
+    <h3>Starting Or Due On This Day</h3>
+    <p class="task-empty-state">No tasks or activities start or are due on this day.</p>
+  </div>
   {% endif %}
 </section>
 {% endif %}
@@ -148,9 +176,27 @@
       <a
         class="calendar-day calendar-day-mini {% if not day.in_month %}is-outside{% endif %} {% if day.is_today %}is-today{% endif %} {% if day.is_selected %}is-selected{% endif %}"
         href="{{ day.month_url }}"
+        data-calendar-date="{{ day.date.isoformat() }}"
         {% if day["hover_text"] %}title="{{ day['hover_text'] }}"{% endif %}
       >
         <span class="calendar-day-number">{{ day.day_number }}</span>
+        {% if day.occupancy %}
+        <div class="calendar-occupancy-list calendar-occupancy-list-mini">
+          {% for occupancy in day.occupancy %}
+          <span
+            class="calendar-occupancy-marker is-{{ occupancy.position }}"
+            title="{{ occupancy.title }} | {{ occupancy.duration_text }}"
+            data-occupancy-date="{{ day.date.isoformat() }}"
+            data-occupancy-title="{{ occupancy.title }}"
+          >
+            <span class="calendar-occupancy-label">{{ occupancy.title }}</span>
+          </span>
+          {% endfor %}
+          {% if day.occupancy_overflow_count %}
+          <span class="calendar-occupancy-overflow">+{{ day.occupancy_overflow_count }}</span>
+          {% endif %}
+        </div>
+        {% endif %}
         <div class="calendar-mini-list">
           {% for item in day["items"] %}
           <span class="calendar-mini-chip {{ item.css_class }}">{{ item.title }}</span>
@@ -176,7 +222,7 @@
   <div class="calendar-month-grid">
     {% for week in month_grid %}
     {% for day in week %}
-    <article class="calendar-day calendar-day-full {% if not day.in_month %}is-outside{% endif %} {% if day.is_today %}is-today{% endif %} {% if day.is_selected %}is-selected{% endif %}">
+    <article class="calendar-day calendar-day-full {% if not day.in_month %}is-outside{% endif %} {% if day.is_today %}is-today{% endif %} {% if day.is_selected %}is-selected{% endif %}" data-calendar-date="{{ day.date.isoformat() }}">
       <div class="calendar-day-header">
         <a class="calendar-day-link" href="{{ day.month_url }}">{{ day.day_number }}</a>
         {% if day.in_month %}
@@ -193,6 +239,24 @@
         </div>
         {% endif %}
       </div>
+      {% if day.occupancy %}
+      <div class="calendar-occupancy-list">
+        {% for occupancy in day.occupancy %}
+        <a
+          class="calendar-occupancy-marker is-{{ occupancy.position }}"
+          href="{{ occupancy.detail_url }}"
+          title="{{ occupancy.title }} | {{ occupancy.duration_text }}"
+          data-occupancy-date="{{ day.date.isoformat() }}"
+          data-occupancy-title="{{ occupancy.title }}"
+        >
+          <span class="calendar-occupancy-label">{{ occupancy.title }}</span>
+          {% if occupancy.is_visible_start %}
+          <span class="calendar-occupancy-duration">{{ occupancy.duration_text }}</span>
+          {% endif %}
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
       <div class="calendar-entry-list">
         {% for item in day["items"] %}
         <article class="calendar-entry {{ item.css_class }}">

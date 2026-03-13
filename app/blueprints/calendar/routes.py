@@ -112,16 +112,35 @@ def _build_day_cell(
     *,
     display_month: int,
     item_lookup: dict[date, list[dict]],
+    occupancy_lookup: dict[date, list[dict]],
     selected_farm_id: str,
     selected_date: date | None,
     mini_mode: bool,
 ) -> dict:
     all_items = item_lookup.get(day, [])
+    all_occupancy = occupancy_lookup.get(day, [])
     visible_items = all_items[:2] if mini_mode else all_items
+    visible_occupancy = all_occupancy[:1] if mini_mode else all_occupancy
     create_task_url = url_for(
         "tasks.new_task_page",
         due_date=day.isoformat(),
         farm_id=selected_farm_id or None,
+    )
+    scheduled_activity_urls = {
+        item["detail_url"] for item in all_items if item["kind"] == "activity"
+    }
+    hover_lines = []
+    for occupancy in all_occupancy:
+        if occupancy["is_start"] and occupancy["detail_url"] in scheduled_activity_urls:
+            continue
+        hover_lines.append(f"Occupied: {occupancy['title']} ({occupancy['duration_text']})")
+    hover_lines.extend(
+        (
+            f"{item['badge_text']}: {item['title']} ({item['duration_text']})"
+            if item.get("duration_text")
+            else f"{item['badge_text']}: {item['title']}"
+        )
+        for item in all_items
     )
     return {
         "date": day,
@@ -131,15 +150,11 @@ def _build_day_cell(
         "is_selected": selected_date == day,
         "items": visible_items,
         "all_items": all_items,
-        "hover_text": "\n".join(
-            (
-                f"{item['badge_text']}: {item['title']} ({item['duration_text']})"
-                if item.get("duration_text")
-                else f"{item['badge_text']}: {item['title']}"
-            )
-            for item in all_items
-        ),
+        "occupancy": visible_occupancy,
+        "all_occupancy": all_occupancy,
+        "hover_text": "\n".join(hover_lines),
         "overflow_count": max(len(all_items) - len(visible_items), 0),
+        "occupancy_overflow_count": max(len(all_occupancy) - len(visible_occupancy), 0),
         "month_url": _calendar_url(
             view="month",
             year=day.year,
@@ -155,6 +170,7 @@ def _build_month_grid(
     year: int,
     month: int,
     item_lookup: dict[date, list[dict]],
+    occupancy_lookup: dict[date, list[dict]],
     *,
     selected_farm_id: str,
     selected_date: date | None,
@@ -169,6 +185,7 @@ def _build_month_grid(
                     day,
                     display_month=month,
                     item_lookup=item_lookup,
+                    occupancy_lookup=occupancy_lookup,
                     selected_farm_id=selected_farm_id,
                     selected_date=selected_date,
                     mini_mode=mini_mode,
@@ -215,6 +232,7 @@ def index():
                         state["year"],
                         month_number,
                         calendar_data["items_by_date"],
+                        calendar_data["occupancy_by_date"],
                         selected_farm_id=state["farm_id"],
                         selected_date=state["selected_date"],
                         mini_mode=True,
@@ -258,6 +276,7 @@ def index():
         state["year"],
         state["month"],
         calendar_data["items_by_date"],
+        calendar_data["occupancy_by_date"],
         selected_farm_id=state["farm_id"],
         selected_date=state["selected_date"],
         mini_mode=False,
@@ -268,6 +287,7 @@ def index():
             state["selected_date"],
             display_month=state["selected_date"].month,
             item_lookup=calendar_data["items_by_date"],
+            occupancy_lookup=calendar_data["occupancy_by_date"],
             selected_farm_id=state["farm_id"],
             selected_date=state["selected_date"],
             mini_mode=False,
@@ -275,12 +295,16 @@ def index():
         activity_count = sum(1 for item in selected_day["all_items"] if item["kind"] == "activity")
         task_count = sum(1 for item in selected_day["all_items"] if item["kind"] == "task")
         total_count = len(selected_day["all_items"])
+        occupancy_count = len(selected_day["all_occupancy"])
         selected_day["heading"] = _day_heading(selected_day["date"])
         selected_day["summary"] = (
             f"{selected_day['date'].isoformat()} | "
             f"{_item_count_label(total_count, 'scheduled item')} | "
             f"{_item_count_label(activity_count, 'activity')} | "
             f"{_item_count_label(task_count, 'task')}"
+        )
+        selected_day["occupancy_summary"] = (
+            _item_count_label(occupancy_count, "occupying activity") if occupancy_count else None
         )
 
     return render_template(
