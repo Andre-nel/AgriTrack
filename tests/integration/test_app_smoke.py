@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
 
 from app.extensions import db
@@ -7,6 +8,7 @@ from app.models import (
     AnimalGroupType,
     Farm,
     GrazingAllocation,
+    GrazingAllocationLsuHistory,
     GrazingSession,
     JournalEntry,
     Mob,
@@ -84,6 +86,125 @@ def _write_google_earth_farm_kml(app, farm_name: str, placemark_name: str):
     )
 
 
+def _square_ring(lon_start: float, lat_start: float, size_deg: float) -> list[tuple[float, float]]:
+    return [
+        (lon_start, lat_start),
+        (lon_start + size_deg, lat_start),
+        (lon_start + size_deg, lat_start + size_deg),
+        (lon_start, lat_start + size_deg),
+        (lon_start, lat_start),
+    ]
+
+
+def _rectangle_ring(
+    lon_start: float,
+    lat_start: float,
+    lon_size_deg: float,
+    lat_size_deg: float,
+) -> list[tuple[float, float]]:
+    return [
+        (lon_start, lat_start),
+        (lon_start + lon_size_deg, lat_start),
+        (lon_start + lon_size_deg, lat_start + lat_size_deg),
+        (lon_start, lat_start + lat_size_deg),
+        (lon_start, lat_start),
+    ]
+
+
+def _ring_text(coords: list[tuple[float, float]]) -> str:
+    return " ".join(f"{lon:.6f},{lat:.6f},0" for lon, lat in coords)
+
+
+def _polygon_xml(
+    outer_ring: list[tuple[float, float]],
+    *,
+    inner_rings: list[list[tuple[float, float]]] | None = None,
+) -> str:
+    holes_xml = "".join(
+        f"""
+        <innerBoundaryIs>
+          <LinearRing>
+            <coordinates>{_ring_text(ring)}</coordinates>
+          </LinearRing>
+        </innerBoundaryIs>
+"""
+        for ring in (inner_rings or [])
+    )
+    return f"""
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>{_ring_text(outer_ring)}</coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+        {holes_xml}
+      </Polygon>
+"""
+
+
+def _placemark_polygon_xml(
+    name: str,
+    polygons: list[dict[str, list[list[tuple[float, float]]] | list[tuple[float, float]]]],
+) -> str:
+    polygon_xml = "".join(
+        _polygon_xml(
+            polygon["outer"],
+            inner_rings=polygon.get("inners"),
+        )
+        for polygon in polygons
+    )
+    return f"""
+    <Placemark>
+      <name>{name}</name>
+      <MultiGeometry>
+        {polygon_xml}
+      </MultiGeometry>
+    </Placemark>
+"""
+
+
+def _placemark_point_xml(name: str, lon: float, lat: float) -> str:
+    return f"""
+    <Placemark>
+      <name>{name}</name>
+      <Point>
+        <coordinates>{lon:.6f},{lat:.6f},0</coordinates>
+      </Point>
+    </Placemark>
+"""
+
+
+def _kml_bytes(*placemarks: str) -> bytes:
+    document = "".join(placemarks)
+    return (
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    {document}
+  </Document>
+</kml>
+"""
+    ).encode("utf-8")
+
+
+def _post_import_farm(
+    client,
+    *,
+    filename: str,
+    file_bytes: bytes,
+    timezone: str = "UTC",
+    follow_redirects: bool = False,
+):
+    return client.post(
+        "/farms/import",
+        data={
+            "timezone": timezone,
+            "farm_kml": (BytesIO(file_bytes), filename),
+        },
+        follow_redirects=follow_redirects,
+    )
+
+
 def test_health_endpoint(client):
     response = client.get("/health")
     assert response.status_code == 200
@@ -118,6 +239,398 @@ def test_analytics_pages_load(client):
     response = client.get("/analytics/journal")
     assert response.status_code == 200
     assert b"Journal" in response.data
+
+
+def test_import_farm_page_loads_and_nav_contains_link(client):
+    response = client.get("/farms/import")
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "Import Farm" in body
+    assert "Choose KML File" in body
+
+
+def test_import_farm_creates_farm_paddocks_and_map_file(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    file_bytes = _kml_bytes(
+        _placemark_polygon_xml("North Camp", [{"outer": _square_ring(0.000, 0.000, 0.001)}]),
+        _placemark_polygon_xml("South Camp", [{"outer": _square_ring(0.002, 0.000, 0.001)}]),
+    )
+
+    response = _post_import_farm(
+        client,
+        filename="Import Ranch.kml",
+        file_bytes=file_bytes,
+        timezone="Africa/Johannesburg",
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        farm = Farm.query.filter_by(name="Import Ranch").first()
+        assert farm is not None
+        assert farm.timezone == "Africa/Johannesburg"
+        paddocks = Paddock.query.filter_by(farm_id=farm.id).order_by(Paddock.name.asc()).all()
+        assert [paddock.name for paddock in paddocks] == ["North Camp", "South Camp"]
+        assert [float(paddock.area_ha) for paddock in paddocks] == [1.24, 1.24]
+        assert [float(paddock.grazeable_area_ha) for paddock in paddocks] == [1.24, 1.24]
+        farm_id = str(farm.id)
+
+    map_path = Path(app.instance_path) / "maps" / "Import Ranch.kml"
+    assert map_path.read_bytes() == file_bytes
+
+    response = client.get(f"/farms/{farm_id}/map-data")
+    assert response.status_code == 200
+
+
+def test_import_farm_skips_boundary_placemark_matching_farm_name(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    file_bytes = _kml_bytes(
+        _placemark_polygon_xml("Boundary Farm", [{"outer": _square_ring(0.000, 0.000, 0.004)}]),
+        _placemark_polygon_xml("North Camp", [{"outer": _square_ring(0.005, 0.000, 0.001)}]),
+        _placemark_polygon_xml("South Camp", [{"outer": _square_ring(0.007, 0.000, 0.001)}]),
+    )
+
+    response = _post_import_farm(client, filename="Boundary Farm.kml", file_bytes=file_bytes)
+    assert response.status_code == 302
+
+    with app.app_context():
+        farm = Farm.query.filter_by(name="Boundary Farm").first()
+        assert farm is not None
+        paddocks = Paddock.query.filter_by(farm_id=farm.id).order_by(Paddock.name.asc()).all()
+        assert [paddock.name for paddock in paddocks] == ["North Camp", "South Camp"]
+        farm_id = str(farm.id)
+
+    response = client.get(f"/farms/{farm_id}/map-data")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert any(feature["properties"]["feature_type"] == "farm_boundary" for feature in payload["features"])
+
+
+def test_import_farm_updates_existing_farm_and_overwrites_map_file(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    with app.app_context():
+        farm = Farm(name="Conflict Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        db.session.add(
+            Paddock(
+                farm_id=farm.id,
+                name="North Camp",
+                area_ha=5,
+                grazeable_area_ha=5,
+                status="inactive",
+            )
+        )
+        db.session.add(
+            Paddock(
+                farm_id=farm.id,
+                name="Legacy Camp",
+                area_ha=7,
+                grazeable_area_ha=7,
+            )
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    maps_dir = Path(app.instance_path) / "maps"
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    existing_path = maps_dir / "Conflict Farm.kml"
+    existing_path.write_bytes(b"old-map")
+
+    response = _post_import_farm(
+        client,
+        filename="Conflict Farm.kml",
+        file_bytes=_kml_bytes(
+            _placemark_polygon_xml("North Camp", [{"outer": _square_ring(0.000, 0.000, 0.001)}]),
+            _placemark_polygon_xml("South Camp", [{"outer": _square_ring(0.002, 0.000, 0.001)}]),
+        ),
+        timezone="Africa/Johannesburg",
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        farm = Farm.query.filter_by(id=farm_id).first()
+        assert farm is not None
+        assert farm.timezone == "Africa/Johannesburg"
+        paddocks = Paddock.query.filter_by(farm_id=farm.id).order_by(Paddock.name.asc()).all()
+        assert [paddock.name for paddock in paddocks] == ["Legacy Camp", "North Camp", "South Camp"]
+        north = next(paddock for paddock in paddocks if paddock.name == "North Camp")
+        south = next(paddock for paddock in paddocks if paddock.name == "South Camp")
+        legacy = next(paddock for paddock in paddocks if paddock.name == "Legacy Camp")
+        assert float(north.area_ha) == 1.24
+        assert float(north.grazeable_area_ha) == 1.24
+        assert north.status == "active"
+        assert float(south.area_ha) == 1.24
+        assert float(south.grazeable_area_ha) == 1.24
+        assert float(legacy.area_ha) == 7.0
+        assert legacy.status == "inactive"
+
+    assert existing_path.read_bytes() != b"old-map"
+    assert b"South Camp" in existing_path.read_bytes()
+
+    farm_page = client.get(f"/farms/{farm_id}")
+    assert farm_page.status_code == 200
+    farm_body = farm_page.data.decode("utf-8")
+    assert "North Camp" in farm_body
+    assert "South Camp" in farm_body
+    assert "Legacy Camp" not in farm_body
+
+
+def test_import_farm_transfers_missing_paddock_history_by_overlap_ratio(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    with app.app_context():
+        farm = Farm(name="Split Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        farm_id = str(farm.id)
+
+        source = Paddock(
+            farm_id=farm.id,
+            name="Split Source",
+            area_ha=2.47,
+            grazeable_area_ha=2.47,
+        )
+        db.session.add(source)
+        db.session.flush()
+        source_id = str(source.id)
+
+        mob = Mob(farm_id=farm.id, name="Split Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+            end_at=None,
+        )
+        db.session.add(session)
+        db.session.flush()
+        session_id = str(session.id)
+
+        allocation = GrazingAllocation(
+            grazing_session_id=session.id,
+            paddock_id=source.id,
+            allocation_fraction=1,
+        )
+        db.session.add(allocation)
+        db.session.flush()
+
+        db.session.add(
+            GrazingAllocationLsuHistory(
+                farm_id=farm.id,
+                mob_id=mob.id,
+                paddock_id=source.id,
+                grazing_session_id=session.id,
+                grazing_allocation_id=allocation.id,
+                effective_from=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+                effective_to=None,
+                allocation_fraction=1,
+                mob_total_lsu=8,
+                allocated_lsu=8,
+                source="live",
+            )
+        )
+        db.session.commit()
+
+    maps_dir = Path(app.instance_path) / "maps"
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    existing_path = maps_dir / "Split Farm.kml"
+    existing_path.write_bytes(
+        _kml_bytes(
+            _placemark_polygon_xml(
+                "Split Source",
+                [{"outer": _rectangle_ring(0.000, 0.000, 0.002, 0.001)}],
+            )
+        )
+    )
+
+    response = _post_import_farm(
+        client,
+        filename="Split Farm.kml",
+        file_bytes=_kml_bytes(
+            _placemark_polygon_xml("West Target", [{"outer": _square_ring(0.000, 0.000, 0.001)}]),
+            _placemark_polygon_xml("East Target", [{"outer": _square_ring(0.001, 0.000, 0.001)}]),
+        ),
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        source = Paddock.query.filter_by(id=source_id).first()
+        assert source is not None
+        assert source.status == "inactive"
+
+        active_paddocks = (
+            Paddock.query.filter_by(farm_id=farm_id, status="active").order_by(Paddock.name.asc()).all()
+        )
+        assert [paddock.name for paddock in active_paddocks] == ["East Target", "West Target"]
+
+        allocations = (
+            GrazingAllocation.query.join(Paddock)
+            .filter(GrazingAllocation.grazing_session_id == session_id)
+            .order_by(Paddock.name.asc())
+            .all()
+        )
+        assert [allocation.paddock.name for allocation in allocations] == ["East Target", "West Target"]
+        assert [float(allocation.allocation_fraction) for allocation in allocations] == [0.5, 0.5]
+
+        history_rows = (
+            GrazingAllocationLsuHistory.query.join(Paddock)
+            .filter(GrazingAllocationLsuHistory.grazing_session_id == session_id)
+            .order_by(Paddock.name.asc())
+            .all()
+        )
+        assert [row.paddock.name for row in history_rows] == ["East Target", "West Target"]
+        assert [float(row.allocation_fraction) for row in history_rows] == [0.5, 0.5]
+        assert [float(row.allocated_lsu) for row in history_rows] == [4.0, 4.0]
+
+    farm_page = client.get(f"/farms/{farm_id}")
+    assert farm_page.status_code == 200
+    farm_body = farm_page.data.decode("utf-8")
+    assert "West Target" in farm_body
+    assert "East Target" in farm_body
+    assert "Split Source" not in farm_body
+
+
+def test_import_farm_rejects_existing_map_file(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    maps_dir = Path(app.instance_path) / "maps"
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    existing_path = maps_dir / "Mapped Farm.kml"
+    existing_path.write_bytes(b"existing-map")
+
+    response = _post_import_farm(
+        client,
+        filename="Mapped Farm.kml",
+        file_bytes=_kml_bytes(
+            _placemark_polygon_xml("North Camp", [{"outer": _square_ring(0.000, 0.000, 0.001)}])
+        ),
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "A map file for Mapped Farm already exists" in response.data.decode("utf-8")
+    assert existing_path.read_bytes() == b"existing-map"
+
+    with app.app_context():
+        assert Farm.query.filter_by(name="Mapped Farm").first() is None
+
+
+def test_import_farm_rejects_empty_file(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    response = _post_import_farm(
+        client,
+        filename="Empty Farm.kml",
+        file_bytes=b"",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Uploaded KML file is empty" in response.data.decode("utf-8")
+
+
+def test_import_farm_rejects_invalid_xml(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    response = _post_import_farm(
+        client,
+        filename="Broken Farm.kml",
+        file_bytes=b"<kml><Document>",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Unable to parse the uploaded KML file" in response.data.decode("utf-8")
+
+
+def test_import_farm_rejects_non_kml_extension(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    response = _post_import_farm(
+        client,
+        filename="Wrong Format.txt",
+        file_bytes=_kml_bytes(
+            _placemark_polygon_xml("North Camp", [{"outer": _square_ring(0.000, 0.000, 0.001)}])
+        ),
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Farm import requires a .kml file" in response.data.decode("utf-8")
+
+
+def test_import_farm_rejects_duplicate_paddock_names(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    response = _post_import_farm(
+        client,
+        filename="Duplicate Farm.kml",
+        file_bytes=_kml_bytes(
+            _placemark_polygon_xml("North Camp", [{"outer": _square_ring(0.000, 0.000, 0.001)}]),
+            _placemark_polygon_xml(" north   camp ", [{"outer": _square_ring(0.002, 0.000, 0.001)}]),
+        ),
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Duplicate paddock names were found in the uploaded KML" in response.data.decode("utf-8")
+
+
+def test_import_farm_rejects_kml_without_paddock_polygons(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    response = _post_import_farm(
+        client,
+        filename="Point Farm.kml",
+        file_bytes=_kml_bytes(_placemark_point_xml("Water Point", 0.000, 0.000)),
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "No paddock polygons were found in the uploaded KML" in response.data.decode("utf-8")
+
+
+def test_import_farm_imports_multipolygon_paddock_area(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    response = _post_import_farm(
+        client,
+        filename="Split Farm.kml",
+        file_bytes=_kml_bytes(
+            _placemark_polygon_xml(
+                "Split Camp",
+                [
+                    {"outer": _square_ring(0.000, 0.000, 0.001)},
+                    {"outer": _square_ring(0.002, 0.000, 0.001)},
+                ],
+            )
+        ),
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        farm = Farm.query.filter_by(name="Split Farm").first()
+        assert farm is not None
+        paddock = Paddock.query.filter_by(farm_id=farm.id, name="Split Camp").first()
+        assert paddock is not None
+        assert float(paddock.area_ha) == 2.47
+        assert float(paddock.grazeable_area_ha) == 2.47
+
+
+def test_import_farm_imports_polygon_with_hole_area(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    response = _post_import_farm(
+        client,
+        filename="Hole Farm.kml",
+        file_bytes=_kml_bytes(
+            _placemark_polygon_xml(
+                "Holed Camp",
+                [
+                    {
+                        "outer": _square_ring(0.000, 0.000, 0.002),
+                        "inners": [_square_ring(0.0005, 0.0005, 0.001)],
+                    }
+                ],
+            )
+        ),
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        farm = Farm.query.filter_by(name="Hole Farm").first()
+        assert farm is not None
+        paddock = Paddock.query.filter_by(farm_id=farm.id, name="Holed Camp").first()
+        assert paddock is not None
+        assert float(paddock.area_ha) == 3.71
+        assert float(paddock.grazeable_area_ha) == 3.71
 
 
 def test_journal_page_can_create_manual_entry(client, app):

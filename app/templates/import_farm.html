@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Import Farm | AgriTrack{% endblock %}
+{% block content %}
+<a class="btn btn-secondary" href="{{ url_for('web.farms_page') }}">Back To Manage Farms</a>
+<section class="card import-farm-card">
+  <h1>Import Farm</h1>
+  <p class="muted">
+    Upload a <code>.kml</code> file to create a farm and paddocks in one step. The farm name is taken from the file name,
+    polygon placemarks become paddocks, and all imported paddock area is treated as grazeable.
+  </p>
+  <p class="muted">If the farm already exists, the upload updates its map file and paddocks. A standalone map-file conflict still fails.</p>
+
+  <form method="post" enctype="multipart/form-data" class="grid-form">
+    <label>Timezone
+      <input type="text" name="timezone" value="{{ default_timezone }}" />
+    </label>
+
+    <div
+      class="file-drop-zone"
+      data-file-drop-zone
+      tabindex="0"
+      role="button"
+      aria-controls="farmKmlInput"
+      aria-describedby="farmKmlHelp farmKmlName"
+    >
+      <input
+        id="farmKmlInput"
+        class="sr-only"
+        type="file"
+        name="farm_kml"
+        accept=".kml"
+        data-file-input
+        required
+      />
+      <strong>Drag and drop a farm KML here</strong>
+      <p id="farmKmlHelp" class="muted">or click to choose a <code>.kml</code> file from your device</p>
+      <span class="btn btn-secondary" data-open-file-picker>Choose KML File</span>
+    </div>
+
+    <p id="farmKmlName" class="muted import-file-name" data-file-name>No file selected.</p>
+    <p class="error-text import-file-hint" data-file-error hidden></p>
+
+    <button type="submit" class="btn">Import Farm</button>
+  </form>
+</section>
+
+<script>
+  (function () {
+    const dropZone = document.querySelector("[data-file-drop-zone]");
+    const fileInput = document.querySelector("[data-file-input]");
+    const fileName = document.querySelector("[data-file-name]");
+    const fileError = document.querySelector("[data-file-error]");
+    const pickerButton = document.querySelector("[data-open-file-picker]");
+    if (!dropZone || !fileInput || !fileName || !fileError) return;
+
+    function setClientHint(message) {
+      if (message) {
+        fileError.hidden = false;
+        fileError.textContent = message;
+      } else {
+        fileError.hidden = true;
+        fileError.textContent = "";
+      }
+    }
+
+    function updateSelectedFileName() {
+      const selected = fileInput.files && fileInput.files[0];
+      fileName.textContent = selected ? selected.name : "No file selected.";
+      if (selected && !selected.name.toLowerCase().endsWith(".kml")) {
+        setClientHint("Client hint: choose a .kml file.");
+      } else {
+        setClientHint("");
+      }
+    }
+
+    function assignDroppedFile(file) {
+      if (!file) return;
+      if (typeof DataTransfer !== "undefined") {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        fileInput.files = transfer.files;
+      }
+      updateSelectedFileName();
+    }
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      dropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropZone.classList.add("is-dragover");
+      });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+      dropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropZone.classList.remove("is-dragover");
+      });
+    });
+
+    dropZone.addEventListener("drop", (event) => {
+      const files = event.dataTransfer && event.dataTransfer.files;
+      if (!files || !files.length) return;
+      assignDroppedFile(files[0]);
+    });
+
+    dropZone.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      fileInput.click();
+    });
+
+    if (pickerButton) {
+      pickerButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        fileInput.click();
+      });
+    }
+
+    fileInput.addEventListener("change", updateSelectedFileName);
+    updateSelectedFileName();
+  })();
+</script>
+{% endblock %}

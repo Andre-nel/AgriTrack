@@ -16,7 +16,7 @@ class ReportingService:
     @staticmethod
     def dashboard_summary() -> dict:
         farm_count = Farm.query.count()
-        paddock_count = sum(len(f.paddocks) for f in Farm.query.all())
+        paddock_count = sum(len([p for p in f.paddocks if p.status == "active"]) for f in Farm.query.all())
         mob_count = Mob.query.filter_by(status="active").count()
         return {
             "farm_count": farm_count,

@@ -26,6 +26,7 @@ from app.models import (
     StockLedgerEntry,
 )
 from app.models.stock_ledger import StockEventType
+from app.services.farm_import_service import FarmImportService
 from app.services.mob_event_service import MobEventService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
@@ -926,7 +927,7 @@ def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict)
 
 def _build_farm_map_feature_collection(farm: Farm) -> dict:
     kml_features, kml_path = _load_farm_kml_features(farm.name)
-    paddocks = list(Paddock.query.filter_by(farm_id=farm.id).all())
+    paddocks = list(Paddock.query.filter_by(farm_id=farm.id, status="active").all())
     paddock_by_name = {_normalize_name(p.name): p for p in paddocks}
     farm_name_key = _normalize_name(farm.name)
     active_snapshot = _active_grazing_snapshot_by_paddock(str(farm.id))
@@ -984,7 +985,7 @@ def dashboard():
 
     farm_cards = []
     for farm in farms:
-        paddocks = len(farm.paddocks)
+        paddocks = len([paddock for paddock in farm.paddocks if paddock.status == "active"])
         mobs = len([mob for mob in farm.mobs if mob.status == "active"])
         ready = paddocks > 0 and mobs > 0
         farm_cards.append(
@@ -1468,10 +1469,53 @@ def farms_page():
     return render_template("farms.html", farms=farms)
 
 
+@bp.route("/farms/import", methods=["GET", "POST"])
+def import_farm_page():
+    if request.method == "GET":
+        return render_template("import_farm.html", default_timezone="UTC")
+
+    uploaded_file = request.files.get("farm_kml")
+    file_name = uploaded_file.filename if uploaded_file else ""
+    file_bytes = uploaded_file.read() if uploaded_file else b""
+    timezone_value = (request.form.get("timezone") or "UTC").strip() or "UTC"
+
+    try:
+        result = FarmImportService.import_farm(
+            file_name=file_name,
+            file_bytes=file_bytes,
+            timezone=timezone_value,
+            instance_path=current_app.instance_path,
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("web.import_farm_page"))
+
+    if result["existing_farm"]:
+        retired_note = (
+            f", {result['retired_count']} retired"
+            if result.get("retired_count")
+            else ""
+        )
+        flash(
+            (
+                f"Updated farm {result['farm_name']} from import with {result['paddock_count']} paddock(s) "
+                f"({result['created_count']} added, {result['updated_count']} updated{retired_note})"
+            ),
+            "success",
+        )
+    else:
+        flash(f"Imported farm {result['farm_name']} with {result['paddock_count']} paddock(s)", "success")
+    return redirect(url_for("web.farm_detail", farm_id=result["farm_id"]))
+
+
 @bp.get("/farms/<farm_id>")
 def farm_detail(farm_id):
     farm = Farm.query.get_or_404(farm_id)
-    paddocks = sorted(farm.paddocks, key=lambda p: p.name.lower())
+    paddocks = sorted(
+        [paddock for paddock in farm.paddocks if paddock.status == "active"],
+        key=lambda p: p.name.lower(),
+    )
     mobs = _active_mobs_for_farm(farm_id)
     located_mob_ids = set()
     if mobs:
@@ -1763,7 +1807,7 @@ def mob_detail(mob_id):
     mob = _get_active_mob_or_404(mob_id)
     selected_event_tag = " ".join((request.args.get("event_tag") or "").strip().lower().split())
     farms = Farm.query.order_by(Farm.name).all()
-    all_paddocks = Paddock.query.order_by(Paddock.name).all()
+    all_paddocks = Paddock.query.filter_by(status="active").order_by(Paddock.name).all()
     all_active_mobs = Mob.query.filter_by(status="active").order_by(Mob.name).all()
     move_farms = [{"id": str(farm.id), "name": farm.name} for farm in farms]
     move_paddocks_by_farm = {str(farm.id): [] for farm in farms}
@@ -2419,7 +2463,7 @@ def paddock_detail(paddock_id):
     paddock = Paddock.query.get_or_404(paddock_id)
     stock_summary = ReportingService.paddock_current_stock_summary(paddock_id)
     farms = Farm.query.order_by(Farm.name).all()
-    all_paddocks = Paddock.query.order_by(Paddock.name).all()
+    all_paddocks = Paddock.query.filter_by(status="active").order_by(Paddock.name).all()
     bulk_move_farms = [{"id": str(farm.id), "name": farm.name} for farm in farms]
     bulk_move_paddocks_by_farm = {str(farm.id): [] for farm in farms}
     for option_paddock in all_paddocks:

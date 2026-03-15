@@ -145,6 +145,40 @@ body {
   margin-bottom: 0.35rem;
 }
 
+.import-farm-card {
+  margin-top: 1rem;
+}
+
+.file-drop-zone {
+  display: grid;
+  gap: 0.7rem;
+  justify-items: start;
+  padding: 1.1rem;
+  border: 2px dashed #9fb9ad;
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(240, 247, 243, 0.96));
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.file-drop-zone strong {
+  font-size: 1rem;
+}
+
+.file-drop-zone.is-dragover,
+.file-drop-zone:focus-visible,
+.file-drop-zone:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(47, 122, 92, 0.12);
+  transform: translateY(-1px);
+}
+
+.import-file-name,
+.import-file-hint {
+  margin: 0;
+}
+
 label { display: grid; gap: 0.25rem; }
 input, select, button, textarea {
   padding: 0.56rem;
