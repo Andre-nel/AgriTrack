@@ -47,6 +47,43 @@ def _write_farm_kml(app, farm_name: str, placemark_name: str):
     )
 
 
+def _write_google_earth_farm_kml(app, farm_name: str, placemark_name: str):
+    maps_dir = Path(app.instance_path) / "maps"
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    (maps_dir / f"{farm_name}.kml").write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
+  <Document id="farm-doc">
+    <name>{farm_name}</name>
+    <gx:CascadingStyle kml:id="style-1">
+      <Style>
+        <LineStyle>
+          <color>ff2dc0fb</color>
+        </LineStyle>
+      </Style>
+    </gx:CascadingStyle>
+    <Placemark id="paddock-1">
+      <name>{placemark_name}</name>
+      <LookAt>
+        <gx:fovy>35</gx:fovy>
+      </LookAt>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              25.0000,-32.0000,0 25.0100,-32.0000,0 25.0100,-32.0100,0 25.0000,-32.0100,0 25.0000,-32.0000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>
+""",
+        encoding="utf-8",
+    )
+
+
 def test_health_endpoint(client):
     response = client.get("/health")
     assert response.status_code == 200
@@ -507,6 +544,83 @@ def test_paddock_page_and_map_data_show_grazed_days_and_area_per_current_lsu(cli
     assert properties["area_ha"] == 12.0
     assert properties["paddock_ha_per_current_lsu"] == 2.0
     assert properties["current_lsu"] == 6.0
+
+
+def test_paddock_detail_can_rename_name_and_update_farm_kml(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+
+    with app.app_context():
+        farm = Farm(name="Rename Map Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+
+        paddock = Paddock(farm_id=farm.id, name="Old Camp", area_ha=8, grazeable_area_ha=7)
+        db.session.add(paddock)
+        db.session.commit()
+        paddock_id = str(paddock.id)
+
+    _write_google_earth_farm_kml(app, "Rename Map Farm", "Old Camp")
+
+    response = client.post(f"/paddocks/{paddock_id}/rename", data={"name": "New Camp"})
+    assert response.status_code == 302
+
+    with app.app_context():
+        renamed = Paddock.query.filter_by(id=paddock_id).first()
+        assert renamed is not None
+        assert renamed.name == "New Camp"
+
+    page = client.get(f"/paddocks/{paddock_id}")
+    assert page.status_code == 200
+    body = page.data.decode("utf-8")
+    assert "Edit Name" in body
+    assert "New Camp" in body
+
+    kml_text = (Path(app.instance_path) / "maps" / "Rename Map Farm.kml").read_text(encoding="utf-8")
+    assert "gx:CascadingStyle" in kml_text
+    assert "<name>New Camp</name>" in kml_text
+    assert "<name>Old Camp</name>" not in kml_text
+
+
+def test_paddock_rename_rejects_blank_and_duplicate_names(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+
+    with app.app_context():
+        farm = Farm(name="Rename Validation Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+
+        target = Paddock(farm_id=farm.id, name="Target Camp", area_ha=10, grazeable_area_ha=8)
+        existing = Paddock(farm_id=farm.id, name="South Camp", area_ha=9, grazeable_area_ha=7)
+        db.session.add_all([target, existing])
+        db.session.commit()
+        target_id = str(target.id)
+
+    _write_farm_kml(app, "Rename Validation Farm", "Target Camp")
+
+    response = client.post(
+        f"/paddocks/{target_id}/rename",
+        data={"name": "   "},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Paddock name is required" in response.data.decode("utf-8")
+
+    response = client.post(
+        f"/paddocks/{target_id}/rename",
+        data={"name": "  south   camp  "},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "A paddock with this name already exists on this farm" in response.data.decode("utf-8")
+
+    with app.app_context():
+        unchanged = Paddock.query.filter_by(id=target_id).first()
+        assert unchanged is not None
+        assert unchanged.name == "Target Camp"
+
+    kml_text = (Path(app.instance_path) / "maps" / "Rename Validation Farm.kml").read_text(encoding="utf-8")
+    assert "<name>Target Camp</name>" in kml_text
+    assert "<name>South Camp</name>" not in kml_text
 
 
 def test_mob_balance_edit_reclassifies_and_records_change(client, app):

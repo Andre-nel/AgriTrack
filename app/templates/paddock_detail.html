@@ -1,9 +1,40 @@
 {% extends "base.html" %}
 {% block title %}{{ paddock.name }} | AgriTrack{% endblock %}
 {% block content %}
-<a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=paddock.farm_id) }}">Back To Farm</a>
-<h1>{{ paddock.name }}</h1>
-<p class="muted">Area: {{ paddock.area_ha }} ha | Grazeable: {{ paddock.grazeable_area_ha }} ha</p>
+<section class="paddock-page-header">
+  <div>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=paddock.farm_id) }}">Back To Farm</a>
+    <h1>{{ paddock.name }}</h1>
+    <p class="muted">Area: {{ paddock.area_ha }} ha | Grazeable: {{ paddock.grazeable_area_ha }} ha</p>
+  </div>
+  <button type="button" class="btn btn-secondary" data-open-paddock-name-modal>Edit Name</button>
+</section>
+
+<dialog id="paddock-name-modal" class="entity-edit-modal">
+  <div class="entity-edit-modal-header">
+    <div>
+      <h2>Edit Paddock Name</h2>
+      <p class="muted">Save a valid paddock name here. The matching farm map placemark will be renamed too when a KML file exists.</p>
+    </div>
+    <button type="button" class="btn btn-secondary" data-close-paddock-name-modal>Close</button>
+  </div>
+  <form method="post" action="{{ url_for('web.rename_paddock_form', paddock_id=paddock.id) }}" class="grid-form">
+    <label>New Paddock Name
+      <input
+        type="text"
+        name="name"
+        value="{{ paddock.name }}"
+        maxlength="120"
+        required
+        data-paddock-name-input
+      />
+    </label>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Name</button>
+      <button type="button" class="btn btn-secondary" data-close-paddock-name-modal>Cancel</button>
+    </div>
+  </form>
+</dialog>
 
 <section class="card">
   <h2>Stocking Rate, Grazing Capacity & Density</h2>
@@ -208,6 +239,51 @@
 </section>
 <script>
   (function () {
+    const paddockNameDialog = document.getElementById("paddock-name-modal");
+    const openPaddockNameButton = document.querySelector("[data-open-paddock-name-modal]");
+    const paddockNameInput = paddockNameDialog
+      ? paddockNameDialog.querySelector("[data-paddock-name-input]")
+      : null;
+
+    function closePaddockNameDialog() {
+      if (!paddockNameDialog) return;
+      if (typeof paddockNameDialog.close === "function") {
+        paddockNameDialog.close();
+      } else {
+        paddockNameDialog.removeAttribute("open");
+      }
+    }
+
+    if (paddockNameDialog && openPaddockNameButton) {
+      openPaddockNameButton.addEventListener("click", () => {
+        if (typeof paddockNameDialog.showModal === "function") {
+          paddockNameDialog.showModal();
+        } else {
+          paddockNameDialog.setAttribute("open", "open");
+        }
+        if (paddockNameInput) {
+          paddockNameInput.focus();
+          paddockNameInput.select();
+        }
+      });
+
+      paddockNameDialog.querySelectorAll("[data-close-paddock-name-modal]").forEach((button) => {
+        button.addEventListener("click", closePaddockNameDialog);
+      });
+
+      paddockNameDialog.addEventListener("click", (event) => {
+        const rect = paddockNameDialog.getBoundingClientRect();
+        const clickedBackdrop =
+          event.clientX < rect.left ||
+          event.clientX > rect.right ||
+          event.clientY < rect.top ||
+          event.clientY > rect.bottom;
+        if (clickedBackdrop) {
+          closePaddockNameDialog();
+        }
+      });
+    }
+
     const paddocksByFarmEl = document.getElementById("bulkMovePaddocksByFarm");
     const farmSelects = document.querySelectorAll(".bulk-move-farm");
     if (!paddocksByFarmEl || !farmSelects.length) return;

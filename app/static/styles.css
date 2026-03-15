@@ -133,6 +133,18 @@ body {
   align-items: center;
 }
 
+.paddock-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.paddock-page-header h1 {
+  margin-bottom: 0.35rem;
+}
+
 label { display: grid; gap: 0.25rem; }
 input, select, button, textarea {
   padding: 0.56rem;
@@ -1358,6 +1370,33 @@ a { color: #1b5f49; }
   margin: 0;
 }
 
+.entity-edit-modal {
+  width: min(560px, calc(100vw - 2rem));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1rem;
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 24px 64px rgba(21, 33, 29, 0.24);
+}
+
+.entity-edit-modal::backdrop {
+  background: rgba(25, 41, 35, 0.38);
+  backdrop-filter: blur(3px);
+}
+
+.entity-edit-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.entity-edit-modal-header h2 {
+  margin: 0;
+}
+
 .calendar-day-detail {
   margin-top: 1rem;
 }
@@ -1483,10 +1522,12 @@ a { color: #1b5f49; }
   }
 
   .calendar-toolbar,
+  .paddock-page-header,
   .calendar-month-card-header,
   .calendar-day-header,
   .calendar-entry-topline,
   .calendar-modal-header,
+  .entity-edit-modal-header,
   .calendar-create-panel-summary,
   .calendar-day-detail-header {
     flex-direction: column;
@@ -1514,6 +1555,11 @@ a { color: #1b5f49; }
   }
 
   .calendar-activity-modal {
+    width: calc(100vw - 1rem);
+    padding: 0.85rem;
+  }
+
+  .entity-edit-modal {
     width: calc(100vw - 1rem);
     padding: 0.85rem;
   }

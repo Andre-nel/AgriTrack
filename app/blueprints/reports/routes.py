@@ -29,6 +29,7 @@ from app.models.stock_ledger import StockEventType
 from app.services.mob_event_service import MobEventService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
+from app.services.paddock_service import PaddockService
 from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
 
@@ -119,7 +120,7 @@ def _parse_query_date(value: str | None) -> date | None:
 
 
 def _normalize_name(value: str | None) -> str:
-    return " ".join((value or "").strip().lower().split())
+    return PaddockService.normalize_name(value).lower()
 
 
 def _round_float(value: float | None, precision: int = 4) -> float | None:
@@ -1413,9 +1414,10 @@ def setup_farm():
         mob_map = {}
 
         for p in _parse_paddock_lines(paddocks_raw):
+            paddock_name = PaddockService.validate_available_name(str(farm.id), p["name"])
             paddock = Paddock(
                 farm_id=farm.id,
-                name=p["name"],
+                name=paddock_name,
                 area_ha=p["area_ha"],
                 grazeable_area_ha=p["grazeable_area_ha"],
             )
@@ -1674,10 +1676,11 @@ def update_farm_stocking_rate_form(farm_id):
 @bp.post("/farms/<farm_id>/paddocks")
 def create_paddock_form(farm_id):
     farm = Farm.query.get_or_404(farm_id)
-    name = (request.form.get("name") or "").strip()
     override_raw = (request.form.get("stocking_rate_ha_per_lsu_override") or "").strip()
-    if not name:
-        flash("Paddock name is required", "error")
+    try:
+        name = PaddockService.validate_available_name(farm_id, request.form.get("name"))
+    except ValueError as exc:
+        flash(str(exc), "error")
         return redirect(url_for("web.farm_detail", farm_id=farm_id))
 
     override_value = None
@@ -1698,7 +1701,12 @@ def create_paddock_form(farm_id):
         stocking_rate_ha_per_lsu_override=override_value,
     )
     db.session.add(paddock)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("A paddock with this name already exists on this farm", "error")
+        return redirect(url_for("web.farm_detail", farm_id=farm_id))
     flash(f"Paddock created for {farm.name}", "success")
     return redirect(url_for("web.farm_detail", farm_id=farm_id))
 
@@ -2376,6 +2384,33 @@ def update_paddock_stocking_rate_form(paddock_id):
     paddock.stocking_rate_ha_per_lsu_override = override_value
     db.session.commit()
     flash("Paddock carrying capacity override updated", "success")
+    return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
+
+
+@bp.post("/paddocks/<paddock_id>/rename")
+def rename_paddock_form(paddock_id):
+    paddock = Paddock.query.get_or_404(paddock_id)
+    try:
+        result = PaddockService.rename_paddock(
+            paddock,
+            request.form.get("name"),
+            instance_path=current_app.instance_path,
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
+    except IntegrityError:
+        db.session.rollback()
+        flash("A paddock with this name already exists on this farm", "error")
+        return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
+
+    if not result["changed"]:
+        flash("Paddock name unchanged", "success")
+    elif result["map_updated"]:
+        flash("Paddock name updated", "success")
+    else:
+        flash("Paddock name updated. No farm map file was found to update.", "success")
     return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
 
 

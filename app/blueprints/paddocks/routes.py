@@ -1,8 +1,10 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from decimal import Decimal, InvalidOperation
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import Paddock
+from app.services.paddock_service import PaddockService
 from app.services.reporting_service import ReportingService
 
 bp = Blueprint("paddocks", __name__)
@@ -40,6 +42,10 @@ def create_paddock():
     required = {"farm_id", "name"}
     if not required.issubset(payload):
         return jsonify({"error": "farm_id and name are required"}), 400
+    try:
+        name = PaddockService.validate_available_name(payload["farm_id"], payload.get("name"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     override = payload.get("stocking_rate_ha_per_lsu_override")
     if override is not None:
         try:
@@ -51,14 +57,18 @@ def create_paddock():
 
     paddock = Paddock(
         farm_id=payload["farm_id"],
-        name=payload["name"],
+        name=name,
         area_ha=payload.get("area_ha", 0),
         grazeable_area_ha=payload.get("grazeable_area_ha", 0),
         status=payload.get("status", "active"),
         stocking_rate_ha_per_lsu_override=override,
     )
     db.session.add(paddock)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "A paddock with this name already exists on this farm"}), 400
     return jsonify({"id": str(paddock.id), "name": paddock.name}), 201
 
 
@@ -113,7 +123,7 @@ def update_paddock(paddock_id):
     paddock = Paddock.query.get_or_404(paddock_id)
     payload = request.get_json() or {}
 
-    for field in ["name", "status", "area_ha", "grazeable_area_ha"]:
+    for field in ["status", "area_ha", "grazeable_area_ha"]:
         if field in payload:
             setattr(paddock, field, payload[field])
     if "stocking_rate_ha_per_lsu_override" in payload:
@@ -129,7 +139,29 @@ def update_paddock(paddock_id):
                 return jsonify({"error": "stocking_rate_ha_per_lsu_override must be greater than 0"}), 400
             paddock.stocking_rate_ha_per_lsu_override = value
 
-    db.session.commit()
+    renamed = False
+    if "name" in payload:
+        try:
+            rename_result = PaddockService.rename_paddock(
+                paddock,
+                payload.get("name"),
+                instance_path=current_app.instance_path,
+            )
+            renamed = rename_result["changed"]
+        except ValueError as exc:
+            db.session.rollback()
+            return jsonify({"error": str(exc)}), 400
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({"error": "A paddock with this name already exists on this farm"}), 400
+
+    if not renamed:
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({"error": "A paddock with this name already exists on this farm"}), 400
+
     return jsonify({"id": str(paddock.id), "name": paddock.name})
 
 
