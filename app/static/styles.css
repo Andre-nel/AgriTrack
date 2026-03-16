@@ -272,6 +272,12 @@ a { color: #1b5f49; }
   border-bottom: 1px dashed #e3ebe6;
 }
 
+.link-list li.mob-unallocated,
+.link-list li.mob-unallocated a {
+  color: #ff2a2a;
+  font-weight: 700;
+}
+
 .muted { color: var(--muted); }
 .error-text { color: #b94b4b; font-weight: 600; }
 

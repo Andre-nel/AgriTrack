@@ -178,7 +178,8 @@
     </form>
     <ul class="link-list">
       {% for m in mobs %}
-      <li><a href="{{ url_for('web.mob_detail', mob_id=m.id) }}">{{ m.name }}</a> ({{ mob_detail_labels.get(m.id, m.status) }})</li>
+      {% set mob_detail_label = mob_detail_labels.get(m.id, m.status) %}
+      <li{% if mob_detail_label == 'Not Located' %} class="mob-unallocated"{% endif %}><a href="{{ url_for('web.mob_detail', mob_id=m.id) }}">{{ m.name }}</a> ({{ mob_detail_label }})</li>
       {% else %}
       <li>No mobs yet.</li>
       {% endfor %}

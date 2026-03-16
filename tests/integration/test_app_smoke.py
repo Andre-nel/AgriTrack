@@ -491,6 +491,27 @@ def test_import_farm_transfers_missing_paddock_history_by_overlap_ratio(client, 
     assert "Split Source" not in farm_body
 
 
+def test_farm_detail_marks_unallocated_mobs_in_red(client, app):
+    with app.app_context():
+        farm = Farm(name="Unallocated Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+
+        mob = Mob(farm_id=farm.id, name="Angora Groot Ramme", status="active")
+        db.session.add(mob)
+        db.session.commit()
+
+        farm_id = str(farm.id)
+
+    response = client.get(f"/farms/{farm_id}")
+    assert response.status_code == 200
+
+    body = response.data.decode("utf-8")
+    assert "Angora Groot Ramme" in body
+    assert "(Not Located)" in body
+    assert 'class="mob-unallocated"' in body
+
+
 def test_import_farm_rejects_existing_map_file(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     maps_dir = Path(app.instance_path) / "maps"
