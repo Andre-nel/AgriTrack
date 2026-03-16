@@ -2,18 +2,41 @@ from decimal import Decimal, ROUND_DOWN
 from math import cos, radians
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+import json
 import xml.etree.ElementTree as ET
 
 from app.extensions import db
-from app.models import Farm, GrazingAllocation, GrazingAllocationLsuHistory, Paddock
+from app.models import (
+    Farm,
+    GrazingAllocation,
+    GrazingAllocationLsuHistory,
+    Paddock,
+    WaterAsset,
+)
 from app.services.paddock_service import PaddockService
+from app.services.water_network_service import WaterNetworkService
 
 KML_NAMESPACE = "http://www.opengis.net/kml/2.2"
-KML_NAMESPACES = {"k": KML_NAMESPACE}
+GX_NAMESPACE = "http://www.google.com/kml/ext/2.2"
+KML_NAMESPACES = {"k": KML_NAMESPACE, "gx": GX_NAMESPACE}
 EARTH_RADIUS_M = 6371008.8
 INVALID_FARM_FILENAME_CHARS = set('<>:"/\\|?*')
 FOUR_DECIMAL_PLACES = Decimal("0.0001")
 GEOMETRY_EPSILON = 1e-9
+WATER_STYLE_PREFIXES = (
+    ("03EF", "borehole"),
+    ("0E643", "pit"),
+    ("01D3", "windmill"),
+    ("024E", "solarpump"),
+    ("3BF", "cement_dam"),
+    ("024948", "cement_dam"),
+    ("0CB", "tank"),
+    ("0D08", "ground_dam"),
+    ("053182", "weir"),
+    ("2ECA", "trough"),
+    ("044130", "trough"),
+    ("0EB629", "trough"),
+)
 
 
 class FarmImportService:
@@ -54,6 +77,344 @@ class FarmImportService:
         if path.suffix.lower() != ".kml":
             raise ValueError("Farm import requires a .kml file")
         return cls.validate_farm_name(path.stem)
+
+    @staticmethod
+    def _parse_root(file_bytes: bytes, parse_error_message: str):
+        try:
+            return ET.fromstring(file_bytes)
+        except ET.ParseError as exc:
+            raise ValueError(parse_error_message) from exc
+
+    @staticmethod
+    def _xml_identifier(element) -> str | None:
+        for key, value in element.attrib.items():
+            if key == "id" or key.endswith("}id"):
+                text = (value or "").strip()
+                if text:
+                    return text
+        return None
+
+    @classmethod
+    def _style_identifier_tokens(cls, value: str | None) -> set[str]:
+        raw = (value or "").strip()
+        if not raw:
+            return set()
+
+        raw_tokens = [raw]
+        separators = "#/?&=:.\\-_"
+        working = raw
+        for separator in separators:
+            working = working.replace(separator, " ")
+        raw_tokens.extend(working.split())
+
+        tokens = set()
+        for token in raw_tokens:
+            normalized = "".join(char for char in token.upper() if char.isalnum())
+            if normalized:
+                tokens.add(normalized)
+        return tokens
+
+    @classmethod
+    def _style_tokens_from_style_element(cls, style_element) -> set[str]:
+        if style_element is None:
+            return set()
+        tokens = set()
+        tokens.update(cls._style_identifier_tokens(cls._xml_identifier(style_element)))
+        href = style_element.findtext(
+            ".//k:IconStyle/k:Icon/k:href",
+            default="",
+            namespaces=KML_NAMESPACES,
+        )
+        tokens.update(cls._style_identifier_tokens(href))
+        return tokens
+
+    @classmethod
+    def _build_style_lookup(cls, root) -> tuple[dict[str, set[str]], dict[str, str]]:
+        styles: dict[str, set[str]] = {}
+        style_maps: dict[str, str] = {}
+
+        for style in root.findall(".//k:Style", KML_NAMESPACES):
+            style_id = cls._xml_identifier(style)
+            if not style_id:
+                continue
+            key = "".join(char for char in style_id.upper() if char.isalnum())
+            tokens = cls._style_tokens_from_style_element(style)
+            tokens.update(cls._style_identifier_tokens(style_id))
+            styles[key] = tokens
+
+        for style in root.findall(".//gx:CascadingStyle", KML_NAMESPACES):
+            style_id = cls._xml_identifier(style)
+            if not style_id:
+                continue
+            key = "".join(char for char in style_id.upper() if char.isalnum())
+            tokens = cls._style_identifier_tokens(style_id)
+            tokens.update(cls._style_tokens_from_style_element(style.find("k:Style", KML_NAMESPACES)))
+            styles[key] = tokens
+
+        for style_map in root.findall(".//k:StyleMap", KML_NAMESPACES):
+            style_id = cls._xml_identifier(style_map)
+            if not style_id:
+                continue
+            selected_style_url = ""
+            for pair in style_map.findall("k:Pair", KML_NAMESPACES):
+                pair_key = (pair.findtext("k:key", default="", namespaces=KML_NAMESPACES) or "").strip()
+                style_url = (pair.findtext("k:styleUrl", default="", namespaces=KML_NAMESPACES) or "").strip()
+                if pair_key == "normal" and style_url:
+                    selected_style_url = style_url
+                    break
+                if not selected_style_url and style_url:
+                    selected_style_url = style_url
+            if not selected_style_url:
+                continue
+            key = "".join(char for char in style_id.upper() if char.isalnum())
+            style_maps[key] = selected_style_url
+
+        return styles, style_maps
+
+    @classmethod
+    def _resolve_style_tokens(
+        cls,
+        style_url: str | None,
+        styles: dict[str, set[str]],
+        style_maps: dict[str, str],
+        *,
+        seen: set[str] | None = None,
+    ) -> set[str]:
+        tokens = cls._style_identifier_tokens(style_url)
+        normalized_key = "".join(char for char in (style_url or "").upper() if char.isalnum())
+        if not normalized_key:
+            return tokens
+
+        if seen is None:
+            seen = set()
+        if normalized_key in seen:
+            return tokens
+        seen.add(normalized_key)
+
+        if normalized_key in styles:
+            tokens.update(styles[normalized_key])
+        mapped_style_url = style_maps.get(normalized_key)
+        if mapped_style_url:
+            tokens.update(cls._resolve_style_tokens(mapped_style_url, styles, style_maps, seen=seen))
+        return tokens
+
+    @classmethod
+    def _parse_managed_point_hints(cls, managed_point_hints) -> dict[str, str]:
+        if not managed_point_hints:
+            return {}
+        if isinstance(managed_point_hints, dict):
+            source = managed_point_hints
+        else:
+            try:
+                source = json.loads(str(managed_point_hints))
+            except (TypeError, ValueError):
+                return {}
+            if not isinstance(source, dict):
+                return {}
+
+        return {
+            cls.normalize_name(key).casefold(): str(value).strip()
+            for key, value in source.items()
+            if cls.normalize_name(key) and str(value).strip()
+        }
+
+    @classmethod
+    def _recognized_asset_type(
+        cls,
+        placemark_name: str,
+        style_tokens: set[str],
+        managed_point_hints: dict[str, str],
+    ) -> str | None:
+        for token in style_tokens:
+            for prefix, asset_type in WATER_STYLE_PREFIXES:
+                if token.startswith(prefix):
+                    return asset_type
+
+        hint = managed_point_hints.get(cls.normalize_name(placemark_name).casefold())
+        if not hint:
+            return None
+
+        normalized_hint = WaterNetworkService.normalize_choice(hint)
+        if normalized_hint in WaterNetworkService.ASSET_TYPES:
+            return normalized_hint
+
+        for token in cls._style_identifier_tokens(hint):
+            for prefix, asset_type in WATER_STYLE_PREFIXES:
+                if token.startswith(prefix):
+                    return asset_type
+        return None
+
+    @staticmethod
+    def _parse_point_coordinates(raw: str | None) -> tuple[float, float, float | None] | None:
+        tokens = [token for token in (raw or "").replace("\n", " ").split() if token]
+        if not tokens:
+            return None
+        parts = [part.strip() for part in tokens[0].split(",")]
+        if len(parts) < 2:
+            return None
+        try:
+            lon = float(parts[0])
+            lat = float(parts[1])
+            altitude = float(parts[2]) if len(parts) >= 3 and parts[2] else None
+        except ValueError:
+            return None
+        return (lon, lat, altitude)
+
+    @classmethod
+    def _point_on_segment(
+        cls,
+        point: tuple[float, float],
+        start: tuple[float, float],
+        end: tuple[float, float],
+    ) -> bool:
+        cross = cls._cross_product(start, end, point)
+        if abs(cross) > GEOMETRY_EPSILON:
+            return False
+        if min(start[0], end[0]) - GEOMETRY_EPSILON <= point[0] <= max(start[0], end[0]) + GEOMETRY_EPSILON and min(
+            start[1],
+            end[1],
+        ) - GEOMETRY_EPSILON <= point[1] <= max(start[1], end[1]) + GEOMETRY_EPSILON:
+            return True
+        return False
+
+    @classmethod
+    def _ring_contains_point(cls, point: tuple[float, float], ring: list[tuple[float, float]]) -> bool:
+        open_ring = cls._open_ring(ring)
+        if len(open_ring) < 3:
+            return False
+
+        inside = False
+        for index, current in enumerate(open_ring):
+            next_point = open_ring[(index + 1) % len(open_ring)]
+            if cls._point_on_segment(point, current, next_point):
+                return True
+            y_crosses = (current[1] > point[1]) != (next_point[1] > point[1])
+            if not y_crosses:
+                continue
+            xinters = ((next_point[0] - current[0]) * (point[1] - current[1]) / (next_point[1] - current[1])) + current[0]
+            if point[0] < xinters + GEOMETRY_EPSILON:
+                inside = not inside
+        return inside
+
+    @classmethod
+    def _polygon_contains_point(cls, point: tuple[float, float], polygon: dict) -> bool:
+        if not cls._ring_contains_point(point, polygon["outer"]):
+            return False
+        for inner_ring in polygon["inners"]:
+            if cls._ring_contains_point(point, inner_ring):
+                return False
+        return True
+
+    @classmethod
+    def _geometry_contains_point(cls, point: tuple[float, float], geometry: list[dict]) -> bool:
+        return any(cls._polygon_contains_point(point, polygon) for polygon in geometry)
+
+    @classmethod
+    def _containing_paddock_key(cls, point: tuple[float, float], paddocks: list[dict]) -> str | None:
+        for paddock in paddocks:
+            bounds = paddock["bounds"]
+            if point[0] < bounds[0] or point[0] > bounds[2] or point[1] < bounds[1] or point[1] > bounds[3]:
+                continue
+            if cls._geometry_contains_point(point, paddock["geometry"]):
+                return paddock["key"]
+        return None
+
+    @staticmethod
+    def _distance_between_points(
+        point: tuple[float, float],
+        other: tuple[float, float],
+    ) -> float:
+        dx = other[0] - point[0]
+        dy = other[1] - point[1]
+        return (dx * dx + dy * dy) ** 0.5
+
+    @classmethod
+    def _distance_point_to_segment_m(
+        cls,
+        point: tuple[float, float],
+        start: tuple[float, float],
+        end: tuple[float, float],
+    ) -> float:
+        segment_dx = end[0] - start[0]
+        segment_dy = end[1] - start[1]
+        segment_length_sq = (segment_dx * segment_dx) + (segment_dy * segment_dy)
+        if segment_length_sq <= GEOMETRY_EPSILON:
+            return cls._distance_between_points(point, start)
+
+        projection = (
+            ((point[0] - start[0]) * segment_dx) + ((point[1] - start[1]) * segment_dy)
+        ) / segment_length_sq
+        projection = max(0.0, min(1.0, projection))
+        closest_point = (
+            start[0] + (projection * segment_dx),
+            start[1] + (projection * segment_dy),
+        )
+        return cls._distance_between_points(point, closest_point)
+
+    @classmethod
+    def _distance_point_to_ring_m(
+        cls,
+        point: tuple[float, float],
+        ring: list[tuple[float, float]],
+    ) -> float:
+        open_ring = cls._open_ring(ring)
+        if len(open_ring) < 2:
+            return float("inf")
+
+        lat_values = [point[1], *[lat for _, lat in open_ring]]
+        lat0 = sum(lat_values) / len(lat_values)
+        projected_point = cls._project_lon_lat_points([point], lat0)[0]
+        projected_ring = cls._project_lon_lat_points(open_ring, lat0)
+
+        minimum_distance = float("inf")
+        for index, start in enumerate(projected_ring):
+            end = projected_ring[(index + 1) % len(projected_ring)]
+            minimum_distance = min(
+                minimum_distance,
+                cls._distance_point_to_segment_m(projected_point, start, end),
+            )
+        return minimum_distance
+
+    @classmethod
+    def _distance_point_to_geometry_m(
+        cls,
+        point: tuple[float, float],
+        geometry: list[dict],
+    ) -> float:
+        if cls._geometry_contains_point(point, geometry):
+            return 0.0
+
+        minimum_distance = float("inf")
+        for polygon in geometry:
+            minimum_distance = min(
+                minimum_distance,
+                cls._distance_point_to_ring_m(point, polygon["outer"]),
+            )
+            for inner_ring in polygon["inners"]:
+                minimum_distance = min(
+                    minimum_distance,
+                    cls._distance_point_to_ring_m(point, inner_ring),
+                )
+        return minimum_distance
+
+    @classmethod
+    def _nearest_paddock_key(
+        cls,
+        point: tuple[float, float],
+        paddocks: list[dict],
+        *,
+        max_distance_m: float,
+    ) -> str | None:
+        closest_key = None
+        closest_distance = None
+        for paddock in paddocks:
+            distance = cls._distance_point_to_geometry_m(point, paddock["geometry"])
+            if distance > max_distance_m:
+                continue
+            if closest_distance is None or distance < closest_distance:
+                closest_key = paddock["key"]
+                closest_distance = distance
+        return closest_key
 
     @staticmethod
     def _parse_ring_coordinates(raw: str | None, paddock_name: str) -> list[tuple[float, float]]:
@@ -463,18 +824,7 @@ class FarmImportService:
         return total_overlap_m2 / 10000.0
 
     @classmethod
-    def _parse_kml_paddocks(
-        cls,
-        *,
-        file_bytes: bytes,
-        farm_name: str,
-        parse_error_message: str,
-    ) -> list[dict]:
-        try:
-            root = ET.fromstring(file_bytes)
-        except ET.ParseError as exc:
-            raise ValueError(parse_error_message) from exc
-
+    def _parse_kml_paddocks_from_root(cls, *, root, farm_name: str) -> list[dict]:
         paddocks = []
         seen_paddock_names = set()
         farm_name_key = cls.normalize_name(farm_name).casefold()
@@ -516,17 +866,99 @@ class FarmImportService:
         return paddocks
 
     @classmethod
-    def parse_upload(cls, file_name: str, file_bytes: bytes) -> dict:
+    def _parse_kml_paddocks(
+        cls,
+        *,
+        file_bytes: bytes,
+        farm_name: str,
+        parse_error_message: str,
+    ) -> list[dict]:
+        root = cls._parse_root(file_bytes, parse_error_message)
+        return cls._parse_kml_paddocks_from_root(root=root, farm_name=farm_name)
+
+    @classmethod
+    def _parse_kml_water_assets_from_root(
+        cls,
+        *,
+        root,
+        paddocks: list[dict],
+        managed_point_hints: dict[str, str],
+    ) -> list[dict]:
+        styles, style_maps = cls._build_style_lookup(root)
+        water_assets = []
+
+        for placemark in root.findall(".//k:Placemark", KML_NAMESPACES):
+            placemark_name = (
+                placemark.findtext("k:name", default="", namespaces=KML_NAMESPACES) or ""
+            ).strip()
+            point_coordinates = cls._parse_point_coordinates(
+                placemark.findtext(".//k:Point/k:coordinates", default="", namespaces=KML_NAMESPACES)
+            )
+            if not placemark_name or point_coordinates is None:
+                continue
+
+            style_url = (placemark.findtext("k:styleUrl", default="", namespaces=KML_NAMESPACES) or "").strip()
+            style_tokens = set()
+            style_tokens.update(cls._resolve_style_tokens(style_url, styles, style_maps))
+            style_tokens.update(
+                cls._style_tokens_from_style_element(placemark.find("k:Style", KML_NAMESPACES))
+            )
+
+            asset_type = cls._recognized_asset_type(placemark_name, style_tokens, managed_point_hints)
+            if not asset_type:
+                continue
+
+            validated_name = WaterNetworkService.validate_name(placemark_name)
+            containing_paddock_key = cls._containing_paddock_key(
+                (point_coordinates[0], point_coordinates[1]),
+                paddocks,
+            )
+            if containing_paddock_key is None and asset_type == "trough":
+                containing_paddock_key = cls._nearest_paddock_key(
+                    (point_coordinates[0], point_coordinates[1]),
+                    paddocks,
+                    max_distance_m=250.0,
+                )
+            water_assets.append(
+                {
+                    "name": validated_name,
+                    "asset_type": asset_type,
+                    "latitude": point_coordinates[1],
+                    "longitude": point_coordinates[0],
+                    "altitude_m": point_coordinates[2],
+                    "location_paddock_key": containing_paddock_key,
+                    "served_paddock_keys": (
+                        [containing_paddock_key]
+                        if asset_type == "trough" and containing_paddock_key
+                        else []
+                    ),
+                    "import_placemark_name": validated_name,
+                    "import_style_url": style_url or None,
+                }
+            )
+
+        return water_assets
+
+    @classmethod
+    def parse_upload(
+        cls,
+        file_name: str,
+        file_bytes: bytes,
+        *,
+        managed_point_hints: dict[str, str] | None = None,
+    ) -> dict:
         farm_name = cls._farm_name_from_upload(file_name)
         if not file_bytes:
             raise ValueError("Uploaded KML file is empty")
 
-        paddocks = cls._parse_kml_paddocks(
-            file_bytes=file_bytes,
-            farm_name=farm_name,
-            parse_error_message="Unable to parse the uploaded KML file",
+        root = cls._parse_root(file_bytes, "Unable to parse the uploaded KML file")
+        paddocks = cls._parse_kml_paddocks_from_root(root=root, farm_name=farm_name)
+        water_assets = cls._parse_kml_water_assets_from_root(
+            root=root,
+            paddocks=paddocks,
+            managed_point_hints=cls._parse_managed_point_hints(managed_point_hints),
         )
-        return {"farm_name": farm_name, "paddocks": paddocks}
+        return {"farm_name": farm_name, "paddocks": paddocks, "water_assets": water_assets}
 
     @classmethod
     def _load_existing_map_paddocks(cls, map_path: Path, farm_name: str) -> dict[str, dict]:
@@ -728,8 +1160,14 @@ class FarmImportService:
         file_bytes: bytes,
         timezone: str,
         instance_path: str | Path,
+        *,
+        managed_point_hints: dict[str, str] | None = None,
     ) -> dict:
-        parsed = cls.parse_upload(file_name, file_bytes)
+        parsed = cls.parse_upload(
+            file_name,
+            file_bytes,
+            managed_point_hints=managed_point_hints,
+        )
         farm_name = parsed["farm_name"]
         timezone_value = cls.normalize_name(timezone) or "UTC"
         map_path = Path(instance_path) / "maps" / f"{farm_name}.kml"
@@ -743,6 +1181,9 @@ class FarmImportService:
         created_count = 0
         updated_count = 0
         retired_count = 0
+        water_created_count = 0
+        water_updated_count = 0
+        water_archived_count = 0
         existing_farm = farm is not None
         existing_by_name: dict[str, Paddock] = {}
         if farm is None:
@@ -916,6 +1357,60 @@ class FarmImportService:
                 for allocation in allocations_to_delete:
                     db.session.delete(allocation)
 
+        imported_water_assets = {
+            (
+                asset.asset_type,
+                WaterNetworkService.normalize_name(asset.import_placemark_name).casefold(),
+            ): asset
+            for asset in WaterAsset.query.filter_by(farm_id=farm.id).all()
+            if asset.import_placemark_name
+        }
+        paddock_id_by_key = {
+            paddock_payload["key"]: str(paddock_payload["db_paddock"].id)
+            for paddock_payload in parsed["paddocks"]
+        }
+        seen_water_keys = set()
+
+        for water_payload in parsed.get("water_assets", []):
+            water_key = (
+                water_payload["asset_type"],
+                WaterNetworkService.normalize_name(water_payload["import_placemark_name"]).casefold(),
+            )
+            asset_payload = {
+                "farm_id": str(farm.id),
+                "name": water_payload["name"],
+                "asset_type": water_payload["asset_type"],
+                "active": True,
+                "needs_review": True,
+                "location_paddock_id": paddock_id_by_key.get(water_payload.get("location_paddock_key")),
+                "latitude": water_payload["latitude"],
+                "longitude": water_payload["longitude"],
+                "altitude_m": water_payload["altitude_m"],
+                "import_placemark_name": water_payload["import_placemark_name"],
+                "import_style_url": water_payload.get("import_style_url"),
+                "served_paddock_ids": [
+                    paddock_id_by_key[key]
+                    for key in water_payload.get("served_paddock_keys", [])
+                    if key in paddock_id_by_key
+                ],
+            }
+            existing_asset = imported_water_assets.get(water_key)
+            if existing_asset is None:
+                existing_asset = WaterNetworkService.create_asset(asset_payload, imported=True)
+                imported_water_assets[water_key] = existing_asset
+                water_created_count += 1
+            else:
+                WaterNetworkService.apply_asset_payload(existing_asset, asset_payload, imported=True)
+                water_updated_count += 1
+            seen_water_keys.add(water_key)
+
+        for water_key, existing_asset in imported_water_assets.items():
+            if water_key in seen_water_keys or not existing_asset.active:
+                continue
+            existing_asset.active = False
+            existing_asset.needs_review = True
+            water_archived_count += 1
+
         temp_path = None
         final_written = False
         previous_map_bytes = map_path.read_bytes() if map_path.exists() else None
@@ -947,5 +1442,9 @@ class FarmImportService:
             "created_count": created_count,
             "updated_count": updated_count,
             "retired_count": retired_count,
+            "water_asset_count": len(parsed.get("water_assets", [])),
+            "water_created_count": water_created_count,
+            "water_updated_count": water_updated_count,
+            "water_archived_count": water_archived_count,
             "map_path": str(map_path),
         }

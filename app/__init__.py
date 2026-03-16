@@ -7,6 +7,7 @@ from app.blueprints.mobs.routes import bp as mobs_api_bp
 from app.blueprints.paddocks.routes import bp as paddocks_api_bp
 from app.blueprints.reports.routes import bp as web_bp
 from app.blueprints.tasks.routes import bp as tasks_bp
+from app.blueprints.water.routes import bp as water_api_bp
 from app.cli import init_cli
 from app.config import Config, get_config
 import app.models  # noqa: F401
@@ -30,6 +31,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     app.register_blueprint(farms_api_bp, url_prefix="/api/farms")
     app.register_blueprint(paddocks_api_bp, url_prefix="/api/paddocks")
     app.register_blueprint(mobs_api_bp, url_prefix="/api/mobs")
+    app.register_blueprint(water_api_bp, url_prefix="/api")
 
     @app.get("/health")
     def health() -> tuple[dict[str, str], int]:

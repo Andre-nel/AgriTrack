@@ -191,6 +191,41 @@
 </section>
 
 <section class="card">
+  <h2>Water For This Paddock</h2>
+  <div class="split">
+    <div>
+      <h3>Assets In This Paddock</h3>
+      <ul class="link-list-clean">
+        {% for asset in local_water_assets %}
+        <li>
+          <strong>{{ asset.name }}</strong>
+          <span class="muted">{{ water_asset_type_labels[asset.asset_type] }}</span>
+          {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
+        </li>
+        {% else %}
+        <li>No active water assets are located inside this paddock.</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3>Troughs Serving This Paddock</h3>
+      <ul class="link-list-clean">
+        {% for asset in serving_troughs %}
+        <li>
+          <strong>{{ asset.name }}</strong>
+          {% if asset.location_paddock %}<span class="muted">Located in {{ asset.location_paddock.name }}</span>{% endif %}
+          {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
+        </li>
+        {% else %}
+        <li>No active troughs are linked to this paddock.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('web.farm_water_workspace', farm_id=paddock.farm_id) }}">Open Farm Water Workspace</a>
+</section>
+
+<section class="card">
   <h2>Current Weighted Stock</h2>
   <table>
     <thead>

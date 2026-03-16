@@ -15,6 +15,16 @@ class Farm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     rainfall_records = db.relationship(
         "RainfallRecord", back_populates="farm", cascade="all, delete-orphan"
     )
+    water_assets = db.relationship(
+        "WaterAsset",
+        back_populates="farm",
+        cascade="all, delete-orphan",
+    )
+    water_connections = db.relationship(
+        "WaterConnection",
+        back_populates="farm",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         db.CheckConstraint(

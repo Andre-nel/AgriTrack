@@ -12,6 +12,7 @@ from app.models.snapshot import DailyStockSnapshot
 from app.models.stock_ledger import StockLedgerEntry
 from app.models.task import Task, TaskComment, TaskLink, TaskSpace, TaskSpaceComment, TaskStatusTransition
 from app.models.user import User, UserFarmRole
+from app.models.water import WaterAsset, WaterAssetServedPaddock, WaterConnection
 
 __all__ = [
     "AnimalGroupBalance",
@@ -40,4 +41,7 @@ __all__ = [
     "TaskStatusTransition",
     "User",
     "UserFarmRole",
+    "WaterAsset",
+    "WaterAssetServedPaddock",
+    "WaterConnection",
 ]

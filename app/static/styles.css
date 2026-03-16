@@ -131,6 +131,20 @@ body {
   display: flex;
   gap: 0.8rem;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.check-row input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
 }
 
 .paddock-page-header {
@@ -345,6 +359,30 @@ a { color: #1b5f49; }
   margin-top: 0.65rem;
 }
 
+.water-map-filter-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.water-map-filter-group {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem 0.8rem;
+}
+
+.water-map-filter-group legend {
+  padding: 0 0.25rem;
+  font-weight: 600;
+}
+
+.water-map-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.55rem 0.8rem;
+}
+
 .map-legend span {
   display: inline-flex;
   align-items: center;
@@ -385,6 +423,9 @@ a { color: #1b5f49; }
 .map-legend .swatch.s9 { background: #e06666; }
 .map-legend .swatch.s10 { background: #cc0000; }
 .map-legend .swatch.unknown { background: #8f9a96; }
+.map-legend .swatch.water-asset-swatch { background: #166f9a; }
+.map-legend .swatch.water-pumped-swatch { background: #d17f2a; }
+.map-legend .swatch.water-gravity-swatch { background: #2c7fb8; }
 
 .map-popup-table {
   width: 100%;
@@ -430,6 +471,27 @@ a { color: #1b5f49; }
 
 .map-paddock-label-bold {
   font-weight: 800;
+}
+
+.water-asset-marker-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.water-asset-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(9, 24, 40, 0.78);
+  background: var(--water-asset-color, #2f7a5c);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow: 0 5px 14px rgba(10, 25, 41, 0.25);
 }
 
 .stock-float-marker-wrap {
@@ -1032,6 +1094,37 @@ a { color: #1b5f49; }
   padding: 0;
   margin: 1rem 0 0;
   list-style: none;
+}
+
+.water-item {
+  margin-bottom: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfa;
+  overflow: hidden;
+}
+
+.water-item:last-child {
+  margin-bottom: 0;
+}
+
+.water-item summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.8rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.water-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.water-item-form {
+  padding: 0 0.8rem 0.8rem;
+  border-top: 1px solid var(--line);
 }
 
 .comment-card,

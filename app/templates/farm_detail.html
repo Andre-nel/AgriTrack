@@ -11,11 +11,12 @@
   <article class="card stat"><h2>Paddocks</h2><p>{{ paddocks|length }}</p></article>
   <article class="card stat"><h2>Mobs</h2><p>{{ mobs|length }}</p></article>
   <article class="card stat"><h2>Rainfall Logs</h2><p>{{ rainfall|length }}</p></article>
+  <article class="card stat"><h2>Water Assets</h2><p>{{ water_summary.active_asset_count }}</p></article>
 </div>
 
 <section class="card">
   <h2>Farm Map</h2>
-  <p class="muted">Paddocks are coloured by year-to-date grazing pressure (used SDH vs annual SDH capacity).</p>
+  <p class="muted">Paddocks are coloured by year-to-date grazing pressure (used SDH vs annual SDH capacity), with water assets and links overlaid when available.</p>
   <div
     id="farm-map"
     data-url="{{ url_for('web.farm_map_data', farm_id=farm.id) }}"
@@ -39,6 +40,11 @@
     </span>
     <span class="scale-label">High / Over</span>
     <span><i class="swatch unknown"></i>No Data</span>
+  </div>
+  <div class="map-legend" aria-hidden="true">
+    <span><i class="swatch water-asset-swatch"></i>Water Asset</span>
+    <span><i class="swatch water-pumped-swatch"></i>Pumped Link</span>
+    <span><i class="swatch water-gravity-swatch"></i>Gravity Link</span>
   </div>
   <p id="farm-map-status" class="muted">Loading map...</p>
 </section>
@@ -127,6 +133,16 @@
       {% endfor %}
     </tbody>
   </table>
+</section>
+
+<section class="card">
+  <h2>Water Network</h2>
+  <p class="muted">
+    {{ water_summary.active_asset_count }} active asset(s),
+    {{ water_summary.active_connection_count }} active connection(s),
+    {{ water_summary.review_asset_count }} asset(s) still need review.
+  </p>
+  <a class="btn" href="{{ url_for('web.farm_water_workspace', farm_id=farm.id) }}">Open Water Workspace</a>
 </section>
 
 <section class="split">
