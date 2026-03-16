@@ -57,10 +57,23 @@ def _style_map_xml(style_map_id: str, style_id: str) -> str:
 """
 
 
-def _point_placemark_xml(name: str, style_url: str, lon: float, lat: float) -> str:
+def _point_placemark_xml(
+    name: str,
+    style_url: str,
+    lon: float,
+    lat: float,
+    *,
+    description_html: str = "",
+) -> str:
+    description_xml = (
+        f"\n      <description><![CDATA[{description_html}]]></description>"
+        if description_html
+        else ""
+    )
     return f"""
     <Placemark>
       <name>{name}</name>
+      {description_xml}
       <styleUrl>{style_url}</styleUrl>
       <Point>
         <coordinates>{lon:.6f},{lat:.6f},0</coordinates>
@@ -98,17 +111,29 @@ def _write_map(app, farm_name: str, file_bytes: bytes):
     (maps_dir / f"{farm_name}.kml").write_bytes(file_bytes)
 
 
-def test_import_farm_creates_water_assets_from_recognized_point_styles(client, app, tmp_path):
+def test_import_farm_creates_water_assets_from_recognized_point_descriptions(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     file_bytes = _kml_bytes(
-        _style_xml("borehole-style", "03EF12345"),
-        _style_xml("trough-style", "0EB62999"),
+        _style_xml("borehole-style", "GENERIC001"),
+        _style_xml("trough-style", "GENERIC002"),
         _style_map_xml("trough-style-map", "trough-style"),
-        _style_xml("cement-red-style", "02494877"),
+        _style_xml("cement-red-style", "0EB62999"),
         _placemark_polygon_xml("North Camp", _square_ring(25.0000, -32.0000, 0.0010)),
-        _point_placemark_xml("BH-1", "#borehole-style", 25.0003, -32.0003),
-        _point_placemark_xml("Trough Red", "#trough-style-map", 25.0007, -32.0007),
-        _point_placemark_xml("Cement Dam Red", "#cement-red-style", 25.0015, -32.0005),
+        _point_placemark_xml("BH-1", "#borehole-style", 25.0003, -32.0003, description_html="<div>BH</div>"),
+        _point_placemark_xml(
+            "Trough Red",
+            "#trough-style-map",
+            25.0007,
+            -32.0007,
+            description_html="<div>TR</div>",
+        ),
+        _point_placemark_xml(
+            "Cement Dam Red",
+            "#cement-red-style",
+            25.0015,
+            -32.0005,
+            description_html="<div>CD</div>",
+        ),
     )
 
     response = _post_import_farm(
@@ -150,11 +175,11 @@ def test_import_farm_creates_water_assets_from_recognized_point_styles(client, a
 def test_import_farm_reimports_water_assets_and_archives_missing_imported_rows(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     first_import = _kml_bytes(
-        _style_xml("borehole-style", "03EF5555"),
-        _style_xml("trough-style", "2ECA7777"),
+        _style_xml("borehole-style", "GENERIC101"),
+        _style_xml("trough-style", "GENERIC102"),
         _placemark_polygon_xml("North Camp", _square_ring(25.0000, -32.0000, 0.0010)),
-        _point_placemark_xml("BH-1", "#borehole-style", 25.0002, -32.0002),
-        _point_placemark_xml("TR-1", "#trough-style", 25.0007, -32.0007),
+        _point_placemark_xml("BH-1", "#borehole-style", 25.0002, -32.0002, description_html="<div>BH</div>"),
+        _point_placemark_xml("TR-1", "#trough-style", 25.0007, -32.0007, description_html="<div>TR</div>"),
     )
     response = _post_import_farm(client, filename="Water Sync Farm.kml", file_bytes=first_import)
     assert response.status_code == 302
@@ -180,9 +205,9 @@ def test_import_farm_reimports_water_assets_and_archives_missing_imported_rows(c
         trough_id = str(trough.id)
 
     second_import = _kml_bytes(
-        _style_xml("borehole-style", "03EF5555"),
+        _style_xml("borehole-style", "GENERIC101"),
         _placemark_polygon_xml("North Camp", _square_ring(25.0000, -32.0000, 0.0010)),
-        _point_placemark_xml("BH-1", "#borehole-style", 25.0009, -32.0009),
+        _point_placemark_xml("BH-1", "#borehole-style", 25.0009, -32.0009, description_html="<div>BH</div>"),
     )
     response = _post_import_farm(client, filename="Water Sync Farm.kml", file_bytes=second_import)
     assert response.status_code == 302
@@ -204,6 +229,28 @@ def test_import_farm_reimports_water_assets_and_archives_missing_imported_rows(c
         assert manual_asset is not None
         assert manual_asset.active is True
         assert manual_asset.import_placemark_name is None
+
+
+def test_import_farm_repeated_trough_placemark_keeps_single_served_paddock_link(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    file_bytes = _kml_bytes(
+        _style_xml("trough-style", "GENERIC202"),
+        _placemark_polygon_xml("North Camp", _square_ring(25.0000, -32.0000, 0.0010)),
+        _point_placemark_xml("TR-1", "#trough-style", 25.0004, -32.0004, description_html="<div>TR</div>"),
+        _point_placemark_xml("TR-1", "#trough-style", 25.0005, -32.0005, description_html="<div>TR</div>"),
+    )
+
+    response = _post_import_farm(client, filename="Repeated Trough Farm.kml", file_bytes=file_bytes)
+    assert response.status_code == 302
+
+    with app.app_context():
+        farm = Farm.query.filter_by(name="Repeated Trough Farm").first()
+        assert farm is not None
+        troughs = WaterAsset.query.filter_by(farm_id=farm.id, name="TR-1").all()
+        assert len(troughs) == 1
+        trough = troughs[0]
+        assert len(trough.served_paddock_links) == 1
+        assert trough.asset_type == "trough"
 
 
 def test_water_asset_and_connection_api_validation(client, app):

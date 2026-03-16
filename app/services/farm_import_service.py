@@ -1,8 +1,10 @@
 from decimal import Decimal, ROUND_DOWN
+from html import unescape
 from math import cos, radians
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 import json
+import re
 import xml.etree.ElementTree as ET
 
 from app.extensions import db
@@ -23,20 +25,17 @@ EARTH_RADIUS_M = 6371008.8
 INVALID_FARM_FILENAME_CHARS = set('<>:"/\\|?*')
 FOUR_DECIMAL_PLACES = Decimal("0.0001")
 GEOMETRY_EPSILON = 1e-9
-WATER_STYLE_PREFIXES = (
-    ("03EF", "borehole"),
-    ("0E643", "pit"),
-    ("01D3", "windmill"),
-    ("024E", "solarpump"),
-    ("3BF", "cement_dam"),
-    ("024948", "cement_dam"),
-    ("0CB", "tank"),
-    ("0D08", "ground_dam"),
-    ("053182", "weir"),
-    ("2ECA", "trough"),
-    ("044130", "trough"),
-    ("0EB629", "trough"),
-)
+WATER_ASSET_CODE_MAP = {
+    "BH": "borehole",
+    "PT": "pit",
+    "WM": "windmill",
+    "SP": "solarpump",
+    "CD": "cement_dam",
+    "TK": "tank",
+    "GD": "ground_dam",
+    "WR": "weir",
+    "TR": "trough",
+}
 
 
 class FarmImportService:
@@ -85,17 +84,8 @@ class FarmImportService:
         except ET.ParseError as exc:
             raise ValueError(parse_error_message) from exc
 
-    @staticmethod
-    def _xml_identifier(element) -> str | None:
-        for key, value in element.attrib.items():
-            if key == "id" or key.endswith("}id"):
-                text = (value or "").strip()
-                if text:
-                    return text
-        return None
-
     @classmethod
-    def _style_identifier_tokens(cls, value: str | None) -> set[str]:
+    def _identifier_tokens(cls, value: str | None) -> set[str]:
         raw = (value or "").strip()
         if not raw:
             return set()
@@ -115,88 +105,12 @@ class FarmImportService:
         return tokens
 
     @classmethod
-    def _style_tokens_from_style_element(cls, style_element) -> set[str]:
-        if style_element is None:
+    def _description_tokens(cls, value: str | None) -> set[str]:
+        if not value:
             return set()
-        tokens = set()
-        tokens.update(cls._style_identifier_tokens(cls._xml_identifier(style_element)))
-        href = style_element.findtext(
-            ".//k:IconStyle/k:Icon/k:href",
-            default="",
-            namespaces=KML_NAMESPACES,
-        )
-        tokens.update(cls._style_identifier_tokens(href))
-        return tokens
-
-    @classmethod
-    def _build_style_lookup(cls, root) -> tuple[dict[str, set[str]], dict[str, str]]:
-        styles: dict[str, set[str]] = {}
-        style_maps: dict[str, str] = {}
-
-        for style in root.findall(".//k:Style", KML_NAMESPACES):
-            style_id = cls._xml_identifier(style)
-            if not style_id:
-                continue
-            key = "".join(char for char in style_id.upper() if char.isalnum())
-            tokens = cls._style_tokens_from_style_element(style)
-            tokens.update(cls._style_identifier_tokens(style_id))
-            styles[key] = tokens
-
-        for style in root.findall(".//gx:CascadingStyle", KML_NAMESPACES):
-            style_id = cls._xml_identifier(style)
-            if not style_id:
-                continue
-            key = "".join(char for char in style_id.upper() if char.isalnum())
-            tokens = cls._style_identifier_tokens(style_id)
-            tokens.update(cls._style_tokens_from_style_element(style.find("k:Style", KML_NAMESPACES)))
-            styles[key] = tokens
-
-        for style_map in root.findall(".//k:StyleMap", KML_NAMESPACES):
-            style_id = cls._xml_identifier(style_map)
-            if not style_id:
-                continue
-            selected_style_url = ""
-            for pair in style_map.findall("k:Pair", KML_NAMESPACES):
-                pair_key = (pair.findtext("k:key", default="", namespaces=KML_NAMESPACES) or "").strip()
-                style_url = (pair.findtext("k:styleUrl", default="", namespaces=KML_NAMESPACES) or "").strip()
-                if pair_key == "normal" and style_url:
-                    selected_style_url = style_url
-                    break
-                if not selected_style_url and style_url:
-                    selected_style_url = style_url
-            if not selected_style_url:
-                continue
-            key = "".join(char for char in style_id.upper() if char.isalnum())
-            style_maps[key] = selected_style_url
-
-        return styles, style_maps
-
-    @classmethod
-    def _resolve_style_tokens(
-        cls,
-        style_url: str | None,
-        styles: dict[str, set[str]],
-        style_maps: dict[str, str],
-        *,
-        seen: set[str] | None = None,
-    ) -> set[str]:
-        tokens = cls._style_identifier_tokens(style_url)
-        normalized_key = "".join(char for char in (style_url or "").upper() if char.isalnum())
-        if not normalized_key:
-            return tokens
-
-        if seen is None:
-            seen = set()
-        if normalized_key in seen:
-            return tokens
-        seen.add(normalized_key)
-
-        if normalized_key in styles:
-            tokens.update(styles[normalized_key])
-        mapped_style_url = style_maps.get(normalized_key)
-        if mapped_style_url:
-            tokens.update(cls._resolve_style_tokens(mapped_style_url, styles, style_maps, seen=seen))
-        return tokens
+        text = unescape(value)
+        text = re.sub(r"<[^>]+>", " ", text)
+        return cls._identifier_tokens(text)
 
     @classmethod
     def _parse_managed_point_hints(cls, managed_point_hints) -> dict[str, str]:
@@ -222,13 +136,13 @@ class FarmImportService:
     def _recognized_asset_type(
         cls,
         placemark_name: str,
-        style_tokens: set[str],
+        description_tokens: set[str],
         managed_point_hints: dict[str, str],
     ) -> str | None:
-        for token in style_tokens:
-            for prefix, asset_type in WATER_STYLE_PREFIXES:
-                if token.startswith(prefix):
-                    return asset_type
+        for token in description_tokens:
+            asset_type = WATER_ASSET_CODE_MAP.get(token)
+            if asset_type:
+                return asset_type
 
         hint = managed_point_hints.get(cls.normalize_name(placemark_name).casefold())
         if not hint:
@@ -238,10 +152,10 @@ class FarmImportService:
         if normalized_hint in WaterNetworkService.ASSET_TYPES:
             return normalized_hint
 
-        for token in cls._style_identifier_tokens(hint):
-            for prefix, asset_type in WATER_STYLE_PREFIXES:
-                if token.startswith(prefix):
-                    return asset_type
+        for token in cls._identifier_tokens(hint):
+            asset_type = WATER_ASSET_CODE_MAP.get(token)
+            if asset_type:
+                return asset_type
         return None
 
     @staticmethod
@@ -884,7 +798,6 @@ class FarmImportService:
         paddocks: list[dict],
         managed_point_hints: dict[str, str],
     ) -> list[dict]:
-        styles, style_maps = cls._build_style_lookup(root)
         water_assets = []
 
         for placemark in root.findall(".//k:Placemark", KML_NAMESPACES):
@@ -898,13 +811,14 @@ class FarmImportService:
                 continue
 
             style_url = (placemark.findtext("k:styleUrl", default="", namespaces=KML_NAMESPACES) or "").strip()
-            style_tokens = set()
-            style_tokens.update(cls._resolve_style_tokens(style_url, styles, style_maps))
-            style_tokens.update(
-                cls._style_tokens_from_style_element(placemark.find("k:Style", KML_NAMESPACES))
+            description_tokens = cls._description_tokens(
+                placemark.findtext("k:description", default="", namespaces=KML_NAMESPACES)
             )
-
-            asset_type = cls._recognized_asset_type(placemark_name, style_tokens, managed_point_hints)
+            asset_type = cls._recognized_asset_type(
+                placemark_name,
+                description_tokens,
+                managed_point_hints,
+            )
             if not asset_type:
                 continue
 

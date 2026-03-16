@@ -146,7 +146,8 @@ class WaterNetworkService:
     def _paddock_map_for_ids(cls, farm_id: str, paddock_ids: list[str]) -> dict[str, Paddock]:
         if not paddock_ids:
             return {}
-        rows = Paddock.query.filter(Paddock.farm_id == farm_id, Paddock.id.in_(paddock_ids)).all()
+        with db.session.no_autoflush:
+            rows = Paddock.query.filter(Paddock.farm_id == farm_id, Paddock.id.in_(paddock_ids)).all()
         return {str(row.id): row for row in rows}
 
     @classmethod
@@ -326,15 +327,29 @@ class WaterNetworkService:
 
     @classmethod
     def _sync_served_paddocks(cls, asset: WaterAsset, served_paddock_ids: list[str]) -> None:
-        existing_by_id = {str(link.paddock_id): link for link in asset.served_paddock_links}
-        for paddock_id, link in list(existing_by_id.items()):
-            if paddock_id not in served_paddock_ids:
-                db.session.delete(link)
+        target_ids = list(dict.fromkeys(served_paddock_ids))
+        target_id_set = set(target_ids)
+        existing_by_id: dict[str, WaterAssetServedPaddock] = {}
 
-        for paddock_id in served_paddock_ids:
+        for link in list(asset.served_paddock_links):
+            paddock_id = str(link.paddock_id)
+            if paddock_id in existing_by_id:
+                asset.served_paddock_links.remove(link)
+                continue
+            existing_by_id[paddock_id] = link
+
+        for paddock_id, link in list(existing_by_id.items()):
+            if paddock_id in target_id_set:
+                continue
+            asset.served_paddock_links.remove(link)
+            existing_by_id.pop(paddock_id, None)
+
+        for paddock_id in target_ids:
             if paddock_id in existing_by_id:
                 continue
-            db.session.add(WaterAssetServedPaddock(water_asset_id=asset.id, paddock_id=paddock_id))
+            link = WaterAssetServedPaddock(paddock_id=paddock_id)
+            asset.served_paddock_links.append(link)
+            existing_by_id[paddock_id] = link
 
     @classmethod
     def apply_asset_payload(
