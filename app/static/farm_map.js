@@ -39,17 +39,6 @@
     "#e06666",
     "#cc0000",
   ];
-  const waterAssetColors = {
-    borehole: "#166f9a",
-    pit: "#8d6442",
-    windmill: "#5e7183",
-    solarpump: "#cc7b22",
-    cement_dam: "#2b6d7f",
-    tank: "#2f8f88",
-    ground_dam: "#7b5c37",
-    weir: "#4f73a8",
-    trough: "#1f5fb8",
-  };
   const waterAssetCodes = {
     borehole: "BH",
     pit: "PT",
@@ -61,6 +50,31 @@
     weir: "WR",
     trough: "TR",
   };
+  const storageWaterAssetTypes = new Set(["cement_dam", "tank", "ground_dam", "weir", "trough"]);
+  const levelOutlineWaterAssetTypes = new Set(["cement_dam", "tank", "trough"]);
+  const waterLevelVisuals = {
+    full: { ratio: 1, outline: "#2563eb" },
+    high: { ratio: 0.75, outline: "#3b82f6" },
+    half: { ratio: 0.5, outline: "#60a5fa" },
+    low: { ratio: 0.25, outline: "#fca5a5" },
+    empty: { ratio: 0, outline: "#ef4444" },
+  };
+  const waterAssetStatusColors = {
+    operational: "#16a34a",
+    limited: "#f59e0b",
+    dry: "#ef4444",
+    service_due: "#f59e0b",
+    down: "#ef4444",
+    leaking: "#f59e0b",
+    silted: "#f59e0b",
+    damaged: "#ef4444",
+  };
+  const neutralWaterAssetColor = "#64748b";
+  const waterAssetMarkerPath =
+    "M16 2C9.1 2 3.5 7.6 3.5 14.5c0 8.7 7.6 14.6 11.2 22.1.5 1 1.6 1 2.1 0C20.4 29.1 28 23.2 28 14.5 28 7.6 22.4 2 16 2Z";
+  const waterDropPath = "M16 9c-3.4 4-5 6.7-5 9.1a5 5 0 0 0 10 0c0-2.4-1.6-5.1-5-9.1Z";
+  const waterAssetFontFamily = "'Segoe UI', 'Trebuchet MS', sans-serif";
+  let waterAssetMarkerSequence = 0;
   if (!dataUrl) {
     if (statusElement) {
       statusElement.textContent = "Map data URL is missing.";
@@ -105,6 +119,13 @@
 
   function normalizeSpecies(value) {
     return String(value || "").trim().toLowerCase();
+  }
+
+  function normalizeKey(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
   }
 
   function formatHeadCount(value) {
@@ -228,26 +249,144 @@
 
   function waterAssetMarker(feature, latlng) {
     const props = (feature && feature.properties) || {};
-    const assetType = String(props.asset_type || "").trim().toLowerCase();
-    const color = waterAssetColors[assetType] || "#2f7a5c";
+    const assetType = normalizeAssetType(props.asset_type);
     const code = waterAssetCodes[assetType] || "W";
+    const html = storageWaterAssetTypes.has(assetType)
+      ? storageWaterAssetSvg(props, code)
+      : statusWaterAssetSvg(props, code);
     return L.marker(latlng, {
       icon: L.divIcon({
         className: "water-asset-marker-wrap",
-        html:
-          '<span class="water-asset-marker" style="--water-asset-color:' +
-          escapeHtml(color) +
-          '">' +
-          escapeHtml(code) +
-          "</span>",
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
+        html: '<span class="water-asset-marker">' + html + "</span>",
+        iconSize: [32, 42],
+        iconAnchor: [16, 37],
       }),
     });
   }
 
   function normalizeAssetType(value) {
-    return String(value || "").trim().toLowerCase();
+    return normalizeKey(value);
+  }
+
+  function waterAssetStatusColor(status) {
+    return waterAssetStatusColors[normalizeKey(status)] || neutralWaterAssetColor;
+  }
+
+  function waterAssetLevelVisual(waterLevel) {
+    return waterLevelVisuals[normalizeKey(waterLevel)] || null;
+  }
+
+  function waterAssetOutlineColor(assetType, status, waterLevel) {
+    const normalizedStatus = normalizeKey(status);
+    const levelVisual = waterAssetLevelVisual(waterLevel);
+    if (storageWaterAssetTypes.has(assetType)) {
+      if (normalizedStatus && normalizedStatus !== "operational") {
+        return waterAssetStatusColor(normalizedStatus);
+      }
+      if (levelOutlineWaterAssetTypes.has(assetType) && levelVisual) {
+        return levelVisual.outline;
+      }
+      if (normalizedStatus) {
+        return waterAssetStatusColor(normalizedStatus);
+      }
+      return neutralWaterAssetColor;
+    }
+    return waterAssetStatusColor(normalizedStatus);
+  }
+
+  function waterAssetLabel(props, includeWaterLevel) {
+    const bits = [];
+    const name = String(props.name || "").trim();
+    const assetTypeLabel = String(props.asset_type_label || "Water Asset").trim();
+    const status = normalizeKey(props.status).replace(/_/g, " ");
+    const waterLevel = normalizeKey(props.water_level).replace(/_/g, " ");
+
+    if (name) {
+      bits.push(name);
+    }
+    bits.push(assetTypeLabel);
+    if (status) {
+      bits.push("status " + status);
+    }
+    if (includeWaterLevel && waterLevel) {
+      bits.push("water level " + waterLevel);
+    }
+    return bits.join(", ");
+  }
+
+  function statusWaterAssetSvg(props, code) {
+    const fillColor = waterAssetStatusColor(props.status);
+    return [
+      '<svg class="water-asset-marker-svg" xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42" role="img" aria-label="',
+      escapeHtml(waterAssetLabel(props, false) || "Water asset"),
+      '">',
+      '<path d="',
+      waterAssetMarkerPath,
+      '" fill="',
+      fillColor,
+      '" stroke="#0F172A" stroke-width="1.5" stroke-linejoin="round"></path>',
+      '<circle cx="16" cy="14.5" r="8.6" fill="#FFFFFF" fill-opacity="0.16"></circle>',
+      '<circle cx="16" cy="14.5" r="8.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="1"></circle>',
+      '<text x="16" y="17.7" text-anchor="middle" font-family="',
+      waterAssetFontFamily,
+      '" font-size="10.8" font-weight="700" fill="#FFFFFF" letter-spacing="0.3">',
+      escapeHtml(code),
+      "</text>",
+      "</svg>",
+    ].join("");
+  }
+
+  function storageWaterAssetSvg(props, code) {
+    const markerId = "water-asset-level-" + String((waterAssetMarkerSequence += 1));
+    const levelVisual = waterAssetLevelVisual(props.water_level);
+    const outlineColor = waterAssetOutlineColor(props.asset_type, props.status, props.water_level);
+    const fillRatio = levelVisual ? levelVisual.ratio : 0;
+    const dropletTop = 9;
+    const dropletHeight = 14;
+    const fillHeight = dropletHeight * fillRatio;
+    const fillY = dropletTop + (dropletHeight - fillHeight);
+
+    return [
+      '<svg class="water-asset-marker-svg" xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42" role="img" aria-label="',
+      escapeHtml(waterAssetLabel(props, true) || "Water asset"),
+      '">',
+      "<defs>",
+      '<clipPath id="',
+      markerId,
+      '"><rect x="10.4" y="',
+      String(fillY.toFixed(2)),
+      '" width="11.2" height="',
+      String(fillHeight.toFixed(2)),
+      '"></rect></clipPath>',
+      "</defs>",
+      '<path d="',
+      waterAssetMarkerPath,
+      '" fill="#FFFFFF" stroke="',
+      outlineColor,
+      '" stroke-width="1.8" stroke-linejoin="round"></path>',
+      '<circle cx="16" cy="14.5" r="8.8" fill="#F8FAFC" fill-opacity="0.98" stroke="',
+      outlineColor,
+      '" stroke-opacity="0.18" stroke-width="1"></circle>',
+      '<path d="',
+      waterDropPath,
+      '" fill="#EFF6FF"></path>',
+      fillHeight > 0
+        ? '<path d="' + waterDropPath + '" fill="#2563EB" clip-path="url(#' + markerId + ')"></path>'
+        : "",
+      '<path d="',
+      waterDropPath,
+      '" fill="none" stroke="',
+      outlineColor,
+      '" stroke-width="1.25" stroke-linejoin="round"></path>',
+      '<text x="16" y="29.4" text-anchor="middle" font-family="',
+      waterAssetFontFamily,
+      '" font-size="7.5" font-weight="800" fill="',
+      outlineColor,
+      '" letter-spacing="0.5">',
+      escapeHtml(code),
+      "</text>",
+      "</svg>",
+    ].join("");
   }
 
   function isWaterAssetVisible(properties) {
@@ -300,6 +439,15 @@
     }
 
     if (props.feature_type === "paddock") {
+      if (normalizeKey(props.water_alert_level) === "critical") {
+        return {
+          color: "#b91c1c",
+          weight: 2.4,
+          fillColor: "#fca5a5",
+          fillOpacity: paddockFillMode === "outline" ? 0.2 : 0.56,
+          opacity: 0.98,
+        };
+      }
       if (paddockFillMode === "outline") {
         return {
           color: "#f6efb6",
@@ -342,13 +490,13 @@
           : "None";
         const locationText = props.location_paddock_name ? escapeHtml(props.location_paddock_name) : "None";
         const reviewText = props.needs_review ? "Yes" : "No";
-        const assetTarget = props.id ? "asset-" + String(props.id) : "";
+        const networkText = props.network_warning ? escapeHtml(props.network_warning) : "-";
         const openAssetLink =
-          props.asset_workspace_url && assetTarget
+          props.asset_workspace_url && props.id
             ? '<a href="' +
-              escapeHtml(props.asset_workspace_url + "#" + assetTarget) +
-              '" data-water-asset-target="' +
-              escapeHtml(assetTarget) +
+              escapeHtml(props.asset_workspace_url + "?open_asset_id=" + encodeURIComponent(String(props.id)) + "#water-assets") +
+              '" data-open-water-asset-modal="' +
+              escapeHtml(String(props.id)) +
               '">Open asset</a>'
             : "";
         return [
@@ -359,6 +507,7 @@
           "<tr><td>Location Paddock</td><td>" + locationText + "</td></tr>",
           "<tr><td>Status</td><td>" + escapeHtml(props.status || "-") + "</td></tr>",
           "<tr><td>Water Level</td><td>" + escapeHtml(props.water_level || "-") + "</td></tr>",
+          "<tr><td>Network</td><td>" + networkText + "</td></tr>",
           "<tr><td>Capacity (m3)</td><td>" + formatNumber(props.capacity_m3, 2) + "</td></tr>",
           "<tr><td>Needs Review</td><td>" + reviewText + "</td></tr>",
           "</table>",
@@ -427,6 +576,10 @@
         ? "-"
         : formatNumber(props.grazing_pressure_ratio * 100, 1) + "%";
     const currentActivityLabel = escapeHtml(props.current_activity_label || "Current Activity");
+    const waterWarningText = String(props.water_alert_message || "").trim();
+    const waterWarningBlock = waterWarningText
+      ? '<div class="map-water-alert"><strong>Water Warning</strong><br>' + escapeHtml(waterWarningText) + "</div>"
+      : "";
 
     return [
       farmLine,
@@ -442,8 +595,25 @@
       "</table>",
       "<strong>Species / Head</strong><br>" + speciesText,
       "<br><strong>Active Mobs</strong><br>" + mobText,
+      waterWarningBlock ? "<br>" + waterWarningBlock : "",
       detailLink ? "<br>" + detailLink : "",
     ].join("");
+  }
+
+  function bindWaterAlertTooltip(feature, geoLayer) {
+    const props = (feature && feature.properties) || {};
+    if (props.feature_type !== "paddock") {
+      return;
+    }
+    const waterAlertMessage = String(props.water_alert_message || "").trim();
+    if (!waterAlertMessage) {
+      return;
+    }
+    geoLayer.bindTooltip(escapeHtml(waterAlertMessage), {
+      sticky: true,
+      direction: "top",
+      className: "map-water-alert-tooltip",
+    });
   }
 
   function getFullscreenElement() {
@@ -468,38 +638,6 @@
       return document.webkitExitFullscreen();
     }
     return Promise.reject(new Error("Full-screen mode is not supported in this browser."));
-  }
-
-  function openWaterAssetDetails(targetId, options) {
-    const details = targetId ? document.getElementById(targetId) : null;
-    if (!details || details.tagName !== "DETAILS") {
-      return false;
-    }
-
-    details.open = true;
-    if (options && options.updateHash && window.location.hash !== "#" + targetId) {
-      window.history.replaceState(null, "", "#" + targetId);
-    }
-
-    window.setTimeout(function () {
-      details.scrollIntoView({
-        behavior: options && options.smooth ? "smooth" : "auto",
-        block: "start",
-      });
-      const summary = details.querySelector("summary");
-      if (summary && typeof summary.focus === "function") {
-        summary.focus({ preventScroll: true });
-      }
-    }, 0);
-    return true;
-  }
-
-  function openWaterAssetFromHash() {
-    const hash = String(window.location.hash || "").replace(/^#/, "");
-    if (!hash || hash.indexOf("asset-") !== 0) {
-      return;
-    }
-    openWaterAssetDetails(hash, { smooth: false });
   }
 
   const map = L.map(mapElement, { scrollWheelZoom: true });
@@ -637,19 +775,6 @@
     updateFullscreenButton();
     refreshMapSize();
   });
-  document.addEventListener("click", function (event) {
-    const link = event.target.closest("[data-water-asset-target]");
-    if (!link) {
-      return;
-    }
-    const targetId = String(link.dataset.waterAssetTarget || "").trim();
-    if (openWaterAssetDetails(targetId, { smooth: true, updateHash: true })) {
-      event.preventDefault();
-    }
-  });
-  window.addEventListener("hashchange", openWaterAssetFromHash);
-  openWaterAssetFromHash();
-
   fetch(dataUrl, { headers: { Accept: "application/json" } })
     .then((response) => {
       if (!response.ok) {
@@ -705,6 +830,7 @@
         },
         onEachFeature: function (feature, geoLayer) {
           geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
+          bindWaterAlertTooltip(feature, geoLayer);
           addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
           addStockFloatMarker(feature, geoLayer, stockFloatLayer);
         },

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}{{ farm.name }} Water Mass Update | AgriTrack{% endblock %}
+{% block content %}
+<section class="paddock-page-header">
+  <div>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_water_workspace', farm_id=farm.id) }}">Back To Water Workspace</a>
+    <h1>{{ farm.name }} Water Mass Update</h1>
+    <p class="muted">Select one or more asset types, then update every matching asset in a table.</p>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Step 1. Select Asset Types</h2>
+  <form method="get" class="grid-form">
+    <fieldset class="water-map-filter-group">
+      <legend>Water Asset Types</legend>
+      <div class="water-map-filter-grid">
+        {% for asset_type in water_asset_types %}
+        <label class="analytics-checkbox">
+          <input
+            type="checkbox"
+            name="asset_type"
+            value="{{ asset_type }}"
+            {% if asset_type in selected_mass_update_asset_types %}checked{% endif %}
+          />
+          <span>{{ water_asset_type_labels[asset_type] }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <div class="row-actions">
+      <button type="submit" class="btn">Load Mass Update Table</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.farm_water_mass_update', farm_id=farm.id) }}">Clear Selection</a>
+    </div>
+  </form>
+</section>
+
+{% if selected_mass_update_asset_types %}
+<section class="card water-mass-update-panel" data-water-mass-update-panel>
+  <div class="water-mass-update-header">
+    <div>
+      <h2>Step 2. Update Assets</h2>
+      <p class="muted">
+        Selected types:
+        {% for asset_type in selected_mass_update_asset_types %}
+        {{ water_asset_type_labels[asset_type] }}{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      </p>
+    </div>
+    {% if selected_mass_update_assets %}
+    <button
+      type="button"
+      class="btn btn-secondary"
+      data-water-mass-update-fullscreen-toggle
+      aria-pressed="false"
+    >
+      Expand Table
+    </button>
+    {% endif %}
+  </div>
+  {% if selected_mass_update_assets %}
+  <form method="post" action="{{ url_for('web.update_water_assets_mass_form', farm_id=farm.id) }}" class="grid-form">
+    {% for asset_type in selected_mass_update_asset_types %}
+    <input type="hidden" name="asset_type" value="{{ asset_type }}" />
+    {% endfor %}
+    <div class="water-mass-update-table-wrap">
+      <table class="water-mass-update-table">
+        <thead>
+          <tr>
+            <th>Asset</th>
+            {% if has_multiple_mass_update_types %}<th>Type</th>{% endif %}
+            {% for field in mass_update_fields %}
+            <th>{{ field.label }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for asset in selected_mass_update_assets %}
+          <tr>
+            <td>
+              <strong>{{ asset.name }}</strong>
+              <input type="hidden" name="asset_id" value="{{ asset.id }}" />
+            </td>
+            {% if has_multiple_mass_update_types %}
+            <td>{{ water_asset_type_labels[asset.asset_type] }}</td>
+            {% endif %}
+            {% for field in mass_update_fields %}
+            {% set applies = asset.asset_type in field.asset_types %}
+            <td>
+              {% if not applies %}
+              <span class="muted">-</span>
+              {% elif field.kind == "checkbox" %}
+              <input type="hidden" name="{{ field.name }}__{{ asset.id }}" value="0" />
+              <input
+                type="checkbox"
+                name="{{ field.name }}__{{ asset.id }}"
+                value="1"
+                {% if asset[field.name] %}checked{% endif %}
+              />
+              {% elif field.kind == "text" %}
+              <input
+                type="text"
+                name="{{ field.name }}__{{ asset.id }}"
+                value="{{ asset[field.name] or '' }}"
+              />
+              {% elif field.kind == "number" %}
+              <input
+                type="number"
+                name="{{ field.name }}__{{ asset.id }}"
+                value="{{ asset[field.name] if asset[field.name] is not none else '' }}"
+                {% if field.step is defined %}step="{{ field.step }}"{% endif %}
+                {% if field.min is defined %}min="{{ field.min }}"{% endif %}
+              />
+              {% elif field.kind == "select" %}
+              <select name="{{ field.name }}__{{ asset.id }}">
+                <option value="">None</option>
+                {% if field.option_source == "paddocks" %}
+                  {% for paddock in mass_update_paddocks %}
+                  <option value="{{ paddock.id }}" {% if asset[field.name] == paddock.id %}selected{% endif %}>
+                    {{ paddock.name }}
+                  </option>
+                  {% endfor %}
+                {% else %}
+                  {% set options = field.options_by_type[asset.asset_type] if field.options_by_type is defined else field.options %}
+                  {% for option in options %}
+                  <option value="{{ option }}" {% if asset[field.name] == option %}selected{% endif %}>
+                    {{ option.replace('_', ' ')|title }}
+                  </option>
+                  {% endfor %}
+                {% endif %}
+              </select>
+              {% elif field.kind == "multiselect" %}
+              <select name="{{ field.name }}__{{ asset.id }}" multiple size="3">
+                {% for paddock in mass_update_paddocks %}
+                <option
+                  value="{{ paddock.id }}"
+                  {% if paddock.id in asset[field.name] %}selected{% endif %}
+                >
+                  {{ paddock.name }}
+                </option>
+                {% endfor %}
+              </select>
+              {% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Mass Update</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.farm_water_workspace', farm_id=farm.id) }}">Done</a>
+    </div>
+  </form>
+  {% else %}
+  <p>No water assets match the selected type filters.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='farm_water_mass_update.js') }}"></script>
+{% endblock %}

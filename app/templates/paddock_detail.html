@@ -208,16 +208,17 @@
       </ul>
     </div>
     <div>
-      <h3>Troughs Serving This Paddock</h3>
+      <h3>Water Points Serving This Paddock</h3>
       <ul class="link-list-clean">
-        {% for asset in serving_troughs %}
+        {% for asset in serving_water_assets %}
         <li>
           <strong>{{ asset.name }}</strong>
+          <span class="muted">{{ water_asset_type_labels[asset.asset_type] }}</span>
           {% if asset.location_paddock %}<span class="muted">Located in {{ asset.location_paddock.name }}</span>{% endif %}
           {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
         </li>
         {% else %}
-        <li>No active troughs are linked to this paddock.</li>
+        <li>No active water points are linked to this paddock.</li>
         {% endfor %}
       </ul>
     </div>

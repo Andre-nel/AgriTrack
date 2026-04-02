@@ -7,6 +7,7 @@
 <section class="paddock-page-header">
   <div>
     <a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">Back To Farm</a>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_water_mass_update', farm_id=farm.id) }}">Mass Update Assets</a>
     <h1>{{ farm.name }} Water Network</h1>
     <p class="muted">Track water points, storage, troughs, and pipe-fed links for this farm.</p>
   </div>
@@ -141,10 +142,18 @@
             <option value="">None</option>
             {% for option in trough_size_options %}
             <option value="{{ option }}">{{ option|title }}</option>
-            {% endfor %}
+          {% endfor %}
           </select>
         </label>
       </div>
+      <label>Weir Size
+        <select name="weir_size">
+          <option value="">None</option>
+          {% for option in weir_size_options %}
+          <option value="{{ option }}">{{ option|title }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <div class="grid-two">
         <label>Solar Brand
           <input name="solar_brand" />
@@ -244,132 +253,172 @@
   </article>
 </section>
 
-<section class="card">
+<section class="card" id="water-assets">
   <h2>Water Assets</h2>
-  {% for asset in assets %}
-  <details class="water-item" id="asset-{{ asset.id }}">
-    <summary>
-      <strong>{{ asset.name }}</strong>
-      <span class="badge {% if asset.active %}ok{% else %}warn{% endif %}">{{ water_asset_type_labels[asset.asset_type] }}</span>
-      {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
-      {% if asset.location_paddock %}<span class="muted">In {{ asset.location_paddock.name }}</span>{% endif %}
-    </summary>
-    <form method="post" action="{{ url_for('web.update_water_asset_form', farm_id=farm.id, asset_id=asset.id) }}" class="grid-form water-item-form">
-      <div class="grid-two">
-        <label>Name
-          <input name="name" value="{{ asset.name }}" maxlength="120" required />
-        </label>
-        <label>Asset Type
-          <select name="asset_type" required>
-            {% for asset_type in water_asset_types %}
-            <option value="{{ asset_type }}" {% if asset.asset_type == asset_type %}selected{% endif %}>{{ water_asset_type_labels[asset_type] }}</option>
-            {% endfor %}
-          </select>
-        </label>
-      </div>
-      <div class="grid-two">
-        <label>Latitude
-          <input type="number" step="0.0000001" name="latitude" value="{{ asset.latitude if asset.latitude is not none else '' }}" />
-        </label>
-        <label>Longitude
-          <input type="number" step="0.0000001" name="longitude" value="{{ asset.longitude if asset.longitude is not none else '' }}" />
-        </label>
-      </div>
-      <div class="grid-two">
-        <label>Altitude (m)
-          <input type="number" step="0.01" name="altitude_m" value="{{ asset.altitude_m if asset.altitude_m is not none else '' }}" />
-        </label>
-        <label>Location Paddock
-          <select name="location_paddock_id">
-            <option value="">None</option>
-            {% for paddock in paddocks %}
-            <option value="{{ paddock.id }}" {% if asset.location_paddock_id == paddock.id %}selected{% endif %}>{{ paddock.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
-      </div>
-      <div class="grid-two">
-        <label>Status
-          <select name="status">
-            <option value="">None</option>
-            {% for option in all_status_options %}
-            <option value="{{ option }}" {% if asset.status == option %}selected{% endif %}>{{ option.replace('_', ' ')|title }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>Water Level
-          <select name="water_level">
-            <option value="">None</option>
-            {% for option in water_level_options %}
-            <option value="{{ option }}" {% if asset.water_level == option %}selected{% endif %}>{{ option|title }}</option>
-            {% endfor %}
-          </select>
-        </label>
-      </div>
-      <div class="grid-two">
-        <label>Capacity (m3)
-          <input type="number" step="0.01" min="0" name="capacity_m3" value="{{ asset.capacity_m3 if asset.capacity_m3 is not none else '' }}" />
-        </label>
-        <label>Material
-          <select name="material">
-            <option value="">None</option>
-            {% for option in all_material_options %}
-            <option value="{{ option }}" {% if asset.material == option %}selected{% endif %}>{{ option|title }}</option>
-            {% endfor %}
-          </select>
-        </label>
-      </div>
-      <div class="grid-two">
-        <label>Windmill Size (ft)
-          <input type="number" step="1" name="windmill_size_ft" value="{{ asset.windmill_size_ft or '' }}" />
-        </label>
-        <label>Trough Size
-          <select name="trough_size">
-            <option value="">None</option>
-            {% for option in trough_size_options %}
-            <option value="{{ option }}" {% if asset.trough_size == option %}selected{% endif %}>{{ option|title }}</option>
-            {% endfor %}
-          </select>
-        </label>
-      </div>
-      <div class="grid-two">
-        <label>Solar Brand
-          <input name="solar_brand" value="{{ asset.solar_brand or '' }}" />
-        </label>
-        <label>Source System
-          <input name="source_system" value="{{ asset.source_system or '' }}" />
-        </label>
-      </div>
-      <div class="grid-two">
-        <label>Solar kW
-          <input type="number" step="0.01" min="0" name="solar_kw" value="{{ asset.solar_kw if asset.solar_kw is not none else '' }}" />
-        </label>
-        <label>Solar Head (m)
-          <input type="number" step="0.01" min="0" name="solar_head_m" value="{{ asset.solar_head_m if asset.solar_head_m is not none else '' }}" />
-        </label>
-      </div>
-      <label>Served Paddocks
-        <select name="served_paddock_ids" multiple size="4">
-          {% set served_ids = asset.served_paddock_links | map(attribute='paddock_id') | list %}
-          {% for paddock in paddocks %}
-          <option value="{{ paddock.id }}" {% if paddock.id in served_ids %}selected{% endif %}>{{ paddock.name }}</option>
+  <div class="water-asset-list">
+    {% for asset in assets %}
+    <button
+      type="button"
+      class="water-asset-button"
+      id="asset-{{ asset.id }}"
+      data-open-water-asset-modal="{{ asset.id }}"
+      aria-controls="water-asset-modal"
+      aria-haspopup="dialog"
+    >
+      <span class="water-asset-button-main">
+        <span class="water-asset-button-topline">
+          <strong>{{ asset.name }}</strong>
+          <span class="badge {% if asset.active %}ok{% else %}warn{% endif %}">{{ water_asset_type_labels[asset.asset_type] }}</span>
+          {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
+        </span>
+        <span class="water-asset-button-subline">
+          {% if asset.location_paddock %}In {{ asset.location_paddock.name }}{% else %}No paddock location{% endif %}
+          {% if asset.import_placemark_name %} | Imported from {{ asset.import_placemark_name }}{% endif %}
+        </span>
+      </span>
+      <span class="water-asset-button-action">Edit Asset</span>
+    </button>
+    {% else %}
+    <p>No water assets on this farm yet.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<dialog
+  id="water-asset-modal"
+  class="entity-edit-modal water-asset-modal"
+  data-asset-api-base="{{ url_for('water_api.list_water_assets') }}"
+  data-update-url-base="{{ url_for('web.create_water_asset_form', farm_id=farm.id) }}/"
+  data-create-connection-url="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}"
+  data-update-connection-url-base="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}/"
+  data-delete-connection-url-base="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}/"
+>
+  <div class="entity-edit-modal-header">
+    <div>
+      <p class="space-key">Water Asset</p>
+      <h2 data-water-asset-modal-title>Edit Asset</h2>
+      <p class="muted" data-water-asset-modal-subtitle>Load an asset from the map or the list to edit only the fields that apply to that asset type.</p>
+    </div>
+    <button type="button" class="btn btn-secondary" data-close-water-asset-modal>Close</button>
+  </div>
+  <p class="muted water-asset-modal-status" data-water-asset-modal-status hidden></p>
+  <form method="post" class="grid-form" data-water-asset-modal-form hidden>
+    <div class="grid-two">
+      <label data-water-asset-field="name">Name
+        <input name="name" maxlength="120" required />
+      </label>
+      <label data-water-asset-field="asset_type">Asset Type
+        <select name="asset_type" required>
+          {% for asset_type in water_asset_types %}
+          <option value="{{ asset_type }}">{{ water_asset_type_labels[asset_type] }}</option>
           {% endfor %}
         </select>
       </label>
-      {% if asset.import_placemark_name %}
-      <p class="muted">Imported from placemark "{{ asset.import_placemark_name }}"{% if asset.import_style_url %} using {{ asset.import_style_url }}{% endif %}.</p>
-      {% endif %}
-      <div class="row-actions">
-        <label class="check-row"><input type="checkbox" name="active" value="1" {% if asset.active %}checked{% endif %} /> Active</label>
-        <label class="check-row"><input type="checkbox" name="needs_review" value="1" {% if asset.needs_review %}checked{% endif %} /> Needs Review</label>
-        <button type="submit" class="btn">Save Asset</button>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="latitude">Latitude
+        <input type="number" step="0.0000001" name="latitude" />
+      </label>
+      <label data-water-asset-field="longitude">Longitude
+        <input type="number" step="0.0000001" name="longitude" />
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="altitude_m">Altitude (m)
+        <input type="number" step="0.01" name="altitude_m" />
+      </label>
+      <label data-water-asset-field="location_paddock_id">Location Paddock
+        <select name="location_paddock_id">
+          <option value="">None</option>
+          {% for paddock in paddocks %}
+          <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="status">Status
+        <select name="status">
+          <option value="">None</option>
+        </select>
+      </label>
+      <label data-water-asset-field="water_level">Water Level
+        <select name="water_level">
+          <option value="">None</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="capacity_m3">Capacity (m3)
+        <input type="number" step="0.01" min="0" name="capacity_m3" />
+      </label>
+      <label data-water-asset-field="material">Material
+        <select name="material">
+          <option value="">None</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="windmill_size_ft">Windmill Size (ft)
+        <select name="windmill_size_ft">
+          <option value="">None</option>
+        </select>
+      </label>
+      <label data-water-asset-field="trough_size">Trough Size
+        <select name="trough_size">
+          <option value="">None</option>
+        </select>
+      </label>
+    </div>
+    <label data-water-asset-field="weir_size">Weir Size
+      <select name="weir_size">
+        <option value="">None</option>
+      </select>
+    </label>
+    <div class="grid-two">
+      <label data-water-asset-field="solar_brand">Solar Brand
+        <input name="solar_brand" />
+      </label>
+      <label data-water-asset-field="source_system">Source System
+        <input name="source_system" />
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="solar_kw">Solar kW
+        <input type="number" step="0.01" min="0" name="solar_kw" />
+      </label>
+      <label data-water-asset-field="solar_head_m">Solar Head (m)
+        <input type="number" step="0.01" min="0" name="solar_head_m" />
+      </label>
+    </div>
+    <label data-water-asset-field="served_paddock_ids">Served Paddocks
+      <select name="served_paddock_ids" multiple size="4">
+        {% for paddock in paddocks %}
+        <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="muted water-asset-import-note" data-water-asset-import-note hidden></p>
+    <div class="row-actions">
+      <label class="check-row" data-water-asset-field="active"><input type="checkbox" name="active" value="1" /> Active</label>
+      <label class="check-row" data-water-asset-field="needs_review"><input type="checkbox" name="needs_review" value="1" /> Needs Review</label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Asset</button>
+      <button type="button" class="btn btn-secondary" data-close-water-asset-modal>Cancel</button>
+    </div>
+  </form>
+  <section class="water-asset-connection-panel" data-water-asset-connections hidden>
+    <div class="water-asset-connection-panel-header">
+      <div>
+        <h3>Asset Connections</h3>
+        <p class="muted" data-water-asset-connections-summary>Relevant source, destination, and pump links load here for this asset.</p>
       </div>
-    </form>
-  </details>
-  {% else %}
-  <p>No water assets on this farm yet.</p>
-  {% endfor %}
-</section>
+    </div>
+    <div class="water-asset-connection-add" data-water-asset-connection-add></div>
+    <div class="water-asset-connection-list" data-water-asset-connection-list></div>
+  </section>
+</dialog>
 
 <section class="card">
   <h2>Water Connections</h2>
@@ -449,8 +498,11 @@
   <p>No water connections on this farm yet.</p>
   {% endfor %}
 </section>
+<script id="water-asset-editor-config" type="application/json">{{ water_asset_editor_config | tojson }}</script>
 {% endblock %}
 {% block scripts %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script src="{{ url_for('static', filename='farm_map.js') }}"></script>
+<script src="{{ url_for('static', filename='farm_water.js') }}"></script>
+<script src="{{ url_for('static', filename='farm_water_connections.js') }}"></script>
 {% endblock %}

@@ -10,6 +10,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   font-family: "Segoe UI", Tahoma, sans-serif;
@@ -454,6 +455,39 @@ a { color: #1b5f49; }
   margin-bottom: 0.2rem;
 }
 
+.map-water-alert {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(185, 28, 28, 0.2);
+  border-radius: 10px;
+  background: #fff1f2;
+  color: #7f1d1d;
+}
+
+.map-water-alert-tooltip.leaflet-tooltip {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #991b1b;
+  border-radius: 10px;
+  background: #7f1d1d;
+  color: #fff7ed;
+  box-shadow: 0 12px 30px rgba(127, 29, 29, 0.22);
+}
+
+.map-water-alert-tooltip.leaflet-tooltip-top::before {
+  border-top-color: #991b1b;
+}
+
+.map-water-alert-tooltip.leaflet-tooltip-bottom::before {
+  border-bottom-color: #991b1b;
+}
+
+.map-water-alert-tooltip.leaflet-tooltip-left::before {
+  border-left-color: #991b1b;
+}
+
+.map-water-alert-tooltip.leaflet-tooltip-right::before {
+  border-right-color: #991b1b;
+}
+
 .map-paddock-label-wrap {
   background: transparent;
   border: 0;
@@ -485,19 +519,18 @@ a { color: #1b5f49; }
 }
 
 .water-asset-marker {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 2px solid rgba(9, 24, 40, 0.78);
-  background: var(--water-asset-color, #2f7a5c);
-  color: #fff;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  box-shadow: 0 5px 14px rgba(10, 25, 41, 0.25);
+  display: block;
+  width: 32px;
+  height: 42px;
+  line-height: 0;
+}
+
+.water-asset-marker-svg {
+  display: block;
+  width: 32px;
+  height: 42px;
+  overflow: visible;
+  filter: drop-shadow(0 6px 14px rgba(10, 25, 41, 0.22));
 }
 
 .stock-float-marker-wrap {
@@ -1133,6 +1166,59 @@ a { color: #1b5f49; }
   border-top: 1px solid var(--line);
 }
 
+.water-asset-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.water-asset-button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: #fbfcfa;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.water-asset-button:hover,
+.water-asset-button:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 10px 24px rgba(31, 51, 45, 0.08);
+  transform: translateY(-1px);
+}
+
+.water-asset-button-main {
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.water-asset-button-topline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.water-asset-button-subline {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.water-asset-button-action {
+  color: var(--accent);
+  font-size: 0.84rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .comment-card,
 .link-card {
   border: 1px solid var(--line);
@@ -1530,6 +1616,138 @@ a { color: #1b5f49; }
   margin: 0;
 }
 
+.water-asset-modal {
+  width: min(720px, calc(100vw - 2rem));
+}
+
+.water-asset-modal-status,
+.water-asset-import-note {
+  margin: 0;
+}
+
+.water-asset-import-note {
+  padding: 0.7rem 0.8rem;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: #fbfcfa;
+}
+
+.water-asset-connection-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.water-asset-connection-panel-header h3 {
+  margin: 0;
+}
+
+.water-asset-connection-add,
+.water-asset-connection-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.water-asset-connection-add {
+  margin-top: 0.8rem;
+}
+
+.water-asset-connection-list {
+  margin-top: 0.9rem;
+}
+
+.water-asset-connection-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfa;
+  padding: 0.85rem;
+}
+
+.water-asset-connection-card h4,
+.water-asset-connection-card p {
+  margin-top: 0;
+}
+
+.water-asset-connection-note {
+  margin-bottom: 0.75rem;
+}
+
+.water-asset-connection-fixed {
+  padding: 0.72rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.water-asset-connection-delete-form {
+  margin-top: 0.75rem;
+}
+
+.water-mass-update-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.water-mass-update-header h2 {
+  margin-bottom: 0.35rem;
+}
+
+.water-mass-update-table-wrap {
+  overflow-x: auto;
+}
+
+.water-mass-update-table {
+  min-width: 1100px;
+}
+
+.water-mass-update-table th,
+.water-mass-update-table td {
+  vertical-align: top;
+  min-width: 120px;
+}
+
+.water-mass-update-table input,
+.water-mass-update-table select,
+.water-mass-update-table textarea {
+  width: 100%;
+}
+
+.water-mass-update-table select[multiple] {
+  min-height: 5.5rem;
+}
+
+.water-mass-update-panel:fullscreen,
+.water-mass-update-panel:-webkit-full-screen {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 1rem;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  box-sizing: border-box;
+}
+
+.water-mass-update-panel:fullscreen .grid-form,
+.water-mass-update-panel:-webkit-full-screen .grid-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.water-mass-update-panel:fullscreen .water-mass-update-table-wrap,
+.water-mass-update-panel:-webkit-full-screen .water-mass-update-table-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
 .calendar-day-detail {
   margin-top: 1rem;
 }
@@ -1697,6 +1915,11 @@ a { color: #1b5f49; }
     padding: 0.85rem;
   }
 
+  .water-asset-button {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .analytics-chart-wrap {
     min-height: 300px;
   }
@@ -1710,6 +1933,178 @@ a { color: #1b5f49; }
   }
 
   .grazing-timeline-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.btn-danger {
+  border-color: #b94b4b;
+  background: #b94b4b;
+  color: #fff;
+}
+
+.cash-flow-hero {
+  background:
+    linear-gradient(135deg, rgba(47, 122, 92, 0.12), rgba(27, 95, 73, 0.04)),
+    var(--card);
+}
+
+.cash-flow-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.cash-flow-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f7fbf8;
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cash-flow-tab.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cash-summary-grid {
+  margin-top: 1rem;
+}
+
+.cash-summary-card.is-selected {
+  border-color: rgba(47, 122, 92, 0.45);
+  box-shadow: 0 10px 25px rgba(47, 122, 92, 0.08);
+}
+
+.cash-summary-value {
+  margin: 0 0 0.35rem;
+  font-size: 1.65rem;
+  font-weight: 700;
+}
+
+.cash-table-header {
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.cash-flow-table-wrap,
+.cash-form-table-wrap {
+  overflow-x: auto;
+}
+
+.cash-flow-table {
+  min-width: 980px;
+}
+
+.cash-flow-table th,
+.cash-flow-table td {
+  white-space: nowrap;
+}
+
+.cash-flow-table th:first-child,
+.cash-flow-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: inherit;
+}
+
+.cash-row-section td {
+  background: #dbe7f2;
+  font-weight: 700;
+}
+
+.cash-row-line td:first-child {
+  color: #27463b;
+}
+
+.cash-row-summary td {
+  background: #e6f2df;
+  font-weight: 700;
+}
+
+.cash-row-net td {
+  background: #cfe5bc;
+  font-weight: 800;
+}
+
+.cash-transaction-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.7rem;
+}
+
+.cash-entry-table {
+  min-width: 760px;
+}
+
+.cash-entry-table th,
+.cash-entry-table td {
+  vertical-align: top;
+}
+
+.cash-entry-table-readonly {
+  margin-bottom: 1rem;
+}
+
+.cash-transaction-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fdfefd;
+  margin-bottom: 0.8rem;
+}
+
+.cash-transaction-item summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.cash-transaction-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.cash-transaction-body {
+  padding: 0 1rem 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.cash-edit-form {
+  padding-top: 0.25rem;
+  border-top: 1px dashed #d9e3de;
+}
+
+@media (max-width: 840px) {
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.8rem;
+  }
+
+  .topnav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+  }
+
+  .topnav a {
+    margin-left: 0;
+  }
+
+  .grid-two {
     grid-template-columns: 1fr;
   }
 }

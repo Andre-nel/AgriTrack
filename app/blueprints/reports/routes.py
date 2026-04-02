@@ -2,6 +2,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from urllib.parse import urlencode
 import xml.etree.ElementTree as ET
 
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
@@ -32,6 +33,7 @@ from app.services.farm_import_service import FarmImportService
 from app.services.mob_event_service import MobEventService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
+from app.services.mob_service import MobService
 from app.services.paddock_service import PaddockService
 from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
@@ -149,6 +151,7 @@ def _water_asset_form_payload(form, *, farm_id: str) -> dict:
         "capacity_m3": form.get("capacity_m3"),
         "material": form.get("material"),
         "windmill_size_ft": form.get("windmill_size_ft"),
+        "weir_size": form.get("weir_size"),
         "solar_brand": form.get("solar_brand"),
         "solar_kw": form.get("solar_kw"),
         "solar_head_m": form.get("solar_head_m"),
@@ -159,10 +162,13 @@ def _water_asset_form_payload(form, *, farm_id: str) -> dict:
 
 
 def _water_connection_form_payload(form, *, farm_id: str) -> dict:
+    flow_type = form.get("flow_type")
+    if not flow_type:
+        flow_type = form.get("_flow_type")
     return {
         "farm_id": farm_id,
         "active": form.get("active", "0"),
-        "flow_type": form.get("flow_type"),
+        "flow_type": flow_type,
         "source_asset_id": form.get("source_asset_id"),
         "destination_asset_id": form.get("destination_asset_id"),
         "pump_asset_id": form.get("pump_asset_id"),
@@ -173,6 +179,60 @@ def _water_connection_form_payload(form, *, farm_id: str) -> dict:
         "pipe_quality_spec": form.get("pipe_quality_spec"),
         "notes": form.get("notes"),
     }
+
+
+def _water_asset_mass_update_form_value(form, field_name: str, asset_id: str):
+    values = form.getlist(f"{field_name}__{asset_id}")
+    if not values:
+        return None
+    return values[-1]
+
+
+def _water_asset_mass_update_form_payload(form, *, farm_id: str, asset_id: str) -> dict:
+    return {
+        "farm_id": farm_id,
+        "name": _water_asset_mass_update_form_value(form, "name", asset_id),
+        "active": _water_asset_mass_update_form_value(form, "active", asset_id),
+        "needs_review": _water_asset_mass_update_form_value(form, "needs_review", asset_id),
+        "location_paddock_id": _water_asset_mass_update_form_value(form, "location_paddock_id", asset_id),
+        "latitude": _water_asset_mass_update_form_value(form, "latitude", asset_id),
+        "longitude": _water_asset_mass_update_form_value(form, "longitude", asset_id),
+        "altitude_m": _water_asset_mass_update_form_value(form, "altitude_m", asset_id),
+        "status": _water_asset_mass_update_form_value(form, "status", asset_id),
+        "water_level": _water_asset_mass_update_form_value(form, "water_level", asset_id),
+        "capacity_m3": _water_asset_mass_update_form_value(form, "capacity_m3", asset_id),
+        "material": _water_asset_mass_update_form_value(form, "material", asset_id),
+        "windmill_size_ft": _water_asset_mass_update_form_value(form, "windmill_size_ft", asset_id),
+        "weir_size": _water_asset_mass_update_form_value(form, "weir_size", asset_id),
+        "trough_size": _water_asset_mass_update_form_value(form, "trough_size", asset_id),
+        "solar_brand": _water_asset_mass_update_form_value(form, "solar_brand", asset_id),
+        "solar_kw": _water_asset_mass_update_form_value(form, "solar_kw", asset_id),
+        "solar_head_m": _water_asset_mass_update_form_value(form, "solar_head_m", asset_id),
+        "source_system": _water_asset_mass_update_form_value(form, "source_system", asset_id),
+        "served_paddock_ids": form.getlist(f"served_paddock_ids__{asset_id}"),
+    }
+
+
+def _farm_water_workspace_redirect_response(farm_id: str, *, open_asset_id: str | None = None):
+    redirect_values = {"farm_id": farm_id}
+    if open_asset_id:
+        redirect_values["open_asset_id"] = open_asset_id
+    return redirect(url_for("web.farm_water_workspace", **redirect_values))
+
+
+def _farm_water_mass_update_redirect_response(farm_id: str, *, selected_asset_types: list[str] | None = None):
+    target_url = url_for("web.farm_water_mass_update", farm_id=farm_id)
+    if selected_asset_types:
+        target_url += "?" + urlencode({"asset_type": selected_asset_types}, doseq=True)
+    return redirect(target_url)
+
+
+def _active_non_imported_water_assets_for_farm(farm_id: str) -> list[WaterAsset]:
+    return (
+        WaterAsset.query.filter_by(farm_id=farm_id, active=True, import_placemark_name=None)
+        .order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
+        .all()
+    )
 
 
 def _normalize_water_asset_type_filters(raw_values: list[str], *, filters_applied: bool) -> list[str]:
@@ -188,6 +248,162 @@ def _normalize_water_asset_type_filters(raw_values: list[str], *, filters_applie
     if filters_applied:
         return selected
     return list(WaterNetworkService.ASSET_TYPES)
+
+
+def _water_mass_update_field_specs(selected_asset_types: list[str]) -> list[dict]:
+    selected_type_set = set(selected_asset_types)
+    if not selected_type_set:
+        return []
+
+    all_types = set(WaterNetworkService.ASSET_TYPES)
+    field_specs = [
+        {
+            "name": "name",
+            "label": "Name",
+            "kind": "text",
+            "asset_types": list(all_types),
+        },
+        {
+            "name": "active",
+            "label": "Active",
+            "kind": "checkbox",
+            "asset_types": list(all_types),
+        },
+        {
+            "name": "needs_review",
+            "label": "Needs Review",
+            "kind": "checkbox",
+            "asset_types": list(all_types),
+        },
+        {
+            "name": "location_paddock_id",
+            "label": "Location Paddock",
+            "kind": "select",
+            "asset_types": list(all_types),
+            "option_source": "paddocks",
+        },
+        {
+            "name": "latitude",
+            "label": "Latitude",
+            "kind": "number",
+            "asset_types": list(all_types),
+            "step": "0.0000001",
+        },
+        {
+            "name": "longitude",
+            "label": "Longitude",
+            "kind": "number",
+            "asset_types": list(all_types),
+            "step": "0.0000001",
+        },
+        {
+            "name": "altitude_m",
+            "label": "Altitude (m)",
+            "kind": "number",
+            "asset_types": list(all_types),
+            "step": "0.01",
+        },
+        {
+            "name": "status",
+            "label": "Status",
+            "kind": "select",
+            "asset_types": list(all_types),
+            "options_by_type": {
+                asset_type: sorted(options)
+                for asset_type, options in WaterNetworkService.STATUS_OPTIONS_BY_TYPE.items()
+            },
+        },
+        {
+            "name": "water_level",
+            "label": "Water Level",
+            "kind": "select",
+            "asset_types": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
+            "options": list(WaterNetworkService.WATER_LEVEL_OPTIONS),
+        },
+        {
+            "name": "capacity_m3",
+            "label": "Capacity (m3)",
+            "kind": "number",
+            "asset_types": sorted(WaterNetworkService.CAPACITY_TYPES),
+            "step": "0.01",
+            "min": "0",
+        },
+        {
+            "name": "material",
+            "label": "Material",
+            "kind": "select",
+            "asset_types": sorted(WaterNetworkService.MATERIAL_OPTIONS_BY_TYPE.keys()),
+            "options_by_type": {
+                asset_type: sorted(options)
+                for asset_type, options in WaterNetworkService.MATERIAL_OPTIONS_BY_TYPE.items()
+            },
+        },
+        {
+            "name": "windmill_size_ft",
+            "label": "Windmill Size (ft)",
+            "kind": "select",
+            "asset_types": ["windmill"],
+            "options": [str(option) for option in WaterNetworkService.WINDMILL_SIZE_OPTIONS],
+        },
+        {
+            "name": "weir_size",
+            "label": "Weir Size",
+            "kind": "select",
+            "asset_types": ["weir"],
+            "options": list(WaterNetworkService.WEIR_SIZE_OPTIONS),
+        },
+        {
+            "name": "trough_size",
+            "label": "Trough Size",
+            "kind": "select",
+            "asset_types": ["trough"],
+            "options": list(WaterNetworkService.TROUGH_SIZE_OPTIONS),
+        },
+        {
+            "name": "solar_brand",
+            "label": "Solar Brand",
+            "kind": "text",
+            "asset_types": ["solarpump"],
+        },
+        {
+            "name": "source_system",
+            "label": "Source System",
+            "kind": "text",
+            "asset_types": ["solarpump"],
+        },
+        {
+            "name": "solar_kw",
+            "label": "Solar kW",
+            "kind": "number",
+            "asset_types": ["solarpump"],
+            "step": "0.01",
+            "min": "0",
+        },
+        {
+            "name": "solar_head_m",
+            "label": "Solar Head (m)",
+            "kind": "number",
+            "asset_types": ["solarpump"],
+            "step": "0.01",
+            "min": "0",
+        },
+        {
+            "name": "served_paddock_ids",
+            "label": "Served Paddocks",
+            "kind": "multiselect",
+            "asset_types": sorted(
+                WaterNetworkService.SERVED_PADDOCK_TYPES
+                - WaterNetworkService.LOCATION_BOUND_SERVED_PADDOCK_TYPES
+            ),
+            "option_source": "paddocks",
+        },
+    ]
+
+    return [
+        field
+        for field in field_specs
+        if selected_type_set.intersection(field["asset_types"])
+    ]
 
 
 def _active_mobs_for_farm(farm_id: str) -> list[Mob]:
@@ -878,10 +1094,11 @@ def _load_farm_kml_features(farm_name: str) -> tuple[list[dict], str]:
 
 def _active_grazing_snapshot_by_paddock(farm_id: str) -> dict[str, dict]:
     rows = (
-        GrazingAllocation.query.join(GrazingSession)
+        GrazingAllocation.query.join(GrazingSession).join(Mob)
         .filter(
             GrazingSession.farm_id == farm_id,
             GrazingSession.end_at.is_(None),
+            Mob.status == "active",
         )
         .all()
     )
@@ -924,7 +1141,13 @@ def _active_grazing_snapshot_by_paddock(farm_id: str) -> dict[str, dict]:
     return by_paddock
 
 
-def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict) -> dict:
+def _paddock_map_properties(
+    paddock: Paddock,
+    farm: Farm,
+    active_snapshot: dict,
+    *,
+    water_alert: dict | None = None,
+) -> dict:
     today = date.today()
     now_dt = datetime.utcnow()
     year_start_dt = datetime(today.year, 1, 1)
@@ -954,6 +1177,7 @@ def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict)
     current_lsu = active.get("current_lsu", 0.0)
     paddock_ha_per_current_lsu = (area_ha / current_lsu) if current_lsu > 0 else None
     current_activity = ReportingService.paddock_continuous_activity(paddock)
+    water_alert = water_alert or {}
     return {
         "feature_type": "paddock",
         "farm_id": str(farm.id),
@@ -982,6 +1206,8 @@ def _paddock_map_properties(paddock: Paddock, farm: Farm, active_snapshot: dict)
         ),
         "mobs": active.get("mobs", []),
         "species_heads": active.get("species_heads", []),
+        "water_alert_level": water_alert.get("level"),
+        "water_alert_message": water_alert.get("message"),
     }
 
 
@@ -1006,6 +1232,12 @@ def _build_farm_map_feature_collection(
     paddock_by_name = {_normalize_name(p.name): p for p in paddocks}
     farm_name_key = _normalize_name(farm.name)
     active_snapshot = _active_grazing_snapshot_by_paddock(str(farm.id))
+    water_network_state = (
+        WaterNetworkService.network_state_for_farm(str(farm.id))
+        if include_water
+        else None
+    )
+    paddock_water_alerts = (water_network_state or {}).get("paddock_alerts", {})
 
     feature_collection = []
     matched_paddock_ids = set()
@@ -1015,7 +1247,12 @@ def _build_farm_map_feature_collection(
         normalized_name = item["normalized_name"]
         paddock = paddock_by_name.get(normalized_name)
         if paddock:
-            properties = _paddock_map_properties(paddock, farm, active_snapshot)
+            properties = _paddock_map_properties(
+                paddock,
+                farm,
+                active_snapshot,
+                water_alert=paddock_water_alerts.get(str(paddock.id)),
+            )
             matched_paddock_ids.add(str(paddock.id))
         else:
             feature_type = "farm_boundary" if normalized_name == farm_name_key else "unmatched"
@@ -1040,7 +1277,10 @@ def _build_farm_map_feature_collection(
         p.name for p in sorted(paddocks, key=lambda row: row.name.lower()) if str(p.id) not in matched_paddock_ids
     ]
     if include_water:
-        water_features = WaterNetworkService.active_map_features_for_farm(str(farm.id))
+        water_features = WaterNetworkService.active_map_features_for_farm(
+            str(farm.id),
+            network_state=water_network_state,
+        )
         for feature in water_features:
             properties = feature.get("properties", {})
             if properties.get("feature_type") == "water_asset" and properties.get("id"):
@@ -1605,7 +1845,75 @@ def import_farm_page():
             f"Imported farm {result['farm_name']} with {result['paddock_count']} paddock(s){water_note}",
             "success",
         )
+    non_imported_water_assets = _active_non_imported_water_assets_for_farm(result["farm_id"])
+    if non_imported_water_assets:
+        flash(
+            (
+                f"Review {len(non_imported_water_assets)} active non-imported water asset(s). "
+                "You can keep them or delete selected assets."
+            ),
+            "info",
+        )
+        return redirect(url_for("web.review_import_water_assets", farm_id=result["farm_id"]))
     return redirect(url_for("web.farm_detail", farm_id=result["farm_id"]))
+
+
+@bp.get("/farms/<farm_id>/import-review/water-assets")
+def review_import_water_assets(farm_id):
+    farm = Farm.query.get_or_404(farm_id)
+    non_imported_water_assets = _active_non_imported_water_assets_for_farm(str(farm.id))
+    if not non_imported_water_assets:
+        return redirect(url_for("web.farm_detail", farm_id=farm_id))
+    return render_template(
+        "import_water_asset_review.html",
+        farm=farm,
+        water_assets=non_imported_water_assets,
+        water_asset_type_labels=WaterNetworkService.ASSET_TYPE_LABELS,
+    )
+
+
+@bp.post("/farms/<farm_id>/import-review/water-assets")
+def review_import_water_assets_form(farm_id):
+    farm = Farm.query.get_or_404(farm_id)
+    action = (request.form.get("action") or "keep").strip().lower()
+    if action == "keep":
+        flash("Kept existing non-imported water assets", "success")
+        return redirect(url_for("web.farm_detail", farm_id=farm_id))
+
+    selected_asset_ids = request.form.getlist("asset_id")
+    allowed_asset_ids = {
+        str(asset.id) for asset in _active_non_imported_water_assets_for_farm(str(farm.id))
+    }
+    target_asset_ids = [
+        asset_id
+        for asset_id in (str(raw_id or "").strip() for raw_id in selected_asset_ids)
+        if asset_id in allowed_asset_ids
+    ]
+    if not target_asset_ids:
+        flash("Select at least one non-imported water asset to delete", "error")
+        return redirect(url_for("web.review_import_water_assets", farm_id=farm_id))
+
+    try:
+        deleted_assets = WaterNetworkService.delete_assets(str(farm.id), target_asset_ids)
+        db.session.commit()
+        flash(f"Deleted {len(deleted_assets)} non-imported water asset(s)", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("web.review_import_water_assets", farm_id=farm_id))
+    except IntegrityError:
+        db.session.rollback()
+        flash("Unable to delete selected non-imported water assets", "error")
+        return redirect(url_for("web.review_import_water_assets", farm_id=farm_id))
+
+    remaining_assets = _active_non_imported_water_assets_for_farm(str(farm.id))
+    if remaining_assets:
+        flash(
+            f"{len(remaining_assets)} non-imported water asset(s) still remain for review",
+            "info",
+        )
+        return redirect(url_for("web.review_import_water_assets", farm_id=farm_id))
+    return redirect(url_for("web.farm_detail", farm_id=farm_id))
 
 
 @bp.get("/farms/<farm_id>")
@@ -1740,6 +2048,56 @@ def farm_water_workspace(farm_id):
         request.args.getlist("asset_type"),
         filters_applied=map_filters_applied,
     )
+    water_asset_editor_config = {
+        "assetTypeLabels": WaterNetworkService.ASSET_TYPE_LABELS,
+        "assetRecords": [
+            {
+                "id": str(asset.id),
+                "name": asset.name,
+                "assetType": asset.asset_type,
+                "assetTypeLabel": WaterNetworkService.ASSET_TYPE_LABELS.get(asset.asset_type, asset.asset_type),
+                "active": asset.active,
+            }
+            for asset in assets
+        ],
+        "connectionRecords": [
+            WaterNetworkService.serialize_connection(connection)
+            for connection in connections
+        ],
+        "flowTypes": list(WaterNetworkService.FLOW_TYPES),
+        "flowTypeLabels": WaterNetworkService.FLOW_TYPE_LABELS,
+        "statusOptionsByType": {
+            asset_type: sorted(options)
+            for asset_type, options in WaterNetworkService.STATUS_OPTIONS_BY_TYPE.items()
+        },
+        "materialOptionsByType": {
+            asset_type: sorted(options)
+            for asset_type, options in WaterNetworkService.MATERIAL_OPTIONS_BY_TYPE.items()
+        },
+        "waterLevelOptions": list(WaterNetworkService.WATER_LEVEL_OPTIONS),
+        "waterLevelTypes": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
+        "capacityTypes": sorted(WaterNetworkService.CAPACITY_TYPES),
+        "windmillSizeOptions": list(WaterNetworkService.WINDMILL_SIZE_OPTIONS),
+        "weirSizeOptions": list(WaterNetworkService.WEIR_SIZE_OPTIONS),
+        "troughSizeOptions": list(WaterNetworkService.TROUGH_SIZE_OPTIONS),
+        "solarFieldTypes": ["solarpump"],
+        "sourceSystemTypes": ["solarpump"],
+        "weirFieldTypes": ["weir"],
+        "troughFieldTypes": ["trough"],
+        "servedPaddockTypes": sorted(WaterNetworkService.SERVED_PADDOCK_TYPES),
+        "locationBoundServedPaddockTypes": sorted(
+            WaterNetworkService.LOCATION_BOUND_SERVED_PADDOCK_TYPES
+        ),
+        "pumpAssetTypes": sorted(WaterNetworkService.PUMP_ASSET_TYPES),
+        "gravityTroughSourceTypes": sorted(WaterNetworkService.GRAVITY_TROUGH_SOURCE_TYPES),
+        "transferSourceTypes": sorted(WaterNetworkService.TRANSFER_SOURCE_TYPES),
+        "transferDestinationTypes": sorted(WaterNetworkService.TRANSFER_DESTINATION_TYPES),
+        "defaultTroughConnection": {
+            "pipeMaterial": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_MATERIAL,
+            "pipeDiameterSpec": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_DIAMETER_SPEC,
+            "pipeClassSpec": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_CLASS_SPEC,
+        },
+    }
 
     return render_template(
         "farm_water.html",
@@ -1759,6 +2117,7 @@ def farm_water_workspace(farm_id):
             {option for options in WaterNetworkService.STATUS_OPTIONS_BY_TYPE.values() for option in options}
         ),
         water_level_options=WaterNetworkService.WATER_LEVEL_OPTIONS,
+        weir_size_options=WaterNetworkService.WEIR_SIZE_OPTIONS,
         trough_size_options=WaterNetworkService.TROUGH_SIZE_OPTIONS,
         material_options_by_type=WaterNetworkService.MATERIAL_OPTIONS_BY_TYPE,
         all_material_options=sorted(
@@ -1766,6 +2125,39 @@ def farm_water_workspace(farm_id):
         ),
         map_filters_applied=map_filters_applied,
         selected_map_asset_types=selected_map_asset_types,
+        water_asset_editor_config=water_asset_editor_config,
+    )
+
+
+@bp.get("/farms/<farm_id>/water/mass-update")
+def farm_water_mass_update(farm_id):
+    farm = Farm.query.get_or_404(farm_id)
+    paddocks = (
+        Paddock.query.filter_by(farm_id=farm.id, status="active").order_by(Paddock.name.asc()).all()
+    )
+    mass_update_paddocks = [{"id": str(paddock.id), "name": paddock.name} for paddock in paddocks]
+    selected_asset_types = _normalize_water_asset_type_filters(
+        request.args.getlist("asset_type"),
+        filters_applied=True,
+    )
+    selected_asset_type_set = set(selected_asset_types)
+    assets = [
+        WaterNetworkService.serialize_asset(asset)
+        for asset in WaterNetworkService.assets_for_farm(str(farm.id))
+        if asset.asset_type in selected_asset_type_set
+    ]
+    mass_update_fields = _water_mass_update_field_specs(selected_asset_types)
+
+    return render_template(
+        "farm_water_mass_update.html",
+        farm=farm,
+        water_asset_types=WaterNetworkService.ASSET_TYPES,
+        water_asset_type_labels=WaterNetworkService.ASSET_TYPE_LABELS,
+        selected_mass_update_asset_types=selected_asset_types,
+        selected_mass_update_assets=assets,
+        mass_update_fields=mass_update_fields,
+        mass_update_paddocks=mass_update_paddocks,
+        has_multiple_mass_update_types=len(selected_asset_types) > 1,
     )
 
 
@@ -1796,15 +2188,71 @@ def update_water_asset_form(farm_id, asset_id):
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
+        return redirect(url_for("web.farm_water_workspace", farm_id=farm_id, open_asset_id=asset_id))
     except IntegrityError:
         db.session.rollback()
         flash("Unable to update water asset", "error")
+        return redirect(url_for("web.farm_water_workspace", farm_id=farm_id, open_asset_id=asset_id))
     return redirect(url_for("web.farm_water_workspace", farm_id=farm_id))
+
+
+@bp.post("/farms/<farm_id>/water/mass-update")
+def update_water_assets_mass_form(farm_id):
+    Farm.query.get_or_404(farm_id)
+    selected_asset_types = _normalize_water_asset_type_filters(
+        request.form.getlist("asset_type"),
+        filters_applied=True,
+    )
+    selected_asset_type_set = set(selected_asset_types)
+    raw_asset_ids = [str(asset_id or "").strip() for asset_id in request.form.getlist("asset_id")]
+    asset_ids = []
+    seen_asset_ids = set()
+    for asset_id in raw_asset_ids:
+        if not asset_id or asset_id in seen_asset_ids:
+            continue
+        seen_asset_ids.add(asset_id)
+        asset_ids.append(asset_id)
+
+    if not selected_asset_types:
+        flash("Select at least one water asset type to mass update", "error")
+        return _farm_water_mass_update_redirect_response(farm_id, selected_asset_types=selected_asset_types)
+    if not asset_ids:
+        flash("No water assets were selected for mass update", "error")
+        return _farm_water_mass_update_redirect_response(farm_id, selected_asset_types=selected_asset_types)
+
+    assets = WaterAsset.query.filter(WaterAsset.farm_id == farm_id, WaterAsset.id.in_(asset_ids)).all()
+    assets_by_id = {str(asset.id): asset for asset in assets}
+
+    try:
+        for asset_id in asset_ids:
+            asset = assets_by_id.get(asset_id)
+            if asset is None:
+                raise ValueError("One or more selected water assets are invalid")
+            if asset.asset_type not in selected_asset_type_set:
+                raise ValueError("One or more selected water assets do not match the chosen asset types")
+            WaterNetworkService.update_asset(
+                asset,
+                _water_asset_mass_update_form_payload(
+                    request.form,
+                    farm_id=farm_id,
+                    asset_id=asset_id,
+                ),
+            )
+        db.session.commit()
+        flash(f"Updated {len(asset_ids)} water asset(s)", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    except IntegrityError:
+        db.session.rollback()
+        flash("Unable to mass update water assets", "error")
+    return _farm_water_mass_update_redirect_response(farm_id, selected_asset_types=selected_asset_types)
 
 
 @bp.post("/farms/<farm_id>/water/connections")
 def create_water_connection_form(farm_id):
     Farm.query.get_or_404(farm_id)
+    open_asset_id = (request.form.get("open_asset_id") or "").strip() or None
     try:
         WaterNetworkService.create_connection(_water_connection_form_payload(request.form, farm_id=farm_id))
         db.session.commit()
@@ -1815,13 +2263,14 @@ def create_water_connection_form(farm_id):
     except IntegrityError:
         db.session.rollback()
         flash("Unable to save water connection", "error")
-    return redirect(url_for("web.farm_water_workspace", farm_id=farm_id))
+    return _farm_water_workspace_redirect_response(farm_id, open_asset_id=open_asset_id)
 
 
 @bp.post("/farms/<farm_id>/water/connections/<connection_id>")
 def update_water_connection_form(farm_id, connection_id):
     Farm.query.get_or_404(farm_id)
     connection = WaterConnection.query.filter_by(id=connection_id, farm_id=farm_id).first_or_404()
+    open_asset_id = (request.form.get("open_asset_id") or "").strip() or None
     try:
         WaterNetworkService.update_connection(
             connection,
@@ -1835,17 +2284,18 @@ def update_water_connection_form(farm_id, connection_id):
     except IntegrityError:
         db.session.rollback()
         flash("Unable to update water connection", "error")
-    return redirect(url_for("web.farm_water_workspace", farm_id=farm_id))
+    return _farm_water_workspace_redirect_response(farm_id, open_asset_id=open_asset_id)
 
 
 @bp.post("/farms/<farm_id>/water/connections/<connection_id>/delete")
 def delete_water_connection_form(farm_id, connection_id):
     Farm.query.get_or_404(farm_id)
     connection = WaterConnection.query.filter_by(id=connection_id, farm_id=farm_id).first_or_404()
+    open_asset_id = (request.form.get("open_asset_id") or "").strip() or None
     db.session.delete(connection)
     db.session.commit()
     flash("Water connection deleted", "success")
-    return redirect(url_for("web.farm_water_workspace", farm_id=farm_id))
+    return _farm_water_workspace_redirect_response(farm_id, open_asset_id=open_asset_id)
 
 
 @bp.get("/farms/<farm_id>/map-data")
@@ -2490,7 +2940,7 @@ def mob_deactivate_form(mob_id):
         flash("Mob cannot be deactivated while it still contains stock", "error")
         return redirect(url_for("web.mob_detail", mob_id=mob_id))
 
-    mob.status = "archived"
+    MobService.archive_mob(mob)
     db.session.commit()
     flash("Mob deactivated", "success")
     return redirect(url_for("web.farm_detail", farm_id=mob.farm_id))
@@ -2571,10 +3021,11 @@ def paddock_move_all_mobs_form(paddock_id):
             raise ValueError("Duplicate mob rows are not allowed")
 
         active_allocations = (
-            GrazingAllocation.query.join(GrazingSession)
+            GrazingAllocation.query.join(GrazingSession).join(Mob)
             .filter(
                 GrazingAllocation.paddock_id == paddock_id,
                 GrazingSession.end_at.is_(None),
+                Mob.status == "active",
             )
             .all()
         )
@@ -2758,10 +3209,11 @@ def paddock_detail(paddock_id):
         reverse=True,
     )
     active_allocations = (
-        GrazingAllocation.query.join(GrazingSession)
+        GrazingAllocation.query.join(GrazingSession).join(Mob)
         .filter(
             GrazingAllocation.paddock_id == paddock_id,
             GrazingSession.end_at.is_(None),
+            Mob.status == "active",
         )
         .all()
     )
@@ -2795,7 +3247,7 @@ def paddock_detail(paddock_id):
             }
         )
     local_water_assets = WaterNetworkService.local_assets_for_paddock(str(paddock.id))
-    serving_troughs = WaterNetworkService.troughs_serving_paddock(str(paddock.id))
+    serving_water_assets = WaterNetworkService.service_assets_serving_paddock(str(paddock.id))
 
     return render_template(
         "paddock_detail.html",
@@ -2823,6 +3275,6 @@ def paddock_detail(paddock_id):
         bulk_move_paddocks_by_farm=bulk_move_paddocks_by_farm,
         bulk_move_mob_rows=bulk_move_mob_rows,
         local_water_assets=local_water_assets,
-        serving_troughs=serving_troughs,
+        serving_water_assets=serving_water_assets,
         water_asset_type_labels=WaterNetworkService.ASSET_TYPE_LABELS,
     )

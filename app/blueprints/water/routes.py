@@ -15,7 +15,23 @@ def list_water_assets():
     farm_id = (request.args.get("farm_id") or "").strip()
     if farm_id:
         query = query.filter(WaterAsset.farm_id == farm_id)
-    return jsonify([WaterNetworkService.serialize_asset(asset) for asset in query.all()])
+
+    assets = query.all()
+    network_states_by_farm = {}
+    payload = []
+    for asset in assets:
+        asset_farm_id = str(asset.farm_id)
+        if asset_farm_id not in network_states_by_farm:
+            network_states_by_farm[asset_farm_id] = WaterNetworkService.network_state_for_farm(
+                asset_farm_id
+            )
+        payload.append(
+            WaterNetworkService.serialize_asset(
+                asset,
+                network_state=network_states_by_farm[asset_farm_id],
+            )
+        )
+    return jsonify(payload)
 
 
 @bp.post("/water-assets")
@@ -30,13 +46,15 @@ def create_water_asset():
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "Unable to save water asset"}), 400
-    return jsonify(WaterNetworkService.serialize_asset(asset)), 201
+    network_state = WaterNetworkService.network_state_for_farm(str(asset.farm_id))
+    return jsonify(WaterNetworkService.serialize_asset(asset, network_state=network_state)), 201
 
 
 @bp.get("/water-assets/<asset_id>")
 def get_water_asset(asset_id):
     asset = WaterAsset.query.get_or_404(asset_id)
-    return jsonify(WaterNetworkService.serialize_asset(asset))
+    network_state = WaterNetworkService.network_state_for_farm(str(asset.farm_id))
+    return jsonify(WaterNetworkService.serialize_asset(asset, network_state=network_state))
 
 
 @bp.patch("/water-assets/<asset_id>")
@@ -52,7 +70,8 @@ def update_water_asset(asset_id):
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "Unable to update water asset"}), 400
-    return jsonify(WaterNetworkService.serialize_asset(asset))
+    network_state = WaterNetworkService.network_state_for_farm(str(asset.farm_id))
+    return jsonify(WaterNetworkService.serialize_asset(asset, network_state=network_state))
 
 
 @bp.get("/water-connections")

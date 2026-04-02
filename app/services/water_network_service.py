@@ -1,4 +1,8 @@
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
+from math import cos, radians
+
+from sqlalchemy import or_
 
 from app.extensions import db
 from app.models import Paddock, WaterAsset, WaterAssetServedPaddock, WaterConnection
@@ -8,6 +12,7 @@ from app.services.paddock_service import PaddockService
 
 class WaterNetworkService:
     MAX_NAME_LENGTH = 120
+    EARTH_RADIUS_M = 6371008.8
 
     ASSET_TYPES = WATER_ASSET_TYPES
     FLOW_TYPES = WATER_CONNECTION_FLOW_TYPES
@@ -19,21 +24,38 @@ class WaterNetworkService:
         "cement_dam": "Cement Dam",
         "tank": "Tank",
         "ground_dam": "Ground Dam",
-        "weir": "Wear",
+        "weir": "Weir",
         "trough": "Trough",
     }
     FLOW_TYPE_LABELS = {"pumped": "Pumped", "gravity": "Gravity"}
     PUMP_ASSET_TYPES = {"windmill", "solarpump"}
+    DEFAULT_TROUGH_CONNECTION_PIPE_MATERIAL = "plastic"
+    DEFAULT_TROUGH_CONNECTION_PIPE_DIAMETER_SPEC = "32mm"
+    DEFAULT_TROUGH_CONNECTION_PIPE_CLASS_SPEC = "class 2"
+    DEFAULT_TROUGH_CONNECTION_SOURCE_TYPES = {"cement_dam"}
+    IMPORT_DEFAULT_TROUGH_CONNECTION_SOURCE_TYPES = {"cement_dam", "tank"}
     STORAGE_ASSET_TYPES = {"cement_dam", "tank", "ground_dam"}
     WATER_LEVEL_TYPES = {"pit", "cement_dam", "tank", "ground_dam", "weir", "trough"}
     WATER_LEVEL_OPTIONS = ("empty", "low", "half", "high", "full")
+    CAPACITY_TYPES = WATER_LEVEL_TYPES
+    SERVED_PADDOCK_TYPES = {"ground_dam", "weir", "trough"}
+    LOCATION_BOUND_SERVED_PADDOCK_TYPES = {"ground_dam", "weir"}
+    WINDMILL_SIZE_OPTIONS = (10, 12, 14)
+    WEIR_SIZE_OPTIONS = ("small", "medium", "large")
     TROUGH_SIZE_OPTIONS = ("small", "medium", "large")
+    DEFAULT_VALUES_BY_TYPE = {
+        "weir": {
+            "status": "operational",
+            "water_level": "empty",
+            "weir_size": "medium",
+        }
+    }
     MATERIAL_OPTIONS_BY_TYPE = {
         "pit": {"earth"},
-        "cement_dam": {"concrete"},
+        "cement_dam": {"brick", "stone"},
         "tank": {"concrete", "plastic", "steel"},
         "ground_dam": {"earth"},
-        "trough": {"concrete", "plastic", "steel"},
+        "trough": {"concrete", "plastic", "steel", "rubber"},
     }
     STATUS_OPTIONS_BY_TYPE = {
         "borehole": {"operational", "limited", "dry"},
@@ -46,10 +68,11 @@ class WaterNetworkService:
         "weir": {"operational", "silted", "damaged"},
         "trough": {"operational", "leaking", "damaged"},
     }
-    GRAVITY_SOURCE_TYPES = {"cement_dam", "tank"}
-    GRAVITY_DESTINATION_TYPES = {"trough"}
-    PUMPED_SOURCE_TYPES = {"borehole", "pit", "cement_dam", "tank", "ground_dam", "weir"}
-    PUMPED_DESTINATION_TYPES = {"cement_dam", "tank"}
+    DOWN_PUMP_STATUSES = {"down"}
+    DRY_SOURCE_STATUSES = {"dry"}
+    GRAVITY_TROUGH_SOURCE_TYPES = {"cement_dam", "ground_dam", "pit", "tank", "weir"}
+    TRANSFER_SOURCE_TYPES = {"borehole", "cement_dam", "ground_dam", "pit", "tank", "weir"}
+    TRANSFER_DESTINATION_TYPES = {"borehole", "cement_dam", "pit", "tank"}
 
     @staticmethod
     def normalize_name(value: str | None) -> str:
@@ -158,6 +181,10 @@ class WaterNetworkService:
         asset: WaterAsset | None = None,
         imported: bool = False,
     ) -> dict:
+        def retained_value(field: str, current, *, keep_current: bool = True):
+            fallback = current if keep_current else None
+            return cls._current_value(payload, field, fallback)
+
         farm_id = cls._current_value(payload, "farm_id", asset.farm_id if asset else None)
         if not farm_id:
             raise ValueError("farm_id is required")
@@ -200,49 +227,117 @@ class WaterNetworkService:
             cls._current_value(payload, "altitude_m", asset.altitude_m if asset else None),
             "altitude_m",
         )
+        status_options = cls.STATUS_OPTIONS_BY_TYPE[asset_type]
+        material_options = cls.MATERIAL_OPTIONS_BY_TYPE.get(asset_type)
+        water_level_options = set(cls.WATER_LEVEL_OPTIONS)
+        windmill_size_options = set(cls.WINDMILL_SIZE_OPTIONS)
+        weir_size_options = set(cls.WEIR_SIZE_OPTIONS)
+        trough_size_options = set(cls.TROUGH_SIZE_OPTIONS)
+
         capacity_m3 = cls._coerce_optional_decimal(
-            cls._current_value(payload, "capacity_m3", asset.capacity_m3 if asset else None),
+            retained_value(
+                "capacity_m3",
+                asset.capacity_m3 if asset else None,
+                keep_current=asset is not None and asset_type in cls.CAPACITY_TYPES,
+            ),
             "capacity_m3",
         )
         solar_kw = cls._coerce_optional_decimal(
-            cls._current_value(payload, "solar_kw", asset.solar_kw if asset else None),
+            retained_value(
+                "solar_kw",
+                asset.solar_kw if asset else None,
+                keep_current=asset is not None and asset_type == "solarpump",
+            ),
             "solar_kw",
         )
         solar_head_m = cls._coerce_optional_decimal(
-            cls._current_value(payload, "solar_head_m", asset.solar_head_m if asset else None),
+            retained_value(
+                "solar_head_m",
+                asset.solar_head_m if asset else None,
+                keep_current=asset is not None and asset_type == "solarpump",
+            ),
             "solar_head_m",
         )
         windmill_size_ft = cls._coerce_optional_integer(
-            cls._current_value(payload, "windmill_size_ft", asset.windmill_size_ft if asset else None),
+            retained_value(
+                "windmill_size_ft",
+                asset.windmill_size_ft if asset else None,
+                keep_current=asset is not None and asset_type == "windmill",
+            ),
             "windmill_size_ft",
+        )
+        weir_size = cls._coerce_choice(
+            retained_value(
+                "weir_size",
+                asset.weir_size if asset else None,
+                keep_current=asset is not None and asset_type == "weir",
+            ),
+            "weir_size",
+            allowed=weir_size_options,
         )
 
         status = cls._coerce_choice(
-            cls._current_value(payload, "status", asset.status if asset else None),
+            retained_value(
+                "status",
+                asset.status if asset else None,
+                keep_current=asset is not None and asset.status in status_options,
+            ),
             "status",
-            allowed=cls.STATUS_OPTIONS_BY_TYPE[asset_type],
+            allowed=status_options,
         )
         water_level = cls._coerce_choice(
-            cls._current_value(payload, "water_level", asset.water_level if asset else None),
+            retained_value(
+                "water_level",
+                asset.water_level if asset else None,
+                keep_current=asset is not None and asset_type in cls.WATER_LEVEL_TYPES,
+            ),
             "water_level",
-            allowed=set(cls.WATER_LEVEL_OPTIONS),
+            allowed=water_level_options,
         )
         material = cls._coerce_optional_text(
-            cls._current_value(payload, "material", asset.material if asset else None)
+            retained_value(
+                "material",
+                asset.material if asset else None,
+                keep_current=asset is not None
+                and material_options is not None
+                and asset.material in material_options,
+            )
         )
         if material:
             material = cls.normalize_choice(material)
+
+        if asset_type == "weir":
+            weir_defaults = cls.DEFAULT_VALUES_BY_TYPE["weir"]
+            if status is None:
+                status = weir_defaults["status"]
+            if water_level is None:
+                water_level = weir_defaults["water_level"]
+            if weir_size is None:
+                weir_size = weir_defaults["weir_size"]
+
         trough_size = cls._coerce_choice(
-            cls._current_value(payload, "trough_size", asset.trough_size if asset else None),
+            retained_value(
+                "trough_size",
+                asset.trough_size if asset else None,
+                keep_current=asset is not None and asset_type == "trough",
+            ),
             "trough_size",
-            allowed=set(cls.TROUGH_SIZE_OPTIONS),
+            allowed=trough_size_options,
         )
 
         solar_brand = cls._coerce_optional_text(
-            cls._current_value(payload, "solar_brand", asset.solar_brand if asset else None)
+            retained_value(
+                "solar_brand",
+                asset.solar_brand if asset else None,
+                keep_current=asset is not None and asset_type == "solarpump",
+            )
         )
         source_system = cls._coerce_optional_text(
-            cls._current_value(payload, "source_system", asset.source_system if asset else None)
+            retained_value(
+                "source_system",
+                asset.source_system if asset else None,
+                keep_current=asset is not None and asset_type == "solarpump",
+            )
         )
         import_placemark_name = cls._coerce_optional_text(
             cls._current_value(
@@ -268,18 +363,24 @@ class WaterNetworkService:
 
         if water_level and asset_type not in cls.WATER_LEVEL_TYPES:
             raise ValueError(f"water_level is not valid for asset_type {asset_type}")
+        if capacity_m3 is not None and asset_type not in cls.CAPACITY_TYPES:
+            raise ValueError(f"capacity_m3 is not valid for asset_type {asset_type}")
         if material:
-            allowed_materials = cls.MATERIAL_OPTIONS_BY_TYPE.get(asset_type)
-            if not allowed_materials or material not in allowed_materials:
+            if not material_options or material not in material_options:
                 raise ValueError(f"material is not valid for asset_type {asset_type}")
         if windmill_size_ft is not None and asset_type != "windmill":
             raise ValueError("windmill_size_ft is only valid for windmill assets")
-        if windmill_size_ft is not None and windmill_size_ft not in {10, 12, 14}:
-            raise ValueError("windmill_size_ft must be one of: 10, 12, 14")
+        if windmill_size_ft is not None and windmill_size_ft not in windmill_size_options:
+            allowed_sizes = ", ".join(str(size) for size in cls.WINDMILL_SIZE_OPTIONS)
+            raise ValueError(f"windmill_size_ft must be one of: {allowed_sizes}")
+        if weir_size and asset_type != "weir":
+            raise ValueError("weir_size is only valid for weir assets")
         if trough_size and asset_type != "trough":
             raise ValueError("trough_size is only valid for trough assets")
         if asset_type != "solarpump" and any(value is not None for value in (solar_brand, solar_kw, solar_head_m)):
             raise ValueError("solar fields are only valid for solarpump assets")
+        if asset_type != "solarpump" and source_system is not None:
+            raise ValueError("source_system is only valid for solarpump assets")
 
         served_paddock_ids = cls._coerce_id_list(
             payload["served_paddock_ids"]
@@ -293,9 +394,11 @@ class WaterNetworkService:
         if location_paddock_id and location_paddock_id not in paddocks_by_id:
             raise ValueError("location_paddock_id is invalid for this farm")
 
-        if asset_type != "trough":
+        if asset_type in cls.LOCATION_BOUND_SERVED_PADDOCK_TYPES:
+            served_paddock_ids = [location_paddock_id] if location_paddock_id else []
+        elif asset_type not in cls.SERVED_PADDOCK_TYPES:
             if "served_paddock_ids" in payload and served_paddock_ids:
-                raise ValueError("Only trough assets can serve paddocks")
+                raise ValueError("Only ground_dam, weir, and trough assets can serve paddocks")
             served_paddock_ids = []
         elif any(paddock_id not in paddocks_by_id for paddock_id in served_paddock_ids):
             raise ValueError("One or more served paddock IDs are invalid for this farm")
@@ -315,6 +418,7 @@ class WaterNetworkService:
             "capacity_m3": capacity_m3,
             "material": material,
             "windmill_size_ft": windmill_size_ft,
+            "weir_size": weir_size,
             "solar_brand": solar_brand,
             "solar_kw": solar_kw,
             "solar_head_m": solar_head_m,
@@ -351,6 +455,93 @@ class WaterNetworkService:
             asset.served_paddock_links.append(link)
             existing_by_id[paddock_id] = link
 
+    @staticmethod
+    def _asset_coordinates(asset: WaterAsset) -> tuple[float, float] | None:
+        if asset.latitude is None or asset.longitude is None:
+            return None
+        return (float(asset.longitude), float(asset.latitude))
+
+    @classmethod
+    def _distance_between_coordinates_m(
+        cls,
+        left: tuple[float, float],
+        right: tuple[float, float],
+    ) -> float:
+        average_lat = radians((left[1] + right[1]) / 2.0)
+        dx = cls.EARTH_RADIUS_M * radians(right[0] - left[0]) * cos(average_lat)
+        dy = cls.EARTH_RADIUS_M * radians(right[1] - left[1])
+        return (dx * dx + dy * dy) ** 0.5
+
+    @classmethod
+    def ensure_default_trough_connections(
+        cls,
+        farm_id: str,
+        *,
+        source_asset_types: set[str] | None = None,
+    ) -> list[WaterConnection]:
+        assets = cls.assets_for_farm(farm_id)
+        if not assets:
+            return []
+
+        target_source_types = (
+            set(cls.DEFAULT_TROUGH_CONNECTION_SOURCE_TYPES)
+            if source_asset_types is None
+            else set(source_asset_types)
+        )
+        active_sources = [
+            asset
+            for asset in assets
+            if asset.active
+            and asset.asset_type in target_source_types
+            and cls._asset_coordinates(asset) is not None
+        ]
+        if not active_sources:
+            return []
+
+        connections = WaterConnection.query.filter_by(farm_id=farm_id).all()
+        connections_by_destination: dict[str, list[WaterConnection]] = defaultdict(list)
+        for connection in connections:
+            destination_asset_id = str(connection.destination_asset_id)
+            connections_by_destination[destination_asset_id].append(connection)
+
+        changed_connections = []
+        for trough in assets:
+            if not trough.active or trough.asset_type != "trough":
+                continue
+
+            trough_id = str(trough.id)
+            if connections_by_destination.get(trough_id):
+                continue
+
+            trough_coordinates = cls._asset_coordinates(trough)
+            if trough_coordinates is None:
+                continue
+
+            nearest_source_asset = min(
+                active_sources,
+                key=lambda source_asset: cls._distance_between_coordinates_m(
+                    trough_coordinates,
+                    cls._asset_coordinates(source_asset),
+                ),
+            )
+            connection = WaterConnection(
+                farm_id=farm_id,
+                active=True,
+                flow_type="gravity",
+                source_asset_id=nearest_source_asset.id,
+                destination_asset_id=trough.id,
+                pipe_material=cls.DEFAULT_TROUGH_CONNECTION_PIPE_MATERIAL,
+                pipe_diameter_spec=cls.DEFAULT_TROUGH_CONNECTION_PIPE_DIAMETER_SPEC,
+                pipe_class_spec=cls.DEFAULT_TROUGH_CONNECTION_PIPE_CLASS_SPEC,
+            )
+            db.session.add(connection)
+            connections_by_destination[trough_id].append(connection)
+            changed_connections.append(connection)
+
+        if changed_connections:
+            db.session.flush()
+        return changed_connections
+
     @classmethod
     def apply_asset_payload(
         cls,
@@ -366,6 +557,8 @@ class WaterNetworkService:
         if asset.id is None:
             db.session.flush()
         cls._sync_served_paddocks(asset, served_paddock_ids)
+        if not imported:
+            cls.ensure_default_trough_connections(validated["farm_id"])
         return asset
 
     @classmethod
@@ -376,6 +569,8 @@ class WaterNetworkService:
         db.session.add(asset)
         db.session.flush()
         cls._sync_served_paddocks(asset, served_paddock_ids)
+        if not imported:
+            cls.ensure_default_trough_connections(validated["farm_id"])
         return asset
 
     @classmethod
@@ -383,13 +578,353 @@ class WaterNetworkService:
         return cls.apply_asset_payload(asset, payload)
 
     @classmethod
-    def serialize_asset(cls, asset: WaterAsset) -> dict:
+    def delete_assets(cls, farm_id: str, asset_ids: list[str]) -> list[WaterAsset]:
+        unique_asset_ids = []
+        seen_asset_ids = set()
+        for asset_id in asset_ids:
+            normalized_asset_id = str(asset_id or "").strip()
+            if not normalized_asset_id or normalized_asset_id in seen_asset_ids:
+                continue
+            seen_asset_ids.add(normalized_asset_id)
+            unique_asset_ids.append(normalized_asset_id)
+
+        if not unique_asset_ids:
+            return []
+
+        assets = WaterAsset.query.filter(
+            WaterAsset.farm_id == farm_id,
+            WaterAsset.id.in_(unique_asset_ids),
+        ).all()
+        if len(assets) != len(unique_asset_ids):
+            raise ValueError("One or more selected water assets are invalid for this farm")
+
+        WaterConnection.query.filter(
+            WaterConnection.farm_id == farm_id,
+            or_(
+                WaterConnection.source_asset_id.in_(unique_asset_ids),
+                WaterConnection.destination_asset_id.in_(unique_asset_ids),
+                WaterConnection.pump_asset_id.in_(unique_asset_ids),
+            ),
+        ).delete(synchronize_session=False)
+        for asset in assets:
+            db.session.delete(asset)
+        db.session.flush()
+        cls.ensure_default_trough_connections(
+            farm_id,
+            source_asset_types=cls.IMPORT_DEFAULT_TROUGH_CONNECTION_SOURCE_TYPES,
+        )
+        return assets
+
+    @classmethod
+    def _allows_gravity_connection(cls, source_asset_type: str, destination_asset_type: str) -> bool:
+        if destination_asset_type == "trough":
+            return source_asset_type in cls.GRAVITY_TROUGH_SOURCE_TYPES
+        return (
+            source_asset_type in cls.TRANSFER_SOURCE_TYPES
+            and destination_asset_type in cls.TRANSFER_DESTINATION_TYPES
+        )
+
+    @classmethod
+    def _allows_pumped_connection(cls, source_asset_type: str, destination_asset_type: str) -> bool:
+        return (
+            source_asset_type in cls.TRANSFER_SOURCE_TYPES
+            and destination_asset_type in cls.TRANSFER_DESTINATION_TYPES
+        )
+
+    @classmethod
+    def _is_pump_operational(cls, asset: WaterAsset | None) -> bool:
+        if asset is None or not asset.active or asset.asset_type not in cls.PUMP_ASSET_TYPES:
+            return False
+        return cls.normalize_choice(asset.status) not in cls.DOWN_PUMP_STATUSES
+
+    @classmethod
+    def _normalized_water_level(cls, value: str | None) -> str | None:
+        normalized_value = cls.normalize_choice(value)
+        return normalized_value if normalized_value in cls.WATER_LEVEL_OPTIONS else None
+
+    @classmethod
+    def _highest_known_water_level(cls, levels: list[str]) -> str | None:
+        normalized_levels = [
+            normalized_level
+            for normalized_level in (cls._normalized_water_level(level) for level in levels)
+            if normalized_level is not None
+        ]
+        if not normalized_levels:
+            return None
+        return max(normalized_levels, key=lambda level: cls.WATER_LEVEL_OPTIONS.index(level))
+
+    @classmethod
+    def _asset_supply_state(cls, asset: WaterAsset) -> str:
+        if not asset.active:
+            return "empty"
+
+        normalized_status = cls.normalize_choice(asset.status)
+        if normalized_status in cls.DRY_SOURCE_STATUSES:
+            return "empty"
+
+        if asset.asset_type == "borehole":
+            return "available"
+
+        if asset.asset_type in cls.WATER_LEVEL_TYPES:
+            normalized_level = cls.normalize_choice(asset.water_level)
+            if normalized_level == "empty":
+                return "empty"
+            if normalized_level:
+                return "available"
+            return "unknown"
+
+        return "available"
+
+    @classmethod
+    def _upstream_supply_paths(
+        cls,
+        asset_id: str,
+        incoming_connections_by_destination: dict[str, list[WaterConnection]],
+        active_assets_by_id: dict[str, WaterAsset],
+        *,
+        trail: set[str] | None = None,
+    ) -> list[dict]:
+        trail = trail or set()
+        if asset_id in trail:
+            return []
+
+        next_trail = set(trail)
+        next_trail.add(asset_id)
+        incoming_connections = incoming_connections_by_destination.get(asset_id, [])
+        if not incoming_connections:
+            return [
+                {
+                    "pump_ids": set(),
+                    "operational_pump_ids": set(),
+                    "down_pump_ids": set(),
+                }
+            ]
+
+        paths = []
+        for connection in incoming_connections:
+            source_asset_id = str(connection.source_asset_id)
+            if source_asset_id not in active_assets_by_id:
+                continue
+
+            upstream_paths = cls._upstream_supply_paths(
+                source_asset_id,
+                incoming_connections_by_destination,
+                active_assets_by_id,
+                trail=next_trail,
+            )
+            if not upstream_paths:
+                continue
+
+            edge_pump_ids = set()
+            edge_operational_pump_ids = set()
+            edge_down_pump_ids = set()
+            if connection.flow_type == "pumped" and connection.pump_asset_id:
+                pump_asset_id = str(connection.pump_asset_id)
+                edge_pump_ids.add(pump_asset_id)
+                if cls._is_pump_operational(connection.pump_asset):
+                    edge_operational_pump_ids.add(pump_asset_id)
+                else:
+                    edge_down_pump_ids.add(pump_asset_id)
+
+            for path in upstream_paths:
+                paths.append(
+                    {
+                        "pump_ids": set(path["pump_ids"]) | edge_pump_ids,
+                        "operational_pump_ids": set(path["operational_pump_ids"])
+                        | edge_operational_pump_ids,
+                        "down_pump_ids": set(path["down_pump_ids"]) | edge_down_pump_ids,
+                    }
+                )
+        return paths
+
+    @classmethod
+    def network_state_for_farm(
+        cls,
+        farm_id: str,
+        *,
+        assets: list[WaterAsset] | None = None,
+        connections: list[WaterConnection] | None = None,
+    ) -> dict:
+        if assets is None:
+            assets = cls.assets_for_farm(farm_id)
+        if connections is None:
+            connections = cls.connections_for_farm(farm_id)
+
+        active_assets_by_id = {str(asset.id): asset for asset in assets if asset.active}
+        incoming_connections_by_destination: dict[str, list[WaterConnection]] = defaultdict(list)
+
+        for connection in connections:
+            if not connection.active:
+                continue
+            source_asset_id = str(connection.source_asset_id)
+            destination_asset_id = str(connection.destination_asset_id)
+            if source_asset_id not in active_assets_by_id or destination_asset_id not in active_assets_by_id:
+                continue
+            incoming_connections_by_destination[destination_asset_id].append(connection)
+
+        effective_water_levels = {str(asset.id): asset.water_level for asset in assets}
+        asset_warnings: dict[str, str | None] = {str(asset.id): None for asset in assets}
+        served_asset_supply_summaries: dict[str, dict] = {}
+
+        for asset in assets:
+            asset_id = str(asset.id)
+            if not asset.active or asset.asset_type not in cls.SERVED_PADDOCK_TYPES:
+                continue
+
+            incoming_connections = incoming_connections_by_destination.get(asset_id, [])
+            has_available_upstream_source = False
+            has_unknown_upstream_source = False
+            unavailable_source_names = []
+            for connection in incoming_connections:
+                source_asset = active_assets_by_id.get(str(connection.source_asset_id))
+                if source_asset is None:
+                    continue
+                source_state = cls._asset_supply_state(source_asset)
+                if source_state == "available":
+                    has_available_upstream_source = True
+                elif source_state == "empty":
+                    unavailable_source_names.append(source_asset.name)
+                else:
+                    has_unknown_upstream_source = True
+
+            if (
+                incoming_connections
+                and not has_available_upstream_source
+                and not has_unknown_upstream_source
+                and unavailable_source_names
+            ):
+                effective_water_levels[asset_id] = "empty"
+                source_names = ", ".join(
+                    sorted({name for name in unavailable_source_names}, key=lambda value: value.lower())
+                )
+                asset_warnings[asset_id] = f"Upstream source is empty or unavailable: {source_names}."
+
+            if asset.asset_type == "trough" and cls.normalize_choice(asset.status) == "operational":
+                source_water_levels = []
+                for connection in incoming_connections:
+                    source_asset_id = str(connection.source_asset_id)
+                    source_asset = active_assets_by_id.get(source_asset_id)
+                    if source_asset is None:
+                        continue
+                    source_water_levels.append(
+                        effective_water_levels.get(source_asset_id, source_asset.water_level)
+                    )
+                mirrored_water_level = cls._highest_known_water_level(source_water_levels)
+                if mirrored_water_level is not None:
+                    effective_water_levels[asset_id] = mirrored_water_level
+
+            upstream_paths = cls._upstream_supply_paths(
+                asset_id,
+                incoming_connections_by_destination,
+                active_assets_by_id,
+            )
+            required_pump_ids = set()
+            operational_pump_ids = set()
+            down_pump_ids = set()
+            has_operational_path = False
+
+            for path in upstream_paths:
+                path_pump_ids = set(path["pump_ids"])
+                path_operational_pump_ids = set(path["operational_pump_ids"])
+                required_pump_ids.update(path_pump_ids)
+                operational_pump_ids.update(path_operational_pump_ids)
+                down_pump_ids.update(path["down_pump_ids"])
+                if path_pump_ids.issubset(path_operational_pump_ids):
+                    has_operational_path = True
+
+            served_asset_supply_summaries[asset_id] = {
+                "required_pump_ids": required_pump_ids,
+                "operational_pump_ids": operational_pump_ids,
+                "down_pump_ids": down_pump_ids,
+                "has_operational_path": has_operational_path,
+                "effective_water_level": effective_water_levels.get(asset_id),
+                "warning": asset_warnings.get(asset_id),
+            }
+
+        served_assets_by_paddock: dict[str, list[WaterAsset]] = defaultdict(list)
+        for asset in assets:
+            if not asset.active or asset.asset_type not in cls.SERVED_PADDOCK_TYPES:
+                continue
+            for link in asset.served_paddock_links:
+                served_assets_by_paddock[str(link.paddock_id)].append(asset)
+
+        paddock_alerts = {}
+        for paddock_id, service_assets in served_assets_by_paddock.items():
+            required_pump_ids = set()
+            operational_pump_ids = set()
+            down_pump_ids = set()
+            has_operational_path = False
+            empty_service_asset_notes = []
+
+            for service_asset in service_assets:
+                service_asset_id = str(service_asset.id)
+                summary = served_asset_supply_summaries.get(
+                    service_asset_id,
+                    {
+                        "required_pump_ids": set(),
+                        "operational_pump_ids": set(),
+                        "down_pump_ids": set(),
+                        "has_operational_path": True,
+                        "effective_water_level": effective_water_levels.get(service_asset_id),
+                        "warning": asset_warnings.get(service_asset_id),
+                    },
+                )
+                required_pump_ids.update(summary["required_pump_ids"])
+                operational_pump_ids.update(summary["operational_pump_ids"])
+                down_pump_ids.update(summary["down_pump_ids"])
+                has_operational_path = has_operational_path or bool(summary["has_operational_path"])
+
+                if cls.normalize_choice(summary["effective_water_level"]) == "empty":
+                    note = service_asset.name
+                    if summary["warning"]:
+                        note = f"{note} ({summary['warning']})"
+                    empty_service_asset_notes.append(note)
+
+            if service_assets and len(empty_service_asset_notes) == len(service_assets):
+                message = "All served water points are empty: " + "; ".join(empty_service_asset_notes)
+                paddock_alerts[paddock_id] = {
+                    "level": "critical",
+                    "message": message,
+                }
+                continue
+
+            if required_pump_ids and not has_operational_path:
+                down_pump_names = sorted(
+                    {
+                        active_assets_by_id[pump_id].name
+                        for pump_id in down_pump_ids
+                        if pump_id in active_assets_by_id
+                    },
+                    key=lambda value: value.lower(),
+                )
+                pump_suffix = (
+                    " Down pumps: " + ", ".join(down_pump_names) + "."
+                    if down_pump_names
+                    else ""
+                )
+                paddock_alerts[paddock_id] = {
+                    "level": "critical",
+                    "message": "No working pumped supply path reaches this paddock." + pump_suffix,
+                }
+
+        return {
+            "effective_water_levels": effective_water_levels,
+            "asset_warnings": asset_warnings,
+            "served_asset_supply_summaries": served_asset_supply_summaries,
+            "paddock_alerts": paddock_alerts,
+        }
+
+    @classmethod
+    def serialize_asset(cls, asset: WaterAsset, *, network_state: dict | None = None) -> dict:
         served_links = sorted(
             asset.served_paddock_links,
             key=lambda row: row.paddock.name.lower(),
         )
+        asset_id = str(asset.id)
+        effective_water_levels = (network_state or {}).get("effective_water_levels", {})
+        asset_warnings = (network_state or {}).get("asset_warnings", {})
         return {
-            "id": str(asset.id),
+            "id": asset_id,
             "farm_id": str(asset.farm_id),
             "name": asset.name,
             "asset_type": asset.asset_type,
@@ -402,10 +937,12 @@ class WaterNetworkService:
             "longitude": cls._to_float(asset.longitude),
             "altitude_m": cls._to_float(asset.altitude_m),
             "status": asset.status,
-            "water_level": asset.water_level,
+            "water_level": effective_water_levels.get(asset_id, asset.water_level),
+            "reported_water_level": asset.water_level,
             "capacity_m3": cls._to_float(asset.capacity_m3),
             "material": asset.material,
             "windmill_size_ft": asset.windmill_size_ft,
+            "weir_size": asset.weir_size,
             "solar_brand": asset.solar_brand,
             "solar_kw": cls._to_float(asset.solar_kw),
             "solar_head_m": cls._to_float(asset.solar_head_m),
@@ -413,6 +950,7 @@ class WaterNetworkService:
             "source_system": asset.source_system,
             "import_placemark_name": asset.import_placemark_name,
             "import_style_url": asset.import_style_url,
+            "network_warning": asset_warnings.get(asset_id),
             "served_paddock_ids": [str(link.paddock_id) for link in served_links],
             "served_paddocks": [
                 {"id": str(link.paddock_id), "name": link.paddock.name}
@@ -484,24 +1022,30 @@ class WaterNetworkService:
         if flow_type == "gravity":
             if pump_asset_id:
                 raise ValueError("pump_asset_id must be null for gravity connections")
-            if source_asset.asset_type not in cls.GRAVITY_SOURCE_TYPES or destination_asset.asset_type not in cls.GRAVITY_DESTINATION_TYPES:
-                raise ValueError("gravity only allows cement_dam|tank -> trough")
+            if not cls._allows_gravity_connection(
+                source_asset.asset_type,
+                destination_asset.asset_type,
+            ):
+                raise ValueError(
+                    "gravity only allows cement_dam|ground_dam|pit|tank|weir -> trough "
+                    "or transfers from borehole|cement_dam|ground_dam|pit|tank|weir into "
+                    "borehole|cement_dam|pit|tank"
+                )
         else:
             if not pump_asset_id:
                 raise ValueError("pump_asset_id is required for pumped connections")
-            if source_asset.asset_type not in cls.PUMPED_SOURCE_TYPES or destination_asset.asset_type not in cls.PUMPED_DESTINATION_TYPES:
+            if not cls._allows_pumped_connection(
+                source_asset.asset_type,
+                destination_asset.asset_type,
+            ):
                 raise ValueError(
-                    "pumped only allows borehole|pit|cement_dam|tank|ground_dam|weir -> cement_dam|tank"
+                    "pumped only allows transfers from borehole|cement_dam|ground_dam|pit|tank|weir "
+                    "into borehole|cement_dam|pit|tank"
                 )
             if pump_asset and pump_asset.asset_type not in cls.PUMP_ASSET_TYPES:
                 raise ValueError("pump_asset_id must reference a windmill or solarpump asset")
             if pump_asset_id in {source_asset_id, destination_asset_id}:
                 raise ValueError("pump_asset_id must reference a separate pump asset")
-            existing_pump_connection = WaterConnection.query.filter_by(pump_asset_id=pump_asset_id).first()
-            if existing_pump_connection and (
-                connection is None or str(existing_pump_connection.id) != str(connection.id)
-            ):
-                raise ValueError("pump_asset_id is already used by another pumped connection")
 
         pipe_material = cls._coerce_optional_text(
             cls._current_value(payload, "pipe_material", connection.pipe_material if connection else None)
@@ -593,10 +1137,10 @@ class WaterNetworkService:
         }
 
     @classmethod
-    def asset_map_feature(cls, asset: WaterAsset) -> dict | None:
+    def asset_map_feature(cls, asset: WaterAsset, *, network_state: dict | None = None) -> dict | None:
         if not asset.active or asset.latitude is None or asset.longitude is None:
             return None
-        properties = cls.serialize_asset(asset)
+        properties = cls.serialize_asset(asset, network_state=network_state)
         properties["feature_type"] = "water_asset"
         return {
             "type": "Feature",
@@ -639,19 +1183,29 @@ class WaterNetworkService:
         }
 
     @classmethod
-    def active_map_features_for_farm(cls, farm_id: str) -> list[dict]:
+    def active_map_features_for_farm(
+        cls,
+        farm_id: str,
+        *,
+        network_state: dict | None = None,
+    ) -> list[dict]:
         assets = (
             WaterAsset.query.filter_by(farm_id=farm_id)
             .order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
             .all()
         )
-        features = [feature for asset in assets if (feature := cls.asset_map_feature(asset))]
-
         connections = (
             WaterConnection.query.filter_by(farm_id=farm_id)
             .order_by(WaterConnection.flow_type.asc(), WaterConnection.created_at.asc())
             .all()
         )
+        if network_state is None:
+            network_state = cls.network_state_for_farm(farm_id, assets=assets, connections=connections)
+        features = [
+            feature
+            for asset in assets
+            if (feature := cls.asset_map_feature(asset, network_state=network_state))
+        ]
         features.extend(
             feature for connection in connections if (feature := cls.connection_map_feature(connection))
         )
@@ -695,12 +1249,12 @@ class WaterNetworkService:
         )
 
     @classmethod
-    def troughs_serving_paddock(cls, paddock_id: str) -> list[WaterAsset]:
+    def service_assets_serving_paddock(cls, paddock_id: str) -> list[WaterAsset]:
         return (
             WaterAsset.query.join(WaterAssetServedPaddock)
             .filter(
                 WaterAssetServedPaddock.paddock_id == paddock_id,
-                WaterAsset.asset_type == "trough",
+                WaterAsset.asset_type.in_(cls.SERVED_PADDOCK_TYPES),
                 WaterAsset.active.is_(True),
             )
             .order_by(WaterAsset.name.asc())

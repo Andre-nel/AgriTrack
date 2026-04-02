@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Review Imported Water Assets | AgriTrack{% endblock %}
+{% block content %}
+<section class="paddock-page-header">
+  <div>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">Back To Farm</a>
+    <h1>Review Non-Imported Water Assets</h1>
+    <p class="muted">
+      These active water assets on {{ farm.name }} were not part of the imported KML. Keep them, or delete the selected assets now.
+    </p>
+  </div>
+</section>
+
+<section class="card">
+  <form method="post" class="grid-form">
+    <div class="water-mass-update-table-wrap">
+      <table class="water-mass-update-table">
+        <thead>
+          <tr>
+            <th>Delete</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Location Paddock</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Status</th>
+            <th>Needs Review</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for asset in water_assets %}
+          <tr>
+            <td>
+              <input type="checkbox" name="asset_id" value="{{ asset.id }}" />
+            </td>
+            <td>{{ asset.name }}</td>
+            <td>{{ water_asset_type_labels.get(asset.asset_type, asset.asset_type) }}</td>
+            <td>{{ asset.location_paddock.name if asset.location_paddock else "-" }}</td>
+            <td>{{ asset.latitude if asset.latitude is not none else "-" }}</td>
+            <td>{{ asset.longitude if asset.longitude is not none else "-" }}</td>
+            <td>{{ asset.status.replace('_', ' ')|title if asset.status else "-" }}</td>
+            <td>{{ "Yes" if asset.needs_review else "No" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn" name="action" value="delete">Delete Selected Assets</button>
+      <button type="submit" class="btn btn-secondary" name="action" value="keep">Keep All</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
