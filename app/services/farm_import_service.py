@@ -24,6 +24,7 @@ KML_NAMESPACES = {"k": KML_NAMESPACE, "gx": GX_NAMESPACE}
 EARTH_RADIUS_M = 6371008.8
 INVALID_FARM_FILENAME_CHARS = set('<>:"/\\|?*')
 FOUR_DECIMAL_PLACES = Decimal("0.0001")
+SEVEN_DECIMAL_PLACES = Decimal("0.0000001")
 GEOMETRY_EPSILON = 1e-9
 WATER_ASSET_CODE_MAP = {
     "BH": "borehole",
@@ -59,6 +60,39 @@ class FarmImportService:
         if name.endswith((" ", ".")):
             raise ValueError("Farm name derived from the file name is invalid")
         return name
+
+    @classmethod
+    def _imported_water_asset_name_key(cls, asset_type: str, import_placemark_name: str | None):
+        normalized_name = WaterNetworkService.normalize_name(import_placemark_name).casefold()
+        if not normalized_name:
+            return None
+        return (asset_type, normalized_name)
+
+    @staticmethod
+    def _water_asset_location_key(asset_type: str, latitude, longitude):
+        if latitude is None or longitude is None:
+            return None
+        normalized_latitude = Decimal(str(latitude)).quantize(SEVEN_DECIMAL_PLACES)
+        normalized_longitude = Decimal(str(longitude)).quantize(SEVEN_DECIMAL_PLACES)
+        return (asset_type, normalized_latitude, normalized_longitude)
+
+    @staticmethod
+    def _water_asset_import_match_rank(asset: WaterAsset) -> int:
+        if asset.import_placemark_name and asset.active:
+            return 0
+        if asset.import_placemark_name:
+            return 1
+        if asset.active:
+            return 2
+        return 3
+
+    @classmethod
+    def _set_preferred_water_asset_match(cls, lookup: dict, key, asset: WaterAsset) -> None:
+        if key is None:
+            return
+        current = lookup.get(key)
+        if current is None or cls._water_asset_import_match_rank(asset) < cls._water_asset_import_match_rank(current):
+            lookup[key] = asset
 
     @classmethod
     def _safe_upload_name(cls, file_name: str | None) -> str:
@@ -827,7 +861,7 @@ class FarmImportService:
                 (point_coordinates[0], point_coordinates[1]),
                 paddocks,
             )
-            if containing_paddock_key is None and asset_type == "trough":
+            if containing_paddock_key is None and asset_type in WaterNetworkService.SERVED_PADDOCK_TYPES:
                 containing_paddock_key = cls._nearest_paddock_key(
                     (point_coordinates[0], point_coordinates[1]),
                     paddocks,
@@ -843,7 +877,7 @@ class FarmImportService:
                     "location_paddock_key": containing_paddock_key,
                     "served_paddock_keys": (
                         [containing_paddock_key]
-                        if asset_type == "trough" and containing_paddock_key
+                        if asset_type in WaterNetworkService.SERVED_PADDOCK_TYPES and containing_paddock_key
                         else []
                     ),
                     "import_placemark_name": validated_name,
@@ -1271,24 +1305,39 @@ class FarmImportService:
                 for allocation in allocations_to_delete:
                     db.session.delete(allocation)
 
-        imported_water_assets = {
-            (
-                asset.asset_type,
-                WaterNetworkService.normalize_name(asset.import_placemark_name).casefold(),
-            ): asset
-            for asset in WaterAsset.query.filter_by(farm_id=farm.id).all()
-            if asset.import_placemark_name
-        }
+        existing_water_assets = WaterAsset.query.filter_by(farm_id=farm.id).all()
+        preexisting_imported_water_assets = [
+            asset for asset in existing_water_assets if asset.import_placemark_name
+        ]
+        imported_water_assets_by_name = {}
+        water_assets_by_location = {}
+        for asset in existing_water_assets:
+            cls._set_preferred_water_asset_match(
+                water_assets_by_location,
+                cls._water_asset_location_key(asset.asset_type, asset.latitude, asset.longitude),
+                asset,
+            )
+            if asset.import_placemark_name:
+                cls._set_preferred_water_asset_match(
+                    imported_water_assets_by_name,
+                    cls._imported_water_asset_name_key(asset.asset_type, asset.import_placemark_name),
+                    asset,
+                )
         paddock_id_by_key = {
             paddock_payload["key"]: str(paddock_payload["db_paddock"].id)
             for paddock_payload in parsed["paddocks"]
         }
-        seen_water_keys = set()
+        seen_preexisting_imported_water_asset_ids = set()
 
         for water_payload in parsed.get("water_assets", []):
-            water_key = (
+            water_name_key = cls._imported_water_asset_name_key(
                 water_payload["asset_type"],
-                WaterNetworkService.normalize_name(water_payload["import_placemark_name"]).casefold(),
+                water_payload["import_placemark_name"],
+            )
+            water_location_key = cls._water_asset_location_key(
+                water_payload["asset_type"],
+                water_payload["latitude"],
+                water_payload["longitude"],
             )
             asset_payload = {
                 "farm_id": str(farm.id),
@@ -1308,22 +1357,31 @@ class FarmImportService:
                     if key in paddock_id_by_key
                 ],
             }
-            existing_asset = imported_water_assets.get(water_key)
+            existing_asset = imported_water_assets_by_name.get(water_name_key)
+            if existing_asset is None:
+                existing_asset = water_assets_by_location.get(water_location_key)
             if existing_asset is None:
                 existing_asset = WaterNetworkService.create_asset(asset_payload, imported=True)
-                imported_water_assets[water_key] = existing_asset
                 water_created_count += 1
             else:
                 WaterNetworkService.apply_asset_payload(existing_asset, asset_payload, imported=True)
                 water_updated_count += 1
-            seen_water_keys.add(water_key)
+            imported_water_assets_by_name[water_name_key] = existing_asset
+            water_assets_by_location[water_location_key] = existing_asset
+            if existing_asset.import_placemark_name:
+                seen_preexisting_imported_water_asset_ids.add(str(existing_asset.id))
 
-        for water_key, existing_asset in imported_water_assets.items():
-            if water_key in seen_water_keys or not existing_asset.active:
+        for existing_asset in preexisting_imported_water_assets:
+            if str(existing_asset.id) in seen_preexisting_imported_water_asset_ids or not existing_asset.active:
                 continue
             existing_asset.active = False
             existing_asset.needs_review = True
             water_archived_count += 1
+
+        WaterNetworkService.ensure_default_trough_connections(
+            str(farm.id),
+            source_asset_types=WaterNetworkService.IMPORT_DEFAULT_TROUGH_CONNECTION_SOURCE_TYPES,
+        )
 
         temp_path = None
         final_written = False
