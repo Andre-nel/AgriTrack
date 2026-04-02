@@ -204,11 +204,6 @@ class GrazingHistoryService:
             return
 
         sync_at = effective_at or datetime.now(timezone.utc)
-        active_session = (
-            GrazingSession.query.filter_by(mob_id=mob_obj.id, end_at=None)
-            .order_by(GrazingSession.start_at.desc())
-            .first()
-        )
         open_rows = (
             GrazingAllocationLsuHistory.query.filter(
                 GrazingAllocationLsuHistory.mob_id == mob_obj.id,
@@ -216,6 +211,18 @@ class GrazingHistoryService:
             )
             .order_by(GrazingAllocationLsuHistory.effective_from.asc())
             .all()
+        )
+
+        if mob_obj.status != "active":
+            close_at = mob_obj.updated_at or sync_at
+            for row in open_rows:
+                cls._close_or_delete_open_row(row, close_at)
+            return
+
+        active_session = (
+            GrazingSession.query.filter_by(mob_id=mob_obj.id, end_at=None)
+            .order_by(GrazingSession.start_at.desc())
+            .first()
         )
 
         if active_session is None:
@@ -434,7 +441,10 @@ class GrazingHistoryService:
 
         db.session.flush()
 
-        active_sessions = GrazingSession.query.filter_by(end_at=None).all()
+        active_sessions = GrazingSession.query.join(Mob).filter(
+            GrazingSession.end_at.is_(None),
+            Mob.status == "active",
+        ).all()
         for session in active_sessions:
             open_rows = (
                 GrazingAllocationLsuHistory.query.filter(

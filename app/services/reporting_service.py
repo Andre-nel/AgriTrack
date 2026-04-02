@@ -28,7 +28,12 @@ class ReportingService:
     def paddock_current_stock(paddock_id: str) -> dict:
         rows = (
             GrazingAllocation.query.join(GrazingSession)
-            .filter(GrazingAllocation.paddock_id == paddock_id, GrazingSession.end_at.is_(None))
+            .join(Mob)
+            .filter(
+                GrazingAllocation.paddock_id == paddock_id,
+                GrazingSession.end_at.is_(None),
+                Mob.status == "active",
+            )
             .all()
         )
 
@@ -44,7 +49,12 @@ class ReportingService:
     def paddock_current_stock_summary(paddock_id: str) -> list[dict]:
         rows = (
             GrazingAllocation.query.join(GrazingSession)
-            .filter(GrazingAllocation.paddock_id == paddock_id, GrazingSession.end_at.is_(None))
+            .join(Mob)
+            .filter(
+                GrazingAllocation.paddock_id == paddock_id,
+                GrazingSession.end_at.is_(None),
+                Mob.status == "active",
+            )
             .all()
         )
 
@@ -121,18 +131,41 @@ class ReportingService:
         return mob_total * float(allocation.allocation_fraction)
 
     @staticmethod
-    def _normalize_datetime(value: datetime) -> datetime:
+    def _normalize_datetime(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
         if value.tzinfo is None:
             return value
         return value.astimezone(timezone.utc).replace(tzinfo=None)
 
     @classmethod
+    def _effective_session_end(
+        cls,
+        session: GrazingSession,
+        *,
+        default_open_end: datetime | None = None,
+    ) -> datetime | None:
+        if session.end_at is not None:
+            end_at = session.end_at
+        elif getattr(session.mob, "status", None) != "active":
+            end_at = getattr(session.mob, "updated_at", None) or session.start_at
+        else:
+            end_at = default_open_end
+
+        end_dt = cls._normalize_datetime(end_at) if end_at is not None else None
+        start_dt = cls._normalize_datetime(session.start_at)
+        if end_dt is not None and start_dt is not None and end_dt < start_dt:
+            return start_dt
+        return end_dt
+
+    @classmethod
     def paddock_current_lsu_breakdown(cls, paddock_id: str) -> dict:
         rows = (
-            GrazingAllocation.query.join(GrazingSession)
+            GrazingAllocation.query.join(GrazingSession).join(Mob)
             .filter(
                 GrazingAllocation.paddock_id == paddock_id,
                 GrazingSession.end_at.is_(None),
+                Mob.status == "active",
             )
             .all()
         )
@@ -183,7 +216,7 @@ class ReportingService:
         for allocation in rows:
             session = allocation.grazing_session
             session_start = cls._normalize_datetime(session.start_at)
-            session_end = cls._normalize_datetime(session.end_at) if session.end_at else end_dt
+            session_end = cls._effective_session_end(session, default_open_end=end_dt) or end_dt
 
             overlap_start = max(session_start, start_dt)
             overlap_end = min(session_end, end_dt)
@@ -214,7 +247,7 @@ class ReportingService:
                 continue
             session = allocation.grazing_session
             interval_start = cls._normalize_datetime(session.start_at)
-            interval_end = cls._normalize_datetime(session.end_at) if session.end_at else now_dt
+            interval_end = cls._effective_session_end(session, default_open_end=now_dt) or now_dt
             if interval_end > now_dt:
                 interval_end = now_dt
             if interval_end <= interval_start:

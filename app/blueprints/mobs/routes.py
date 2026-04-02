@@ -5,6 +5,7 @@ from app.extensions import db
 from app.models import AnimalGroupBalance, Mob, MobEvent
 from app.models.stock_ledger import StockEventType
 from app.services.mob_event_service import MobEventService
+from app.services.mob_service import MobService
 from app.services.movement_service import MovementService
 from app.services.stock_service import StockService
 
@@ -57,7 +58,9 @@ def update_mob(mob_id):
         total_head_count = sum(int(balance.head_count) for balance in mob.balances)
         if total_head_count > 0:
             return jsonify({"error": "Mob cannot be deactivated while it still contains stock"}), 400
-    mob.status = requested_status
+        MobService.archive_mob(mob)
+    else:
+        mob.status = requested_status
     mob.origin_note = payload.get("origin_note", mob.origin_note)
 
     try:
@@ -246,7 +249,7 @@ def deactivate_mob(mob_id):
     if total_head_count > 0:
         return jsonify({"error": "Mob cannot be deactivated while it still contains stock"}), 400
 
-    mob.status = "archived"
+    MobService.archive_mob(mob)
     db.session.commit()
     return jsonify({"id": str(mob.id), "status": mob.status}), 200
 

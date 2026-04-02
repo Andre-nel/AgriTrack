@@ -1,6 +1,6 @@
 from sqlalchemy import and_
 
-from app.models import Paddock
+from app.models import Mob, Paddock
 from app.models.grazing import GrazingAllocation, GrazingSession
 
 
@@ -16,11 +16,12 @@ class PaddockRepository:
     @staticmethod
     def active_allocations(paddock_id: str):
         return (
-            GrazingAllocation.query.join(GrazingSession)
+            GrazingAllocation.query.join(GrazingSession).join(Mob)
             .filter(
                 and_(
                     GrazingAllocation.paddock_id == paddock_id,
                     GrazingSession.end_at.is_(None),
+                    Mob.status == "active",
                 )
             )
             .all()

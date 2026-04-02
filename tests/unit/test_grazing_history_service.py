@@ -197,3 +197,62 @@ def test_build_paddock_daily_metrics_resets_pressure_and_includes_lsu_per_ha(app
         assert rows[0]["lsu_per_ha"] == 0.1667
         assert rows[1]["lsu_per_ha"] == 0.0
         assert payload["paddocks"][str(paddock.id)]["metrics"]["lsu_per_ha"] == [0.1667, 0.0]
+
+
+def test_sync_live_history_for_archived_mob_closes_open_rows_at_archive_time(app):
+    with app.app_context():
+        farm, paddock, mob = _build_base_entities()
+        group = AnimalGroupType(species="Goat", breed="Angora", sex="ewe", age_class="adult")
+        db.session.add(group)
+        db.session.flush()
+        db.session.add(
+            AnimalGroupBalance(
+                mob_id=mob.id,
+                animal_group_type_id=group.id,
+                head_count=8,
+            )
+        )
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+            end_at=None,
+        )
+        db.session.add(session)
+        db.session.flush()
+        allocation = GrazingAllocation(
+            grazing_session_id=session.id,
+            paddock_id=paddock.id,
+            allocation_fraction=1,
+        )
+        db.session.add(allocation)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocationLsuHistory(
+                farm_id=farm.id,
+                mob_id=mob.id,
+                paddock_id=paddock.id,
+                grazing_session_id=session.id,
+                grazing_allocation_id=allocation.id,
+                effective_from=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+                effective_to=None,
+                allocation_fraction=1,
+                mob_total_lsu=1,
+                allocated_lsu=1,
+                source=GrazingHistoryService.SOURCE_LIVE,
+            )
+        )
+        archive_time = datetime(2026, 3, 4, 10, 30, tzinfo=timezone.utc)
+        mob.status = "archived"
+        mob.updated_at = archive_time
+        db.session.flush()
+
+        GrazingHistoryService.sync_live_history_for_mob(
+            mob,
+            effective_at=datetime(2026, 3, 8, 9, 0, tzinfo=timezone.utc),
+        )
+        db.session.commit()
+
+        row = GrazingAllocationLsuHistory.query.filter_by(grazing_allocation_id=allocation.id).first()
+        assert row is not None
+        assert row.effective_to == GrazingHistoryService._normalize_datetime(archive_time)

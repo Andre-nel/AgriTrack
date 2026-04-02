@@ -36,6 +36,7 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     solar_brand = db.Column(db.String(120))
     solar_kw = db.Column(db.Numeric(8, 2))
     solar_head_m = db.Column(db.Numeric(8, 2))
+    weir_size = db.Column(db.String(20))
     trough_size = db.Column(db.String(20))
     source_system = db.Column(db.String(120))
     import_placemark_name = db.Column(db.String(120))
@@ -97,6 +98,10 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
             "windmill_size_ft IS NULL OR windmill_size_ft IN (10, 12, 14)",
             name="ck_water_asset_windmill_size",
         ),
+        db.CheckConstraint(
+            "weir_size IS NULL OR weir_size IN ('small', 'medium', 'large')",
+            name="ck_water_asset_weir_size",
+        ),
     )
 
 
@@ -140,7 +145,6 @@ class WaterConnection(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     pump_asset_id = db.Column(
         db.String(36),
         db.ForeignKey("water_assets.id"),
-        unique=True,
         index=True,
     )
     pipe_material = db.Column(db.String(20))

@@ -8,6 +8,7 @@ from app.models.movement import MobLineage, MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.grazing_service import GrazingService
+from app.services.mob_service import MobService
 from app.services.stock_service import StockService
 from app.services.validation_service import ValidationService
 
@@ -367,7 +368,7 @@ class MovementService:
                     event_time=when,
                     sync_grazing_history=False,
                 )
-            source.status = "archived"
+            MobService.archive_mob(source, when=when)
 
         for source in source_mobs:
             GrazingHistoryService.sync_live_history_for_mob(source, effective_at=when)
