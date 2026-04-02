@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+{% block title %}Cash Flow | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero cash-flow-hero">
+  <h1>Cash Flow Dashboard</h1>
+  <p>Track actual cash inflows and outflows across the whole business, then compare sheep, cattle, and goats month by month.</p>
+</section>
+
+<section class="card">
+  <form method="get" action="{{ url_for('finance.cash_flow') }}" class="grid-form">
+    <div class="grid-two">
+      <label>Year
+        <select name="year">
+          {% for year in years %}
+          <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <input type="hidden" name="tab" value="{{ selected_tab }}" />
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply</button>
+      <span class="muted">Statements show actual cash only. Shared overheads stay on the overall business view.</span>
+    </div>
+  </form>
+
+  <div class="cash-flow-tabs" role="tablist" aria-label="Cash flow statements">
+    {% for tab in dashboard["tab_options"] %}
+    <a
+      href="{{ url_for('finance.cash_flow', year=selected_year, tab=tab['value']) }}"
+      class="cash-flow-tab {% if selected_tab == tab['value'] %}is-active{% endif %}"
+    >
+      {{ tab["label"] }}
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="cards farm-grid cash-summary-grid">
+  {% for key, statement in dashboard["statements"].items() %}
+  <article class="card cash-summary-card {% if selected_tab == key %}is-selected{% endif %}">
+    <h2>{{ statement["label"] }}</h2>
+    <p class="cash-summary-value">{{ format_currency(statement["summary"]["net"]) }}</p>
+    <p class="muted">Inflows {{ format_currency(statement["summary"]["inflows"]) }} | Outflows {{ format_currency(statement["summary"]["outflows"]) }}</p>
+    <a class="btn btn-secondary" href="{{ url_for('finance.cash_flow', year=selected_year, tab=key) }}">View Statement</a>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <div class="row-actions cash-table-header">
+    <div>
+      <h2>{{ active_statement["title"] }}</h2>
+      <p class="muted">Monthly statement for {{ selected_year }} with annual totals.</p>
+    </div>
+  </div>
+  <div class="cash-flow-table-wrap">
+    <table class="cash-flow-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          {% for month in dashboard["months"] %}
+          <th>{{ month["label"] }}</th>
+          {% endfor %}
+          <th>Annual</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in active_statement["rows"] %}
+        <tr class="cash-row cash-row-{{ row['kind'] }}">
+          <td>{{ row["label"] }}</td>
+          {% for value in row["values"] %}
+          <td>
+            {% if row["kind"] == "section" %}
+            {% elif row["kind"] in ("summary", "net") %}
+            {{ format_currency(value) }}
+            {% elif value %}
+            {{ format_currency(value) }}
+            {% endif %}
+          </td>
+          {% endfor %}
+          <td>
+            {% if row["kind"] == "section" %}
+            {% elif row["kind"] in ("summary", "net") %}
+            {{ format_currency(row["annual"]) }}
+            {% elif row["annual"] %}
+            {{ format_currency(row["annual"]) }}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Add Cash Transaction</h2>
+  <p class="muted">Use one line per species and category amount. Leave species blank for business-wide overheads and unused rows blank.</p>
+  <form method="post" action="{{ url_for('finance.create_transaction') }}" class="grid-form">
+    <input type="hidden" name="return_year" value="{{ selected_year }}" />
+    <input type="hidden" name="return_tab" value="{{ selected_tab }}" />
+    <div class="cash-transaction-meta">
+      <label>Transaction Date
+        <input type="date" name="transaction_date" value="{{ selected_year }}-01-01" required />
+      </label>
+      <label>Farm
+        <select name="farm_id">
+          <option value="">Business-wide / Unassigned</option>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}">{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Reference
+        <input name="reference" placeholder="Invoice / EFT ref" />
+      </label>
+      <label>Counterparty
+        <input name="counterparty" placeholder="Supplier / buyer" />
+      </label>
+    </div>
+    <label>Description
+      <textarea name="description" rows="3" placeholder="Describe the cash movement..." required></textarea>
+    </label>
+    <div class="cash-form-table-wrap">
+      <table class="cash-entry-table">
+        <thead>
+          <tr>
+            <th>Species Scope</th>
+            <th>Category</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in new_line_rows %}
+          <tr>
+            <td>
+              <select name="line_species_scope">
+                {% for option in species_scope_options %}
+                <option value="{{ option.value }}" {% if row.species_scope == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <select name="line_category_code">
+                <option value="">Choose category</option>
+                {% for group in category_groups %}
+                <optgroup label="{{ group.label }}">
+                  {% for option in group.options %}
+                  <option value="{{ option.value }}" {% if row.category_code == option.value %}selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endfor %}
+              </select>
+            </td>
+            <td><input name="line_amount" inputmode="decimal" placeholder="0.00" value="{{ row.amount }}" /></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Transaction</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Recent Transactions For {{ selected_year }}</h2>
+  {% for transaction in recent_transactions %}
+  <details class="cash-transaction-item">
+    <summary>
+      <div>
+        <strong>{{ transaction.transaction_date }}</strong>
+        <span class="muted">{{ transaction.description }}</span>
+      </div>
+      <span class="badge ok">{{ transaction["lines"]|length }} line{% if transaction["lines"]|length != 1 %}s{% endif %}</span>
+    </summary>
+    <div class="cash-transaction-body">
+      <p class="muted">
+        {{ transaction["farm_name"] }}
+        {% if transaction["reference"] %} | Ref {{ transaction["reference"] }}{% endif %}
+        {% if transaction["counterparty"] %} | {{ transaction["counterparty"] }}{% endif %}
+      </p>
+      <table class="cash-entry-table cash-entry-table-readonly">
+        <thead>
+          <tr>
+            <th>Species Scope</th>
+            <th>Category</th>
+            <th>Direction</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in transaction["lines"] %}
+          <tr>
+            <td>{{ line["species_scope"] }}</td>
+            <td>{{ line["category_label"] }}</td>
+            <td>{{ line["direction_label"] }}</td>
+            <td>{{ format_currency(line["amount"]) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <form method="post" action="{{ url_for('finance.edit_transaction', transaction_id=transaction['id']) }}" class="grid-form cash-edit-form">
+        <input type="hidden" name="return_year" value="{{ selected_year }}" />
+        <input type="hidden" name="return_tab" value="{{ selected_tab }}" />
+        <div class="cash-transaction-meta">
+          <label>Transaction Date
+            <input type="date" name="transaction_date" value="{{ transaction['transaction_date'] }}" required />
+          </label>
+          <label>Farm
+            <select name="farm_id">
+              <option value="">Business-wide / Unassigned</option>
+              {% for farm in farms %}
+              <option value="{{ farm.id }}" {% if transaction["farm_id"] == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Reference
+            <input name="reference" value="{{ transaction['reference'] or '' }}" />
+          </label>
+          <label>Counterparty
+            <input name="counterparty" value="{{ transaction['counterparty'] or '' }}" />
+          </label>
+        </div>
+        <label>Description
+          <textarea name="description" rows="3" required>{{ transaction["description"] }}</textarea>
+        </label>
+        <div class="cash-form-table-wrap">
+          <table class="cash-entry-table">
+            <thead>
+              <tr>
+                <th>Species Scope</th>
+                <th>Category</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in transaction["line_rows"] %}
+              <tr>
+                <td>
+                  <select name="line_species_scope">
+                    {% for option in species_scope_options %}
+                    <option value="{{ option.value }}" {% if row["species_scope"] == option.value %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td>
+                  <select name="line_category_code">
+                    <option value="">Choose category</option>
+                    {% for group in category_groups %}
+                    <optgroup label="{{ group.label }}">
+                      {% for option in group.options %}
+                      <option value="{{ option.value }}" {% if row["category_code"] == option.value %}selected{% endif %}>{{ option.label }}</option>
+                      {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td><input name="line_amount" inputmode="decimal" placeholder="0.00" value="{{ row["amount"] }}" /></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="row-actions">
+          <button type="submit" class="btn">Update Transaction</button>
+        </div>
+      </form>
+
+      <form method="post" action="{{ url_for('finance.delete_transaction', transaction_id=transaction['id']) }}">
+        <input type="hidden" name="return_year" value="{{ selected_year }}" />
+        <input type="hidden" name="return_tab" value="{{ selected_tab }}" />
+        <button type="submit" class="btn btn-danger">Delete Transaction</button>
+      </form>
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">No cash transactions recorded for {{ selected_year }} yet.</p>
+  {% endfor %}
+</section>
+{% endblock %}
