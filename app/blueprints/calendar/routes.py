@@ -78,6 +78,13 @@ def _calendar_url(
     return url_for("calendar.index", **kwargs)
 
 
+def _activity_detail_url(activity_id: str, focus_date: date | None = None) -> str:
+    kwargs = {"activity_id": activity_id}
+    if focus_date is not None:
+        kwargs["focus_date"] = focus_date.isoformat()
+    return url_for("calendar.activity_detail", **kwargs)
+
+
 def _calendar_state_from_request() -> dict:
     today = date.today()
     view = " ".join((request.values.get("view") or "year").strip().lower().split())
@@ -396,7 +403,8 @@ def create_activity():
 def activity_detail(activity_id: str):
     activity = _load_activity(activity_id)
     today = date.today()
-    range_start = date(today.year, today.month, 1)
+    focus_date = _parse_query_date(request.args.get("focus_date")) or today
+    range_start = date(focus_date.year, focus_date.month, 1)
     range_end = CalendarService.add_interval(range_start, 24, "months") - timedelta(days=1)
     occurrence_rows = CalendarService.expand_activity_for_detail(
         activity,
@@ -444,7 +452,7 @@ def edit_activity(activity_id: str):
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
-    return redirect(url_for("calendar.activity_detail", activity_id=activity.id))
+    return redirect(_activity_detail_url(activity.id))
 
 
 @bp.post("/calendar/activities/<activity_id>/delete")
@@ -466,8 +474,12 @@ def delete_activity(activity_id: str):
 @bp.post("/calendar/activities/<activity_id>/occurrences")
 def create_occurrence_exception(activity_id: str):
     activity = _load_activity(activity_id)
+    focus_date = (
+        _parse_query_date(request.form.get("rescheduled_date"))
+        or _parse_query_date(request.form.get("occurrence_date"))
+    )
     try:
-        CalendarService.upsert_exception(
+        exception = CalendarService.upsert_exception(
             activity=activity,
             occurrence_date=request.form.get("occurrence_date"),
             action=request.form.get("action"),
@@ -475,17 +487,23 @@ def create_occurrence_exception(activity_id: str):
             note=request.form.get("note"),
         )
         db.session.commit()
+        focus_date = (
+            exception.rescheduled_date
+            if exception.action == "move" and exception.rescheduled_date is not None
+            else exception.occurrence_date
+        )
         flash("Occurrence override saved", "success")
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
-    return redirect(url_for("calendar.activity_detail", activity_id=activity.id))
+    return redirect(_activity_detail_url(activity.id, focus_date))
 
 
 @bp.post("/calendar/activities/<activity_id>/occurrences/<occurrence_date>/clear")
 def clear_occurrence_exception(activity_id: str, occurrence_date: str):
     activity = _load_activity(activity_id)
+    focus_date = _parse_query_date(occurrence_date)
     CalendarService.clear_exception(activity, occurrence_date)
     db.session.commit()
     flash("Occurrence override cleared", "success")
-    return redirect(url_for("calendar.activity_detail", activity_id=activity.id))
+    return redirect(_activity_detail_url(activity.id, focus_date))

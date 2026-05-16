@@ -474,9 +474,11 @@ class CalendarService:
     ) -> list[dict]:
         exception_map = cls._occurrence_exception_map(activity)
         rows = []
+        included_occurrence_dates = set()
         for occurrence_date in cls._activity_base_occurrences(activity, range_start=range_start, range_end=range_end):
             exception = exception_map.get(occurrence_date)
             display_date = exception.rescheduled_date if exception and exception.action == "move" else occurrence_date
+            included_occurrence_dates.add(occurrence_date)
             rows.append(
                 {
                     "date": display_date or occurrence_date,
@@ -496,6 +498,37 @@ class CalendarService:
                     ),
                 }
             )
+
+        for exception in activity.exceptions:
+            if exception.action != "move" or exception.rescheduled_date is None:
+                continue
+            if exception.occurrence_date in included_occurrence_dates:
+                continue
+            if not (range_start <= exception.rescheduled_date <= range_end):
+                continue
+            if not cls.is_valid_occurrence(activity, exception.occurrence_date):
+                continue
+            rows.append(
+                {
+                    "date": exception.rescheduled_date,
+                    "original_date": exception.occurrence_date,
+                    "is_moved": True,
+                    "is_skipped": False,
+                    "exception_action": exception.action,
+                    "exception_note": exception.note,
+                    "exception_rescheduled_date": exception.rescheduled_date,
+                    "create_task_url": url_for(
+                        "tasks.new_task_page",
+                        farm_id=activity.farm_id,
+                        due_date=exception.rescheduled_date.isoformat(),
+                        heading=activity.title,
+                        source_activity_id=activity.id,
+                        occurrence_date=exception.occurrence_date.isoformat(),
+                    ),
+                }
+            )
+
+        rows.sort(key=lambda row: (row["date"], row["original_date"]))
         return rows
 
     @classmethod

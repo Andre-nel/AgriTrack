@@ -29,6 +29,7 @@ from app.models import (
     WaterConnection,
 )
 from app.models.stock_ledger import StockEventType
+from app.services.farm_deletion_service import FarmDeletionService
 from app.services.farm_import_service import FarmImportService
 from app.services.mob_event_service import MobEventService
 from app.services.grazing_history_service import GrazingHistoryService
@@ -1792,6 +1793,29 @@ def farms_page():
 
     farms = Farm.query.order_by(Farm.name).all()
     return render_template("farms.html", farms=farms)
+
+
+@bp.post("/farms/<farm_id>/delete")
+def delete_farm_form(farm_id):
+    farm = Farm.query.get_or_404(farm_id)
+    farm_name = farm.name
+
+    try:
+        FarmDeletionService.delete_farm_records(farm)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("Unable to delete farm because related records still exist", "error")
+        return redirect(url_for("web.farms_page"))
+
+    try:
+        FarmDeletionService.delete_map_file(farm_name, current_app.instance_path)
+    except (OSError, ValueError):
+        flash(f"{farm_name} deleted. The map file could not be removed.", "warning")
+        return redirect(url_for("web.farms_page"))
+
+    flash(f"{farm_name} deleted", "success")
+    return redirect(url_for("web.farms_page"))
 
 
 @bp.route("/farms/import", methods=["GET", "POST"])

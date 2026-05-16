@@ -16,14 +16,25 @@
 </form>
 
 <table>
-  <thead><tr><th>Name</th><th>Timezone</th><th>Status</th><th>Open</th></tr></thead>
+  <thead><tr><th>Name</th><th>Timezone</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
     {% for farm in farms %}
     <tr>
       <td>{{ farm.name }}</td>
       <td>{{ farm.timezone }}</td>
       <td>{{ 'Active' if farm.active else 'Inactive' }}</td>
-      <td><a href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">Manage</a></td>
+      <td>
+        <div class="row-actions">
+          <a href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">Manage</a>
+          <form
+            method="post"
+            action="{{ url_for('web.delete_farm_form', farm_id=farm.id) }}"
+            onsubmit="return confirm('Delete this farm and its related records? This cannot be undone.');"
+          >
+            <button type="submit" class="btn btn-danger">Delete</button>
+          </form>
+        </div>
+      </td>
     </tr>
     {% else %}
     <tr><td colspan="4">No farms yet.</td></tr>
