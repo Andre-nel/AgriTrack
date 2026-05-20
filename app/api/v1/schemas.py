@@ -1,13 +1,4 @@
-"""API schemas placeholder for future Marshmallow/Pydantic models."""
+from app.modules.api_v1.schemas import FarmSchema, MobSchema, PaddockSchema
 
+__all__ = ["FarmSchema", "MobSchema", "PaddockSchema"]
 
-class FarmSchema:
-    fields = ("id", "name", "timezone", "active")
-
-
-class MobSchema:
-    fields = ("id", "farm_id", "name", "status")
-
-
-class PaddockSchema:
-    fields = ("id", "farm_id", "name", "area_ha", "grazeable_area_ha", "status")

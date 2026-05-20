@@ -42,3 +42,10 @@ Run tests:
 ```bash
 pytest
 ```
+
+## Architecture
+
+AgriTrack is organized as a Flask/Jinja modular monolith. Shared app wiring lives
+in `app/core`, and feature-owned route modules live under `app/modules`.
+
+See `docs/architecture.md` for the module contract and migration rules.

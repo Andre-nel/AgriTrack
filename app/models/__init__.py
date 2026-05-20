@@ -4,6 +4,7 @@ from app.models.farm import Farm
 from app.models.finance import CashTransaction, CashTransactionLine
 from app.models.grazing import GrazingAllocation, GrazingAllocationLsuHistory, GrazingSession
 from app.models.journal import JournalEntry
+from app.models.mobile import MobileAuthToken, MobileSyncCommand
 from app.models.mob import Mob
 from app.models.mob_event import MobEvent
 from app.models.movement import MobLineage, MovementEvent, MovementEventMob
@@ -28,6 +29,8 @@ __all__ = [
     "GrazingAllocationLsuHistory",
     "GrazingSession",
     "JournalEntry",
+    "MobileAuthToken",
+    "MobileSyncCommand",
     "Mob",
     "MobEvent",
     "MobLineage",

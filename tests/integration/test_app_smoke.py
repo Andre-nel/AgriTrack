@@ -1229,3 +1229,24 @@ def test_mob_balance_edit_reclassifies_and_records_change(client, app):
         assert "wether" in mob_event.description
         assert "lamb" in mob_event.description
         assert "young" in mob_event.description
+
+
+def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
+    with app.app_context():
+        farm = Farm(name="Adjust Default Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+
+        mob = Mob(farm_id=farm.id, name="Adjust Default Mob", status="active")
+        db.session.add(mob)
+        db.session.commit()
+
+        mob_id = str(mob.id)
+
+    response = client.get(f"/mobs/{mob_id}")
+    assert response.status_code == 200
+
+    body = response.data.decode("utf-8")
+    assert 'option value="adjustment_in" selected' in body
+    assert "count (set final total)" in body
+    assert "Use count only when you want to set the final head count for this exact line." in body

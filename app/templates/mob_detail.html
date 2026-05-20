@@ -112,12 +112,17 @@
         <label>Event type
           <select name="event_type" id="adjustEventType">
             {% for e in stock_event_types %}
-            <option value="{{ e.value }}" {% if e.value == "count" %}selected{% endif %}>{{ e.value }}</option>
+            <option value="{{ e.value }}" {% if e.value == "adjustment_in" %}selected{% endif %}>
+              {% if e.value == "count" %}count (set final total){% else %}{{ e.value }}{% endif %}
+            </option>
             {% endfor %}
           </select>
         </label>
-        <label>Quantity<input type="number" min="1" name="quantity" required /></label>
+        <label>Quantity<input type="number" min="1" step="1" name="quantity" required /></label>
       </div>
+      <p class="muted" id="adjustQuantityHelp">
+        Quantity is posted as the number of head for the selected event. Use count only when you want to set the final head count for this exact line.
+      </p>
       <label>Note<input name="note" /></label>
       <button type="submit" class="btn">Apply Adjustment</button>
     </form>
@@ -418,6 +423,7 @@
     const sexInput = document.getElementById("adjustSex");
     const ageClassInput = document.getElementById("adjustAgeClass");
     const eventTypeSelect = document.getElementById("adjustEventType");
+    const adjustQuantityHelp = document.getElementById("adjustQuantityHelp");
 
     function setSelectOptions(selectEl, options, selectedValue) {
       if (!selectEl) return;
@@ -434,18 +440,32 @@
     }
 
     function applySpeciesDefaults() {
-      if (!speciesSelect || !breedInput || !sexInput || !ageClassInput || !eventTypeSelect) return;
+      if (!speciesSelect || !breedInput || !sexInput || !ageClassInput) return;
       const defaults = speciesDefaults[speciesSelect.value];
       if (!defaults) return;
       breedInput.value = defaults.breed;
       setSelectOptions(sexInput, defaults.sex_options, defaults.sex);
       setSelectOptions(ageClassInput, defaults.age_classes, defaults.age_class);
-      eventTypeSelect.value = "count";
+    }
+
+    function updateAdjustQuantityHelp() {
+      if (!eventTypeSelect || !adjustQuantityHelp) return;
+      if (eventTypeSelect.value === "count") {
+        adjustQuantityHelp.textContent =
+          "Count uses the quantity as the final head count for this exact species, breed, sex, and age-class line.";
+        return;
+      }
+      adjustQuantityHelp.textContent =
+        "Quantity is posted as the number of head for the selected event. Use count only when you want to set the final head count for this exact line.";
     }
 
     if (speciesSelect) {
       speciesSelect.addEventListener("change", applySpeciesDefaults);
       applySpeciesDefaults();
+    }
+    if (eventTypeSelect) {
+      eventTypeSelect.addEventListener("change", updateAdjustQuantityHelp);
+      updateAdjustQuantityHelp();
     }
 
     const balanceTable = document.getElementById("balanceTable");
