@@ -24,6 +24,20 @@
 </section>
 {% endif %}
 
+{% if selected_entity_rows %}
+<section class="card calendar-source-card">
+  <h2>Linked Farm Entities</h2>
+  <ul class="link-list-clean">
+    {% for entity in selected_entity_rows %}
+    <li class="link-card">
+      <span class="link-pill">{{ entity.kind }}</span>
+      <a href="{{ entity.url }}">{{ entity.label }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 <section class="card">
   <form method="post" action="{{ url_for('tasks.create_task_from_page') }}" class="grid-form">
     <input type="hidden" name="source_activity_id" value="{{ form_values.source_activity_id }}" />
@@ -86,6 +100,29 @@
     </div>
     <label>Tags
       <input name="tags" value="{{ form_values.tags }}" placeholder="operations, animal health, feed" />
+    </label>
+    <div class="grid-two">
+      <label>Paddocks
+        <select name="paddock_ids" multiple size="5">
+          {% for paddock in entity_options.paddocks %}
+          <option value="{{ paddock.id }}" {% if paddock.id|string in form_values.paddock_ids %}selected{% endif %}>{{ paddock.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Water Assets
+        <select name="water_asset_ids" multiple size="5">
+          {% for asset in entity_options.water_assets %}
+          <option value="{{ asset.id }}" {% if asset.id|string in form_values.water_asset_ids %}selected{% endif %}>{{ asset.name }} ({{ asset.asset_type.replace('_', ' ')|title }})</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>Mobs
+      <select name="mob_ids" multiple size="5">
+        {% for mob in entity_options.mobs %}
+        <option value="{{ mob.id }}" {% if mob.id|string in form_values.mob_ids %}selected{% endif %}>{{ mob.name }}</option>
+        {% endfor %}
+      </select>
     </label>
     <button type="submit" class="btn">Create Task</button>
   </form>

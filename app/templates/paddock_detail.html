@@ -7,7 +7,10 @@
     <h1>{{ paddock.name }}</h1>
     <p class="muted">Area: {{ paddock.area_ha }} ha | Grazeable: {{ paddock.grazeable_area_ha }} ha</p>
   </div>
-  <button type="button" class="btn btn-secondary" data-open-paddock-name-modal>Edit Name</button>
+  <div class="row-actions">
+    <a class="btn" href="{{ url_for('tasks.new_task_page', paddock_id=paddock.id) }}">Create Task</a>
+    <button type="button" class="btn btn-secondary" data-open-paddock-name-modal>Edit Name</button>
+  </div>
 </section>
 
 <dialog id="paddock-name-modal" class="entity-edit-modal">
@@ -35,6 +38,31 @@
     </div>
   </form>
 </dialog>
+
+<section class="card">
+  <div class="task-section-heading">
+    <h2>Linked Tasks</h2>
+    <a class="btn btn-secondary" href="{{ url_for('tasks.new_task_page', paddock_id=paddock.id) }}">Create Task For Paddock</a>
+  </div>
+  <ul class="link-list-clean">
+    {% for task in linked_task_rows %}
+    <li class="link-card">
+      <div class="task-card-topline">
+        <a class="task-key" href="{{ task.url }}">{{ task.display_key }}</a>
+        <span class="status-pill status-{{ task.status }}">{{ task.status_label }}</span>
+      </div>
+      <p class="text-body"><strong>{{ task.heading }}</strong></p>
+      <div class="task-chip-row">
+        <span class="priority-pill priority-{{ task.priority }}">{{ task.priority_label }}</span>
+        {% if task.due_date %}<span class="tag-pill">Due {{ task.due_date }}</span>{% endif %}
+        {% if task.is_overdue %}<span class="priority-pill priority-high">Overdue</span>{% endif %}
+      </div>
+    </li>
+    {% else %}
+    <li class="task-empty-state">No tasks linked to this paddock yet.</li>
+    {% endfor %}
+  </ul>
+</section>
 
 <section class="card">
   <h2>Stocking Rate, Grazing Capacity & Density</h2>

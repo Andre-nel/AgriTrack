@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import Farm, Paddock, WaterAsset, WaterConnection
+from app.modules.tasks.entity_links import linked_task_rows_by_water_asset
 from app.modules.water.forms import (
     normalize_water_asset_type_filters,
     water_asset_form_payload,
@@ -43,6 +44,11 @@ def register_legacy_routes(bp) -> None:
             .all()
         )
         assets = WaterNetworkService.assets_for_farm(str(farm.id))
+        asset_ids = [str(asset.id) for asset in assets]
+        linked_tasks_by_water_asset_id = linked_task_rows_by_water_asset(
+            asset_ids,
+            farm.timezone if farm else "UTC",
+        )
         connections = WaterNetworkService.connections_for_farm(str(farm.id))
         water_summary = WaterNetworkService.farm_summary(str(farm.id))
         active_assets = [asset for asset in assets if asset.active]
@@ -104,6 +110,8 @@ def register_legacy_routes(bp) -> None:
                 "pipeDiameterSpec": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_DIAMETER_SPEC,
                 "pipeClassSpec": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_CLASS_SPEC,
             },
+            "taskLinksByAssetId": linked_tasks_by_water_asset_id,
+            "newTaskUrl": url_for("tasks.new_task_page"),
         }
 
         return render_template(
@@ -141,6 +149,7 @@ def register_legacy_routes(bp) -> None:
             map_filters_applied=map_filters_applied,
             selected_map_asset_types=selected_map_asset_types,
             water_asset_editor_config=water_asset_editor_config,
+            linked_tasks_by_water_asset_id=linked_tasks_by_water_asset_id,
         )
 
     @bp.get("/farms/<farm_id>/water/mass-update")
@@ -326,4 +335,3 @@ def register_legacy_routes(bp) -> None:
         db.session.commit()
         flash("Water connection deleted", "success")
         return _farm_water_workspace_redirect_response(farm_id, open_asset_id=open_asset_id)
-

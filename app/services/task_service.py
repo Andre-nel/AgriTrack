@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import Task, TaskLink, TaskSpace, TaskStatusTransition
+from app.models import Mob, Paddock, Task, TaskEntityLink, TaskLink, TaskSpace, TaskStatusTransition, WaterAsset
 
 TASK_STATUSES = (
     "todo",
@@ -261,6 +261,109 @@ class TaskService:
         db.session.flush()
         cls.apply_status_transition(task, normalized_status, normalized_reporter, initial=True)
         return task
+
+    @staticmethod
+    def normalize_entity_ids(raw_values) -> list[str]:
+        if raw_values is None:
+            return []
+        if isinstance(raw_values, str):
+            values = [raw_values]
+        else:
+            values = raw_values
+
+        normalized = []
+        seen = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
+    @staticmethod
+    def _rows_by_id(model, ids: list[str], label: str) -> list:
+        if not ids:
+            return []
+        rows = model.query.filter(model.id.in_(ids)).all()
+        by_id = {str(row.id): row for row in rows}
+        missing = [row_id for row_id in ids if row_id not in by_id]
+        if missing:
+            raise ValueError(f"One or more selected {label} were not found")
+        return [by_id[row_id] for row_id in ids]
+
+    @staticmethod
+    def _require_same_farm(rows: list, farm_id: str, label: str) -> None:
+        if any(str(row.farm_id) != str(farm_id) for row in rows):
+            raise ValueError(f"Selected {label} must belong to the task farm")
+
+    @classmethod
+    def add_entity_links(
+        cls,
+        *,
+        task: Task,
+        paddock_ids=None,
+        water_asset_ids=None,
+        mob_ids=None,
+    ) -> list[TaskEntityLink]:
+        space = task.space or db.session.get(TaskSpace, task.space_id)
+        farm_id = space.farm_id
+        normalized_paddock_ids = cls.normalize_entity_ids(paddock_ids)
+        normalized_water_asset_ids = cls.normalize_entity_ids(water_asset_ids)
+        normalized_mob_ids = cls.normalize_entity_ids(mob_ids)
+
+        paddocks = cls._rows_by_id(Paddock, normalized_paddock_ids, "paddocks")
+        water_assets = cls._rows_by_id(WaterAsset, normalized_water_asset_ids, "water assets")
+        mobs = cls._rows_by_id(Mob, normalized_mob_ids, "mobs")
+        cls._require_same_farm(paddocks, farm_id, "paddocks")
+        cls._require_same_farm(water_assets, farm_id, "water assets")
+        cls._require_same_farm(mobs, farm_id, "mobs")
+
+        existing = {
+            ("paddock", str(link.paddock_id))
+            for link in TaskEntityLink.query.filter_by(task_id=task.id).filter(TaskEntityLink.paddock_id.isnot(None))
+        }
+        existing.update(
+            {
+                ("water_asset", str(link.water_asset_id))
+                for link in TaskEntityLink.query.filter_by(task_id=task.id).filter(
+                    TaskEntityLink.water_asset_id.isnot(None)
+                )
+            }
+        )
+        existing.update(
+            {
+                ("mob", str(link.mob_id))
+                for link in TaskEntityLink.query.filter_by(task_id=task.id).filter(TaskEntityLink.mob_id.isnot(None))
+            }
+        )
+
+        links = []
+        for paddock in paddocks:
+            key = ("paddock", str(paddock.id))
+            if key in existing:
+                continue
+            existing.add(key)
+            link = TaskEntityLink(task_id=task.id, paddock_id=paddock.id)
+            db.session.add(link)
+            links.append(link)
+        for asset in water_assets:
+            key = ("water_asset", str(asset.id))
+            if key in existing:
+                continue
+            existing.add(key)
+            link = TaskEntityLink(task_id=task.id, water_asset_id=asset.id)
+            db.session.add(link)
+            links.append(link)
+        for mob in mobs:
+            key = ("mob", str(mob.id))
+            if key in existing:
+                continue
+            existing.add(key)
+            link = TaskEntityLink(task_id=task.id, mob_id=mob.id)
+            db.session.add(link)
+            links.append(link)
+        return links
 
     @classmethod
     def update_task_metadata(

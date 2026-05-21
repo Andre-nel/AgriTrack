@@ -52,6 +52,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         cascade="all, delete-orphan",
     )
     comments = db.relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")
+    entity_links = db.relationship("TaskEntityLink", back_populates="task", cascade="all, delete-orphan")
     outgoing_links = db.relationship(
         "TaskLink",
         foreign_keys="TaskLink.source_task_id",
@@ -94,6 +95,34 @@ class TaskComment(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     body = db.Column(db.Text, nullable=False)
 
     task = db.relationship("Task", back_populates="comments")
+
+
+class TaskEntityLink(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "task_entity_links"
+
+    task_id = db.Column(db.String(36), db.ForeignKey("tasks.id"), nullable=False, index=True)
+    paddock_id = db.Column(db.String(36), db.ForeignKey("paddocks.id"), index=True)
+    water_asset_id = db.Column(db.String(36), db.ForeignKey("water_assets.id"), index=True)
+    mob_id = db.Column(db.String(36), db.ForeignKey("mobs.id"), index=True)
+
+    task = db.relationship("Task", back_populates="entity_links")
+    paddock = db.relationship("Paddock", back_populates="task_entity_links")
+    water_asset = db.relationship("WaterAsset", back_populates="task_entity_links")
+    mob = db.relationship("Mob", back_populates="task_entity_links")
+
+    __table_args__ = (
+        db.CheckConstraint(
+            (
+                "(paddock_id IS NOT NULL AND water_asset_id IS NULL AND mob_id IS NULL) "
+                "OR (paddock_id IS NULL AND water_asset_id IS NOT NULL AND mob_id IS NULL) "
+                "OR (paddock_id IS NULL AND water_asset_id IS NULL AND mob_id IS NOT NULL)"
+            ),
+            name="ck_task_entity_links_one_entity",
+        ),
+        db.UniqueConstraint("task_id", "paddock_id", name="uq_task_entity_links_task_paddock"),
+        db.UniqueConstraint("task_id", "water_asset_id", name="uq_task_entity_links_task_water_asset"),
+        db.UniqueConstraint("task_id", "mob_id", name="uq_task_entity_links_task_mob"),
+    )
 
 
 class TaskSpaceComment(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):

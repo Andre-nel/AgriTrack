@@ -19,10 +19,15 @@
   const subtitleElement = dialog.querySelector("[data-water-asset-modal-subtitle]");
   const statusElement = dialog.querySelector("[data-water-asset-modal-status]");
   const importNoteElement = dialog.querySelector("[data-water-asset-import-note]");
+  const taskPanelElement = dialog.querySelector("[data-water-asset-task-panel]");
+  const taskListElement = dialog.querySelector("[data-water-asset-task-list]");
+  const createTaskLinkElement = dialog.querySelector("[data-water-asset-create-task]");
   if (!form || !titleElement || !subtitleElement || !statusElement || !importNoteElement || !apiBase) {
     return;
   }
 
+  const taskLinksByAssetId = config.taskLinksByAssetId || {};
+  const newTaskUrl = String(config.newTaskUrl || "/tasks/new");
   const assetTypeLabels = config.assetTypeLabels || {};
   const statusOptionsByType = config.statusOptionsByType || {};
   const materialOptionsByType = config.materialOptionsByType || {};
@@ -77,6 +82,60 @@
     return String(value || "")
       .replace(/_/g, " ")
       .replace(/\b\w/g, (match) => match.toUpperCase());
+  }
+
+  function taskCreateUrl(assetId) {
+    const separator = newTaskUrl.indexOf("?") === -1 ? "?" : "&";
+    return newTaskUrl + separator + "water_asset_id=" + encodeURIComponent(String(assetId || ""));
+  }
+
+  function renderTaskLinks(asset) {
+    if (!taskPanelElement || !taskListElement || !createTaskLinkElement) {
+      return;
+    }
+    const assetId = String((asset && asset.id) || "");
+    const rows = Array.isArray(taskLinksByAssetId[assetId]) ? taskLinksByAssetId[assetId] : [];
+    taskPanelElement.hidden = false;
+    createTaskLinkElement.href = taskCreateUrl(assetId);
+    taskListElement.innerHTML = "";
+
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "task-empty-state";
+      empty.textContent = "No tasks linked to this water asset yet.";
+      taskListElement.appendChild(empty);
+      return;
+    }
+
+    const list = document.createElement("ul");
+    list.className = "link-list-clean";
+    rows.forEach((row) => {
+      const item = document.createElement("li");
+      item.className = "link-card";
+
+      const topLine = document.createElement("div");
+      topLine.className = "task-card-topline";
+
+      const link = document.createElement("a");
+      link.className = "task-key";
+      link.href = row.url || "#";
+      link.textContent = row.display_key || "Task";
+
+      const status = document.createElement("span");
+      status.className = "status-pill status-" + String(row.status || "");
+      status.textContent = row.status_label || row.status || "Status";
+
+      const heading = document.createElement("p");
+      heading.className = "text-body";
+      heading.textContent = row.heading || "";
+
+      topLine.appendChild(link);
+      topLine.appendChild(status);
+      item.appendChild(topLine);
+      item.appendChild(heading);
+      list.appendChild(item);
+    });
+    taskListElement.appendChild(list);
   }
 
   function setStatus(message, kind) {
@@ -330,6 +389,15 @@
     form.action = "";
     importNoteElement.hidden = true;
     importNoteElement.textContent = "";
+    if (taskPanelElement) {
+      taskPanelElement.hidden = true;
+    }
+    if (taskListElement) {
+      taskListElement.innerHTML = "";
+    }
+    if (createTaskLinkElement) {
+      createTaskLinkElement.href = "#";
+    }
     setStatus("", "");
 
     Object.keys(fieldWrappers).forEach((fieldName) => {
@@ -385,6 +453,7 @@
     updateImportNote(asset);
     setStatus("", "");
     form.hidden = false;
+    renderTaskLinks(asset);
     setOpenAssetQueryParam(String(asset.id));
 
     if (fieldControls.name && typeof fieldControls.name.focus === "function") {

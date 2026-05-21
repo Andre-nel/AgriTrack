@@ -10,11 +10,14 @@ from app.models import (
     Mob,
     Paddock,
     RainfallRecord,
+    Task,
+    TaskEntityLink,
     TaskSpace,
     WaterAsset,
     WaterAssetServedPaddock,
     WaterConnection,
 )
+from app.services.task_service import TaskService
 
 
 def test_manage_farms_shows_delete_action(client, app):
@@ -112,6 +115,24 @@ def test_delete_farm_removes_farm_records_and_map_file(client, app):
                 ),
             ]
         )
+        task = TaskService.create_task(
+            space=task_space,
+            heading="Delete linked task",
+            description="Task with farm entity links",
+            raw_tags="cleanup",
+            reporter_name="Ava",
+            assignee_name="Noah",
+            status="todo",
+            priority="low",
+            original_estimate_days="",
+            due_date="",
+        )
+        TaskService.add_entity_links(
+            task=task,
+            paddock_ids=[str(paddock.id)],
+            water_asset_ids=[str(tank.id)],
+            mob_ids=[str(mob.id)],
+        )
         db.session.commit()
 
         farm_id = farm.id
@@ -137,6 +158,8 @@ def test_delete_farm_removes_farm_records_and_map_file(client, app):
         assert JournalEntry.query.filter_by(farm_id=farm_id).count() == 0
         assert CalendarActivity.query.filter_by(farm_id=farm_id).count() == 0
         assert TaskSpace.query.filter_by(farm_id=farm_id).count() == 0
+        assert Task.query.count() == 0
+        assert TaskEntityLink.query.count() == 0
         assert WaterAsset.query.filter_by(farm_id=farm_id).count() == 0
         assert WaterConnection.query.filter_by(farm_id=farm_id).count() == 0
         assert db.session.get(CashTransaction, cash_transaction_id).farm_id is None

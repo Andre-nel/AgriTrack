@@ -24,6 +24,7 @@ from app.models import (
     StockLedgerEntry,
     Task,
     TaskComment,
+    TaskEntityLink,
     TaskLink,
     TaskSpace,
     TaskSpaceComment,
@@ -117,6 +118,13 @@ class FarmDeletionService:
             .all()
         ]
 
+        cls._delete_where(
+            TaskEntityLink,
+            cls._in_if_any(TaskEntityLink.task_id, task_ids),
+            cls._in_if_any(TaskEntityLink.paddock_id, paddock_ids),
+            cls._in_if_any(TaskEntityLink.water_asset_id, water_asset_ids),
+            cls._in_if_any(TaskEntityLink.mob_id, mob_ids),
+        )
         cls._delete_where(
             TaskLink,
             cls._in_if_any(TaskLink.source_task_id, task_ids),

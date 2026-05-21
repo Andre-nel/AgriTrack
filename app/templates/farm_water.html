@@ -257,27 +257,46 @@
   <h2>Water Assets</h2>
   <div class="water-asset-list">
     {% for asset in assets %}
-    <button
-      type="button"
-      class="water-asset-button"
-      id="asset-{{ asset.id }}"
-      data-open-water-asset-modal="{{ asset.id }}"
-      aria-controls="water-asset-modal"
-      aria-haspopup="dialog"
-    >
-      <span class="water-asset-button-main">
-        <span class="water-asset-button-topline">
-          <strong>{{ asset.name }}</strong>
-          <span class="badge {% if asset.active %}ok{% else %}warn{% endif %}">{{ water_asset_type_labels[asset.asset_type] }}</span>
-          {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
+    {% set linked_tasks = linked_tasks_by_water_asset_id.get(asset.id|string, []) %}
+    <article class="water-asset-card" id="asset-{{ asset.id }}">
+      <button
+        type="button"
+        class="water-asset-button"
+        data-open-water-asset-modal="{{ asset.id }}"
+        aria-controls="water-asset-modal"
+        aria-haspopup="dialog"
+      >
+        <span class="water-asset-button-main">
+          <span class="water-asset-button-topline">
+            <strong>{{ asset.name }}</strong>
+            <span class="badge {% if asset.active %}ok{% else %}warn{% endif %}">{{ water_asset_type_labels[asset.asset_type] }}</span>
+            {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
+          </span>
+          <span class="water-asset-button-subline">
+            {% if asset.location_paddock %}In {{ asset.location_paddock.name }}{% else %}No paddock location{% endif %}
+            {% if asset.import_placemark_name %} | Imported from {{ asset.import_placemark_name }}{% endif %}
+          </span>
         </span>
-        <span class="water-asset-button-subline">
-          {% if asset.location_paddock %}In {{ asset.location_paddock.name }}{% else %}No paddock location{% endif %}
-          {% if asset.import_placemark_name %} | Imported from {{ asset.import_placemark_name }}{% endif %}
-        </span>
-      </span>
-      <span class="water-asset-button-action">Edit Asset</span>
-    </button>
+        <span class="water-asset-button-action">Edit Asset</span>
+      </button>
+      <div class="water-asset-task-links">
+        <div class="row-actions">
+          <a class="btn btn-secondary" href="{{ url_for('tasks.new_task_page', water_asset_id=asset.id) }}">Create Task</a>
+          {% if linked_tasks %}<span class="muted">{{ linked_tasks|length }} linked task(s)</span>{% endif %}
+        </div>
+        {% if linked_tasks %}
+        <ul class="link-list-clean">
+          {% for task in linked_tasks %}
+          <li>
+            <a class="task-key" href="{{ task.url }}">{{ task.display_key }}</a>
+            <span>{{ task.heading }}</span>
+            <span class="status-pill status-{{ task.status }}">{{ task.status_label }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </article>
     {% else %}
     <p>No water assets on this farm yet.</p>
     {% endfor %}
@@ -408,6 +427,15 @@
       <button type="button" class="btn btn-secondary" data-close-water-asset-modal>Cancel</button>
     </div>
   </form>
+  <section class="water-asset-task-panel" data-water-asset-task-panel hidden>
+    <div class="water-asset-connection-panel-header">
+      <h3>Linked Tasks</h3>
+    </div>
+    <div class="row-actions">
+      <a class="btn btn-secondary" href="#" data-water-asset-create-task>Create Task</a>
+    </div>
+    <div class="water-asset-task-list" data-water-asset-task-list></div>
+  </section>
   <section class="water-asset-connection-panel" data-water-asset-connections hidden>
     <div class="water-asset-connection-panel-header">
       <div>

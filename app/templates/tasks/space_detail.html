@@ -92,6 +92,29 @@
       <label>Tags
         <input name="tags" placeholder="operations, fencing, supplies" />
       </label>
+      <div class="grid-two">
+        <label>Paddocks
+          <select name="paddock_ids" multiple size="5">
+            {% for paddock in entity_options.paddocks %}
+            <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Water Assets
+          <select name="water_asset_ids" multiple size="5">
+            {% for asset in entity_options.water_assets %}
+            <option value="{{ asset.id }}">{{ asset.name }} ({{ asset.asset_type.replace('_', ' ')|title }})</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Mobs
+        <select name="mob_ids" multiple size="5">
+          {% for mob in entity_options.mobs %}
+          <option value="{{ mob.id }}">{{ mob.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <button type="submit" class="btn">Create Task</button>
     </form>
   </article>

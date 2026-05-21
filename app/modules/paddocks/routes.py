@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock
+from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
 from app.services.paddock_service import PaddockService
@@ -310,4 +311,8 @@ def register_legacy_routes(bp) -> None:
             local_water_assets=local_water_assets,
             serving_water_assets=serving_water_assets,
             water_asset_type_labels=WaterNetworkService.ASSET_TYPE_LABELS,
+            linked_task_rows=linked_task_rows_for_entity(
+                paddock_id=str(paddock.id),
+                tz_name=paddock.farm.timezone if paddock.farm else "UTC",
+            ),
         )

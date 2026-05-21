@@ -1171,6 +1171,13 @@ a { color: #1b5f49; }
   gap: 0.8rem;
 }
 
+.water-asset-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfa;
+  overflow: hidden;
+}
+
 .water-asset-button {
   width: 100%;
   display: flex;
@@ -1217,6 +1224,17 @@ a { color: #1b5f49; }
   font-size: 0.84rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.water-asset-task-links {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.water-asset-task-links .link-list-clean {
+  margin: 0;
 }
 
 .comment-card,
@@ -1636,6 +1654,16 @@ a { color: #1b5f49; }
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
+}
+
+.water-asset-task-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.water-asset-task-list {
+  margin-top: 0.8rem;
 }
 
 .water-asset-connection-panel-header h3 {

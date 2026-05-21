@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from app.models import Farm, Mob, MobEvent, Paddock
+from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.models.stock_ledger import StockEventType
 from app.services.mob_event_service import MobEventService
 
@@ -104,4 +105,8 @@ def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
         "mob_events": mob_events,
         "event_tag_options": event_tag_options,
         "selected_event_tag": selected_event_tag,
+        "linked_task_rows": linked_task_rows_for_entity(
+            mob_id=str(mob.id),
+            tz_name=mob.farm.timezone if mob.farm else "UTC",
+        ),
     }

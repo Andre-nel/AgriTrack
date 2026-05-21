@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from app.extensions import db
-from app.models import Farm, Task, TaskComment, TaskLink, TaskSpace, TaskSpaceComment
+from app.models import Farm, Mob, Paddock, Task, TaskComment, TaskEntityLink, TaskLink, TaskSpace, TaskSpaceComment, WaterAsset
 from app.services.task_service import TaskService
 
 
@@ -109,6 +109,194 @@ def test_space_page_can_create_task_and_show_board(client, app):
         assert task is not None
         assert task.started_at is not None
         assert task.display_key == "BRD-1"
+
+
+def test_task_creation_and_detail_manage_farm_entity_links(client, app):
+    with app.app_context():
+        farm = _create_farm("Entity Link Farm")
+        space = _create_space(farm, "ENT", "Entity Links")
+        paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=20, grazeable_area_ha=18)
+        second_paddock = Paddock(farm_id=farm.id, name="South Camp", area_ha=15, grazeable_area_ha=12)
+        tank = WaterAsset(farm_id=farm.id, name="Header Tank", asset_type="tank", active=True)
+        mob = Mob(farm_id=farm.id, name="Main Mob", status="active")
+        db.session.add_all([paddock, second_paddock, tank, mob])
+        db.session.commit()
+        space_id = str(space.id)
+        paddock_id = str(paddock.id)
+        second_paddock_id = str(second_paddock.id)
+        tank_id = str(tank.id)
+        mob_id = str(mob.id)
+
+    response = client.post(
+        f"/tasks/spaces/{space_id}/tasks",
+        data={
+            "heading": "Inspect water and fences",
+            "description": "Check the paddock fence and water storage.",
+            "tags": "field",
+            "reporter_name": "Ava",
+            "assignee_name": "Noah",
+            "status": "todo",
+            "priority": "high",
+            "original_estimate_days": "",
+            "due_date": "2026-06-01",
+            "paddock_ids": [paddock_id],
+            "water_asset_ids": [tank_id],
+            "mob_ids": [mob_id],
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        task = Task.query.filter_by(heading="Inspect water and fences").first()
+        assert task is not None
+        task_id = str(task.id)
+        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 3
+        paddock_link_id = str(TaskEntityLink.query.filter_by(task_id=task_id, paddock_id=paddock_id).first().id)
+
+    detail = client.get(f"/tasks/{task_id}")
+    body = detail.data.decode("utf-8")
+    assert "North Camp" in body
+    assert "Header Tank" in body
+    assert "Main Mob" in body
+
+    duplicate = client.post(
+        f"/tasks/{task_id}/entity-links",
+        data={"paddock_ids": [paddock_id], "water_asset_ids": [], "mob_ids": []},
+        follow_redirects=True,
+    )
+    assert duplicate.status_code == 200
+    assert b"No new farm entity links were added" in duplicate.data
+
+    with app.app_context():
+        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 3
+
+    add_second = client.post(
+        f"/tasks/{task_id}/entity-links",
+        data={"paddock_ids": [second_paddock_id]},
+        follow_redirects=True,
+    )
+    assert add_second.status_code == 200
+    assert b"South Camp" in add_second.data
+
+    delete_response = client.post(
+        f"/tasks/{task_id}/entity-links/{paddock_link_id}/delete",
+        follow_redirects=True,
+    )
+    assert delete_response.status_code == 200
+    assert b"Farm entity link removed" in delete_response.data
+
+    with app.app_context():
+        assert TaskEntityLink.query.filter_by(task_id=task_id, paddock_id=paddock_id).count() == 0
+        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 3
+
+
+def test_new_task_page_prefills_entity_links_and_rejects_cross_farm_links(client, app):
+    with app.app_context():
+        farm = _create_farm("Prefill Farm")
+        other_farm = _create_farm("Other Entity Farm")
+        space = _create_space(farm, "PRE", "Prefill")
+        paddock = Paddock(farm_id=farm.id, name="Prefilled Camp", area_ha=10, grazeable_area_ha=9)
+        other_paddock = Paddock(farm_id=other_farm.id, name="Wrong Farm Camp", area_ha=8, grazeable_area_ha=7)
+        db.session.add_all([paddock, other_paddock])
+        db.session.commit()
+        farm_id = str(farm.id)
+        space_id = str(space.id)
+        paddock_id = str(paddock.id)
+        other_paddock_id = str(other_paddock.id)
+
+    prefill = client.get(f"/tasks/new?paddock_id={paddock_id}")
+    assert prefill.status_code == 200
+    prefill_body = prefill.data.decode("utf-8")
+    assert "Prefilled Camp" in prefill_body
+    assert f'value="{paddock_id}" selected' in prefill_body
+
+    create_response = client.post(
+        "/tasks/new",
+        data={
+            "farm_id": farm_id,
+            "space_id": space_id,
+            "heading": "Check prefilled camp",
+            "description": "Created from the paddock view.",
+            "reporter_name": "Ava",
+            "assignee_name": "",
+            "status": "todo",
+            "priority": "low",
+            "original_estimate_days": "",
+            "due_date": "",
+            "tags": "",
+            "paddock_ids": [paddock_id],
+        },
+        follow_redirects=True,
+    )
+    assert create_response.status_code == 200
+    assert b"Prefilled Camp" in create_response.data
+
+    with app.app_context():
+        created_task = Task.query.filter_by(heading="Check prefilled camp").first()
+        assert created_task is not None
+        assert TaskEntityLink.query.filter_by(task_id=created_task.id, paddock_id=paddock_id).count() == 1
+
+    cross_farm = client.post(
+        "/tasks/new",
+        data={
+            "farm_id": farm_id,
+            "space_id": space_id,
+            "heading": "Bad link",
+            "description": "This should fail.",
+            "reporter_name": "Ava",
+            "assignee_name": "",
+            "status": "todo",
+            "priority": "low",
+            "original_estimate_days": "",
+            "due_date": "",
+            "tags": "",
+            "paddock_ids": [other_paddock_id],
+        },
+        follow_redirects=True,
+    )
+    assert cross_farm.status_code == 200
+    assert b"Selected paddocks must belong to the task farm" in cross_farm.data
+
+
+def test_farm_entity_views_render_linked_tasks_and_create_task_actions(client, app):
+    with app.app_context():
+        farm = _create_farm("Entity View Farm")
+        space = _create_space(farm, "VIEW", "Entity Views")
+        paddock = Paddock(farm_id=farm.id, name="Task Camp", area_ha=12, grazeable_area_ha=10)
+        asset = WaterAsset(farm_id=farm.id, name="Task Trough", asset_type="trough", active=True)
+        mob = Mob(farm_id=farm.id, name="Task Mob", status="active")
+        db.session.add_all([paddock, asset, mob])
+        db.session.flush()
+        task = _create_task(space, "Linked from entity", status="todo")
+        TaskService.add_entity_links(
+            task=task,
+            paddock_ids=[str(paddock.id)],
+            water_asset_ids=[str(asset.id)],
+            mob_ids=[str(mob.id)],
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        paddock_id = str(paddock.id)
+        asset_id = str(asset.id)
+        mob_id = str(mob.id)
+        task_key = task.display_key
+
+    paddock_page = client.get(f"/paddocks/{paddock_id}")
+    assert paddock_page.status_code == 200
+    assert f"/tasks/new?paddock_id={paddock_id}".encode("utf-8") in paddock_page.data
+    assert task_key.encode("utf-8") in paddock_page.data
+    assert b"Linked from entity" in paddock_page.data
+
+    mob_page = client.get(f"/mobs/{mob_id}")
+    assert mob_page.status_code == 200
+    assert f"/tasks/new?mob_id={mob_id}".encode("utf-8") in mob_page.data
+    assert task_key.encode("utf-8") in mob_page.data
+
+    water_page = client.get(f"/farms/{farm_id}/water")
+    assert water_page.status_code == 200
+    assert f"/tasks/new?water_asset_id={asset_id}".encode("utf-8") in water_page.data
+    assert task_key.encode("utf-8") in water_page.data
 
 
 def test_task_status_transitions_track_start_close_and_reopen(client, app):

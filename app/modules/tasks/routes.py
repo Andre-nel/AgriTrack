@@ -8,12 +8,16 @@ from app.extensions import db
 from app.models import (
     CalendarActivity,
     Farm,
+    Mob,
+    Paddock,
     Task,
     TaskComment,
+    TaskEntityLink,
     TaskLink,
     TaskSpace,
     TaskSpaceComment,
     TaskStatusTransition,
+    WaterAsset,
 )
 from app.services.task_service import (
     TASK_LINK_TYPE_LABELS,
@@ -49,6 +53,84 @@ def _format_linked_entity(task: Task | None = None, space: TaskSpace | None = No
         "label": f"{space.key} {space.name}",
         "url": url_for("tasks.space_detail", space_id=space.id),
     }
+
+
+def _source_list(source, *names: str) -> list[str]:
+    values = []
+    for name in names:
+        if hasattr(source, "getlist"):
+            values.extend(source.getlist(name))
+        else:
+            value = source.get(name) if hasattr(source, "get") else None
+            if isinstance(value, (list, tuple)):
+                values.extend(value)
+            else:
+                values.append(value)
+    return TaskService.normalize_entity_ids(values)
+
+
+def _farm_entity_options(farm_id: str | None) -> dict:
+    paddock_query = Paddock.query.order_by(Paddock.name.asc())
+    water_asset_query = WaterAsset.query.order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
+    mob_query = Mob.query.order_by(Mob.name.asc())
+    if farm_id:
+        paddock_query = paddock_query.filter(Paddock.farm_id == farm_id)
+        water_asset_query = water_asset_query.filter(WaterAsset.farm_id == farm_id)
+        mob_query = mob_query.filter(Mob.farm_id == farm_id)
+    return {
+        "paddocks": paddock_query.all(),
+        "water_assets": water_asset_query.all(),
+        "mobs": mob_query.all(),
+    }
+
+
+def _entity_link_kind_and_target(link: TaskEntityLink) -> tuple[str, object]:
+    if link.paddock is not None:
+        return "Paddock", link.paddock
+    if link.water_asset is not None:
+        return "Water Asset", link.water_asset
+    return "Mob", link.mob
+
+
+def _entity_target_url(kind: str, target) -> str:
+    if kind == "Paddock":
+        return url_for("web.paddock_detail", paddock_id=target.id)
+    if kind == "Water Asset":
+        return url_for(
+            "web.farm_water_workspace",
+            farm_id=target.farm_id,
+            open_asset_id=target.id,
+            _anchor="water-assets",
+        )
+    return url_for("web.mob_detail", mob_id=target.id)
+
+
+def _build_entity_link_rows(links: list[TaskEntityLink]) -> list[dict]:
+    rows = []
+    for link in links:
+        kind, target = _entity_link_kind_and_target(link)
+        rows.append(
+            {
+                "id": str(link.id),
+                "kind": kind,
+                "label": target.name,
+                "url": _entity_target_url(kind, target),
+            }
+        )
+    return rows
+
+
+def _build_selected_entity_rows(form_values: dict) -> list[dict]:
+    rows = []
+    for paddock in Paddock.query.filter(Paddock.id.in_(form_values["paddock_ids"])).order_by(Paddock.name.asc()).all():
+        rows.append({"kind": "Paddock", "label": paddock.name, "url": _entity_target_url("Paddock", paddock)})
+    for asset in WaterAsset.query.filter(WaterAsset.id.in_(form_values["water_asset_ids"])).order_by(
+        WaterAsset.name.asc()
+    ).all():
+        rows.append({"kind": "Water Asset", "label": asset.name, "url": _entity_target_url("Water Asset", asset)})
+    for mob in Mob.query.filter(Mob.id.in_(form_values["mob_ids"])).order_by(Mob.name.asc()).all():
+        rows.append({"kind": "Mob", "label": mob.name, "url": _entity_target_url("Mob", mob)})
+    return rows
 
 
 def _build_link_rows(links: list[TaskLink], *, current_task: Task | None = None, current_space: TaskSpace | None = None):
@@ -161,15 +243,28 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
     source_activity = _load_optional_activity(source.get("source_activity_id"))
     selected_space_id = (source.get("space_id") or "").strip()
     selected_farm_id = (source.get("farm_id") or "").strip()
+    paddock_ids = _source_list(source, "paddock_ids", "paddock_id")
+    water_asset_ids = _source_list(source, "water_asset_ids", "water_asset_id")
+    mob_ids = _source_list(source, "mob_ids", "mob_id")
 
     selected_space = None
     if selected_space_id:
         selected_space = TaskSpace.query.options(selectinload(TaskSpace.farm)).filter_by(id=selected_space_id).first()
 
+    selected_entity_farm_ids = []
+    for paddock in Paddock.query.filter(Paddock.id.in_(paddock_ids)).all():
+        selected_entity_farm_ids.append(str(paddock.farm_id))
+    for asset in WaterAsset.query.filter(WaterAsset.id.in_(water_asset_ids)).all():
+        selected_entity_farm_ids.append(str(asset.farm_id))
+    for mob in Mob.query.filter(Mob.id.in_(mob_ids)).all():
+        selected_entity_farm_ids.append(str(mob.farm_id))
+
     if not selected_farm_id and source_activity is not None:
         selected_farm_id = source_activity.farm_id
     if not selected_farm_id and selected_space is not None:
         selected_farm_id = selected_space.farm_id
+    if not selected_farm_id and len(set(selected_entity_farm_ids)) == 1:
+        selected_farm_id = selected_entity_farm_ids[0]
 
     due_date = (source.get("due_date") or "").strip()
     occurrence_date = (source.get("occurrence_date") or "").strip()
@@ -199,6 +294,9 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
             "tags": (source.get("tags") or "").strip(),
             "source_activity_id": (source.get("source_activity_id") or "").strip(),
             "occurrence_date": occurrence_date,
+            "paddock_ids": paddock_ids,
+            "water_asset_ids": water_asset_ids,
+            "mob_ids": mob_ids,
         },
         source_activity,
     )
@@ -210,11 +308,14 @@ def _render_new_task_form(*, form_values: dict, source_activity: CalendarActivit
     if form_values["farm_id"]:
         space_query = space_query.filter(TaskSpace.farm_id == form_values["farm_id"])
     spaces = space_query.all()
+    entity_options = _farm_entity_options(form_values["farm_id"])
     return (
         render_template(
             "tasks/new.html",
             farms=farms,
             spaces=spaces,
+            entity_options=entity_options,
+            selected_entity_rows=_build_selected_entity_rows(form_values),
             form_values=form_values,
             source_activity=source_activity,
             create_status_options=[status for status in TASK_STATUSES if status != "closed"],
@@ -315,6 +416,12 @@ def create_task_from_page():
             original_estimate_days=request.form.get("original_estimate_days"),
             due_date=request.form.get("due_date"),
         )
+        TaskService.add_entity_links(
+            task=task,
+            paddock_ids=form_values["paddock_ids"],
+            water_asset_ids=form_values["water_asset_ids"],
+            mob_ids=form_values["mob_ids"],
+        )
         db.session.commit()
         due_label = task.due_date.isoformat() if task.due_date else "no due date"
         flash(f"Task {task.display_key} created for {due_label}", "success")
@@ -394,6 +501,7 @@ def space_detail(space_id: str):
         link_type_labels=TASK_LINK_TYPE_LABELS,
         comment_rows=_build_comment_rows(comments, tz_name),
         link_rows=_build_link_rows(links, current_space=space),
+        entity_options=_farm_entity_options(space.farm_id),
         available_spaces=TaskSpace.query.filter(TaskSpace.id != space.id).order_by(TaskSpace.key).all(),
     )
 
@@ -440,6 +548,12 @@ def create_task(space_id: str):
             priority=request.form.get("priority"),
             original_estimate_days=request.form.get("original_estimate_days"),
             due_date=request.form.get("due_date"),
+        )
+        TaskService.add_entity_links(
+            task=task,
+            paddock_ids=request.form.getlist("paddock_ids"),
+            water_asset_ids=request.form.getlist("water_asset_ids"),
+            mob_ids=request.form.getlist("mob_ids"),
         )
         db.session.commit()
         flash(f"Task {task.display_key} created", "success")
@@ -511,6 +625,16 @@ def task_detail(task_id: str):
         .order_by(TaskLink.created_at.desc(), TaskLink.id.desc())
         .all()
     )
+    entity_links = (
+        TaskEntityLink.query.options(
+            selectinload(TaskEntityLink.paddock),
+            selectinload(TaskEntityLink.water_asset),
+            selectinload(TaskEntityLink.mob),
+        )
+        .filter_by(task_id=task.id)
+        .order_by(TaskEntityLink.created_at.desc(), TaskEntityLink.id.desc())
+        .all()
+    )
     return render_template(
         "tasks/task_detail.html",
         task=task,
@@ -527,6 +651,8 @@ def task_detail(task_id: str):
         ],
         comment_rows=_build_comment_rows(comments, tz_name),
         link_rows=_build_link_rows(links, current_task=task),
+        entity_link_rows=_build_entity_link_rows(entity_links),
+        entity_options=_farm_entity_options(task.space.farm_id),
         priority_options=TASK_PRIORITIES,
         priority_labels=TASK_PRIORITY_LABELS,
         status_options=[status for status in TASK_STATUSES if status != task.status],
@@ -575,6 +701,37 @@ def update_task_status(task_id: str):
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
+    return _task_redirect(task)
+
+
+@bp.post("/tasks/<task_id>/entity-links")
+def create_task_entity_links(task_id: str):
+    task = _load_task(task_id)
+    try:
+        links = TaskService.add_entity_links(
+            task=task,
+            paddock_ids=request.form.getlist("paddock_ids"),
+            water_asset_ids=request.form.getlist("water_asset_ids"),
+            mob_ids=request.form.getlist("mob_ids"),
+        )
+        db.session.commit()
+        if links:
+            flash(f"Added {len(links)} farm entity link(s)", "success")
+        else:
+            flash("No new farm entity links were added", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    return _task_redirect(task)
+
+
+@bp.post("/tasks/<task_id>/entity-links/<link_id>/delete")
+def delete_task_entity_link(task_id: str, link_id: str):
+    task = _load_task(task_id)
+    link = TaskEntityLink.query.filter_by(id=link_id, task_id=task.id).first_or_404()
+    db.session.delete(link)
+    db.session.commit()
+    flash("Farm entity link removed", "success")
     return _task_redirect(task)
 
 
