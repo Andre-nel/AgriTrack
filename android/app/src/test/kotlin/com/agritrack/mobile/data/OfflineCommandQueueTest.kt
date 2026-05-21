@@ -52,6 +52,43 @@ class OfflineCommandQueueTest {
         assertEquals("condition", json.getJSONObject("payload").getJSONArray("tags").getString(0))
     }
 
+    @Test
+    fun mobMoveCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.mobMove(
+            farmId = "farm-1",
+            mobId = "mob-1",
+            paddockId = "paddock-1",
+        )
+
+        val json = command.toJson()
+        val allocation = json.getJSONObject("payload").getJSONArray("allocations").getJSONObject(0)
+
+        assertEquals("mob.move", json.getString("type"))
+        assertEquals("mob-1", json.getJSONObject("payload").getString("mob_id"))
+        assertEquals("paddock-1", allocation.getString("paddock_id"))
+        assertEquals(1.0, allocation.getDouble("allocation_fraction"), 0.0)
+    }
+
+    @Test
+    fun stockCountCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.stockCount(
+            farmId = "farm-1",
+            mobId = "mob-1",
+            animalGroupTypeId = "group-1",
+            quantity = 42,
+            note = "Counted at crush",
+        )
+
+        val json = command.toJson()
+        val payload = json.getJSONObject("payload")
+
+        assertEquals("stock_count.record", json.getString("type"))
+        assertEquals("mob-1", payload.getString("mob_id"))
+        assertEquals("group-1", payload.getString("animal_group_type_id"))
+        assertEquals(42, payload.getInt("quantity"))
+        assertEquals("Counted at crush", payload.getString("note"))
+    }
+
     private class MemoryStore : OfflineCommandQueue.CommandStore {
         private var value = "[]"
 

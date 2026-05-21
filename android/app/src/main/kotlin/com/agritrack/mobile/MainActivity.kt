@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.agritrack.mobile.data.AnimalGroupTypeSummary
 import com.agritrack.mobile.data.FarmSnapshot
 import com.agritrack.mobile.data.FarmSummary
 import com.agritrack.mobile.data.LoginLoadResult
@@ -51,6 +51,7 @@ import com.agritrack.mobile.data.MobSummary
 import com.agritrack.mobile.data.MobileApiClient
 import com.agritrack.mobile.data.MobileRepository
 import com.agritrack.mobile.data.OfflineCommandQueue
+import com.agritrack.mobile.data.PaddockSummary
 import com.agritrack.mobile.data.SecureTokenStore
 import com.agritrack.mobile.data.SnapshotCache
 import com.agritrack.mobile.data.SyncResult
@@ -78,6 +79,23 @@ class MainActivity : ComponentActivity() {
             selectedFarm = cachedSnapshot?.farm,
             snapshot = cachedSnapshot,
             selectedMobId = cachedSnapshot?.mobs?.firstOrNull()?.id.orEmpty(),
+            selectedPaddockId = cachedSnapshot?.paddocks?.firstOrNull()?.id.orEmpty(),
+            animalGroupTypes = animalGroupTypesFromSnapshot(cachedSnapshot),
+            selectedAnimalGroupTypeId = cachedSnapshot
+                ?.mobs
+                ?.firstOrNull()
+                ?.balances
+                ?.firstOrNull()
+                ?.animalGroupTypeId
+                .orEmpty(),
+            stockQuantity = cachedSnapshot
+                ?.mobs
+                ?.firstOrNull()
+                ?.balances
+                ?.firstOrNull()
+                ?.headCount
+                ?.toString()
+                .orEmpty(),
             pendingCount = queue.size(),
         )
 
@@ -117,9 +135,14 @@ class MainActivity : ComponentActivity() {
                     onRainfallDateChange = { uiState = uiState.copy(rainfallDate = it) },
                     onRainfallMmChange = { uiState = uiState.copy(rainfallMm = it) },
                     onRainfallNoteChange = { uiState = uiState.copy(rainfallNote = it) },
-                    onMobSelected = { uiState = uiState.copy(selectedMobId = it) },
-                    onMobNoteChange = { uiState = uiState.copy(mobNote = it) },
-                    onMobTagsChange = { uiState = uiState.copy(mobTags = it) },
+                    onMobSelected = { uiState = selectMob(uiState, it) },
+                    onPaddockSelected = { uiState = uiState.copy(selectedPaddockId = it) },
+                    onMoveNoteChange = { uiState = uiState.copy(moveNote = it) },
+                    onAnimalGroupSelected = { uiState = selectAnimalGroup(uiState, it) },
+                    onStockQuantityChange = { uiState = uiState.copy(stockQuantity = it) },
+                    onStockNoteChange = { uiState = uiState.copy(stockNote = it) },
+                    onOpenScreen = { uiState = uiState.copy(currentScreen = it) },
+                    onBackHome = { uiState = uiState.copy(currentScreen = AppScreen.Home) },
                     onLogin = {
                         val email = uiState.email
                         val password = uiState.password
@@ -138,8 +161,11 @@ class MainActivity : ComponentActivity() {
                     onQueueRainfall = {
                         uiState = queueRainfall(uiState)
                     },
-                    onQueueMobNote = {
-                        uiState = queueMobNote(uiState)
+                    onQueueMobMove = {
+                        uiState = queueMobMove(uiState)
+                    },
+                    onQueueStockCount = {
+                        uiState = queueStockCount(uiState)
                     },
                     onSync = {
                         runTask(
@@ -181,9 +207,51 @@ class MainActivity : ComponentActivity() {
             selectedFarm = snapshot.farm,
             snapshot = snapshot,
             selectedMobId = snapshot.mobs.firstOrNull()?.id.orEmpty(),
+            selectedPaddockId = snapshot.paddocks.firstOrNull()?.id.orEmpty(),
+            animalGroupTypes = mergeAnimalGroupTypes(
+                result.bootstrap.animalGroupTypes,
+                animalGroupTypesFromSnapshot(snapshot),
+            ),
+            selectedAnimalGroupTypeId = snapshot.mobs
+                .firstOrNull()
+                ?.balances
+                ?.firstOrNull()
+                ?.animalGroupTypeId
+                ?: result.bootstrap.animalGroupTypes.firstOrNull()?.id.orEmpty(),
+            stockQuantity = snapshot.mobs
+                .firstOrNull()
+                ?.balances
+                ?.firstOrNull()
+                ?.headCount
+                ?.toString()
+                .orEmpty(),
             pendingCount = queue.size(),
             password = "",
             statusMessage = "Loaded ${snapshot.farm.name}",
+        )
+    }
+
+    private fun selectMob(state: FieldUiState, mobId: String): FieldUiState {
+        val balance = state.snapshot
+            ?.mobs
+            ?.firstOrNull { it.id == mobId }
+            ?.balances
+            ?.firstOrNull()
+        return state.copy(
+            selectedMobId = mobId,
+            selectedAnimalGroupTypeId = balance?.animalGroupTypeId
+                ?: state.selectedAnimalGroupTypeId.ifBlank { state.animalGroupTypes.firstOrNull()?.id.orEmpty() },
+            stockQuantity = balance?.headCount?.toString() ?: state.stockQuantity,
+        )
+    }
+
+    private fun selectAnimalGroup(state: FieldUiState, groupTypeId: String): FieldUiState {
+        val currentBalance = selectedMob(state)
+            ?.balances
+            ?.firstOrNull { it.animalGroupTypeId == groupTypeId }
+        return state.copy(
+            selectedAnimalGroupTypeId = groupTypeId,
+            stockQuantity = currentBalance?.headCount?.toString() ?: state.stockQuantity,
         )
     }
 
@@ -205,43 +273,88 @@ class MainActivity : ComponentActivity() {
                 note = state.rainfallNote,
             )
             state.copy(
+                currentScreen = AppScreen.Home,
                 pendingCount = queue.size(),
+                rainfallMm = "",
                 rainfallNote = "",
-                statusMessage = "Queued rainfall. Pending: ${queue.size()}",
+                statusMessage = "Queued rainfall. Pending: ${queue.size()}. Sync to send.",
             )
         } catch (exc: Exception) {
             state.copy(statusMessage = exc.message ?: "Queue failed")
         }
     }
 
-    private fun queueMobNote(state: FieldUiState): FieldUiState {
+    private fun queueMobMove(state: FieldUiState): FieldUiState {
         val farm = state.selectedFarm
-            ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a mob note.")
+            ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a mob move.")
         val mobId = state.selectedMobId.ifBlank {
             state.snapshot?.mobs?.firstOrNull()?.id.orEmpty()
+        }
+        val paddockId = state.selectedPaddockId.ifBlank {
+            state.snapshot?.paddocks?.firstOrNull()?.id.orEmpty()
         }
         if (mobId.isBlank()) {
             return state.copy(statusMessage = "No active mob is available in the loaded snapshot.")
         }
-        if (state.mobNote.isBlank()) {
-            return state.copy(statusMessage = "Mob note is required.")
+        if (paddockId.isBlank()) {
+            return state.copy(statusMessage = "No paddock is available in the loaded snapshot.")
         }
-        val tags = state.mobTags
-            .split(",")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
         return try {
-            repository(state.baseUrl).queueMobNote(
+            repository(state.baseUrl).queueMobMove(
                 farmId = farm.id,
                 mobId = mobId,
-                description = state.mobNote,
-                tags = tags,
+                paddockId = paddockId,
+                note = state.moveNote,
             )
             state.copy(
+                currentScreen = AppScreen.Home,
                 selectedMobId = mobId,
-                mobNote = "",
+                selectedPaddockId = paddockId,
+                moveNote = "",
                 pendingCount = queue.size(),
-                statusMessage = "Queued mob note. Pending: ${queue.size()}",
+                statusMessage = "Queued mob move. Pending: ${queue.size()}. Sync to send.",
+            )
+        } catch (exc: Exception) {
+            state.copy(statusMessage = exc.message ?: "Queue failed")
+        }
+    }
+
+    private fun queueStockCount(state: FieldUiState): FieldUiState {
+        val farm = state.selectedFarm
+            ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a stock count.")
+        val mobId = state.selectedMobId.ifBlank {
+            state.snapshot?.mobs?.firstOrNull()?.id.orEmpty()
+        }
+        val groupTypeId = state.selectedAnimalGroupTypeId.ifBlank {
+            selectedMob(state)?.balances?.firstOrNull()?.animalGroupTypeId
+                ?: state.animalGroupTypes.firstOrNull()?.id.orEmpty()
+        }
+        val quantity = state.stockQuantity.toIntOrNull()
+            ?: return state.copy(statusMessage = "Head count must be a whole number.")
+        if (mobId.isBlank()) {
+            return state.copy(statusMessage = "No active mob is available in the loaded snapshot.")
+        }
+        if (groupTypeId.isBlank()) {
+            return state.copy(statusMessage = "No animal group type is available for stock counts.")
+        }
+        if (quantity < 0) {
+            return state.copy(statusMessage = "Head count must be zero or more.")
+        }
+        return try {
+            repository(state.baseUrl).queueStockCount(
+                farmId = farm.id,
+                mobId = mobId,
+                animalGroupTypeId = groupTypeId,
+                quantity = quantity,
+                note = state.stockNote,
+            )
+            state.copy(
+                currentScreen = AppScreen.Home,
+                selectedMobId = mobId,
+                selectedAnimalGroupTypeId = groupTypeId,
+                stockNote = "",
+                pendingCount = queue.size(),
+                statusMessage = "Queued stock count. Pending: ${queue.size()}. Sync to send.",
             )
         } catch (exc: Exception) {
             state.copy(statusMessage = exc.message ?: "Queue failed")
@@ -256,6 +369,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private data class FieldUiState(
+    val currentScreen: AppScreen = AppScreen.Home,
     val baseUrl: String = "http://10.0.2.2:5000",
     val email: String = "",
     val password: String = "",
@@ -265,13 +379,24 @@ private data class FieldUiState(
     val snapshot: FarmSnapshot? = null,
     val pendingCount: Int = 0,
     val lastSync: SyncSummary? = null,
+    val animalGroupTypes: List<AnimalGroupTypeSummary> = emptyList(),
     val rainfallDate: String = LocalDate.now().toString(),
     val rainfallMm: String = "",
     val rainfallNote: String = "",
     val selectedMobId: String = "",
-    val mobNote: String = "",
-    val mobTags: String = "field note",
+    val selectedPaddockId: String = "",
+    val moveNote: String = "",
+    val selectedAnimalGroupTypeId: String = "",
+    val stockQuantity: String = "",
+    val stockNote: String = "",
 )
+
+private enum class AppScreen {
+    Home,
+    Rainfall,
+    MoveMob,
+    StockCount,
+}
 
 @Composable
 private fun AgriTrackTheme(content: @Composable () -> Unit) {
@@ -300,11 +425,17 @@ private fun AgriTrackApp(
     onRainfallMmChange: (String) -> Unit,
     onRainfallNoteChange: (String) -> Unit,
     onMobSelected: (String) -> Unit,
-    onMobNoteChange: (String) -> Unit,
-    onMobTagsChange: (String) -> Unit,
+    onPaddockSelected: (String) -> Unit,
+    onMoveNoteChange: (String) -> Unit,
+    onAnimalGroupSelected: (String) -> Unit,
+    onStockQuantityChange: (String) -> Unit,
+    onStockNoteChange: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onBackHome: () -> Unit,
     onLogin: () -> Unit,
     onQueueRainfall: () -> Unit,
-    onQueueMobNote: () -> Unit,
+    onQueueMobMove: () -> Unit,
+    onQueueStockCount: () -> Unit,
     onSync: () -> Unit,
 ) {
     Surface(
@@ -319,29 +450,42 @@ private fun AgriTrackApp(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Header(state)
-            LoginScreen(
-                state = state,
-                onBaseUrlChange = onBaseUrlChange,
-                onEmailChange = onEmailChange,
-                onPasswordChange = onPasswordChange,
-                onLogin = onLogin,
-            )
-            FarmHomeScreen(snapshot = state.snapshot)
-            RainfallNoteScreen(
-                state = state,
-                onRainfallDateChange = onRainfallDateChange,
-                onRainfallMmChange = onRainfallMmChange,
-                onRainfallNoteChange = onRainfallNoteChange,
-                onMobSelected = onMobSelected,
-                onMobNoteChange = onMobNoteChange,
-                onMobTagsChange = onMobTagsChange,
-                onQueueRainfall = onQueueRainfall,
-                onQueueMobNote = onQueueMobNote,
-            )
-            SyncStatusScreen(
-                state = state,
-                onSync = onSync,
-            )
+            when (state.currentScreen) {
+                AppScreen.Home -> HomeScreen(
+                    state = state,
+                    onBaseUrlChange = onBaseUrlChange,
+                    onEmailChange = onEmailChange,
+                    onPasswordChange = onPasswordChange,
+                    onLogin = onLogin,
+                    onOpenScreen = onOpenScreen,
+                    onSync = onSync,
+                )
+                AppScreen.Rainfall -> RainfallCaptureScreen(
+                    state = state,
+                    onBackHome = onBackHome,
+                    onRainfallDateChange = onRainfallDateChange,
+                    onRainfallMmChange = onRainfallMmChange,
+                    onRainfallNoteChange = onRainfallNoteChange,
+                    onQueueRainfall = onQueueRainfall,
+                )
+                AppScreen.MoveMob -> MoveMobScreen(
+                    state = state,
+                    onBackHome = onBackHome,
+                    onMobSelected = onMobSelected,
+                    onPaddockSelected = onPaddockSelected,
+                    onMoveNoteChange = onMoveNoteChange,
+                    onQueueMobMove = onQueueMobMove,
+                )
+                AppScreen.StockCount -> StockCountScreen(
+                    state = state,
+                    onBackHome = onBackHome,
+                    onMobSelected = onMobSelected,
+                    onAnimalGroupSelected = onAnimalGroupSelected,
+                    onStockQuantityChange = onStockQuantityChange,
+                    onStockNoteChange = onStockNoteChange,
+                    onQueueStockCount = onQueueStockCount,
+                )
+            }
         }
     }
 }
@@ -397,37 +541,50 @@ private fun LoginScreen(
     onLogin: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionTitle("Login")
-        OutlinedTextField(
-            value = state.baseUrl,
-            onValueChange = onBaseUrlChange,
-            label = { Text("Base URL") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = state.email,
-            onValueChange = onEmailChange,
-            label = { Text("Email") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = state.password,
-            onValueChange = onPasswordChange,
-            label = { Text("Password") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(
-            onClick = onLogin,
-            enabled = !state.isBusy && state.email.isNotBlank() && state.password.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Login")
+        SectionTitle(if (state.snapshot == null) "Login" else "Connection")
+        if (state.snapshot != null) {
+            Text(
+                text = state.email.ifBlank { "Stored field session" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFF233126),
+            )
+            Text(
+                text = state.baseUrl,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF5A6657),
+            )
+        } else {
+            OutlinedTextField(
+                value = state.baseUrl,
+                onValueChange = onBaseUrlChange,
+                label = { Text("Base URL") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = state.email,
+                onValueChange = onEmailChange,
+                label = { Text("Email") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = state.password,
+                onValueChange = onPasswordChange,
+                label = { Text("Password") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = onLogin,
+                enabled = !state.isBusy && state.email.isNotBlank() && state.password.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Login")
+            }
         }
     }
 }
@@ -474,20 +631,127 @@ private fun FarmHomeScreen(snapshot: FarmSnapshot?) {
 }
 
 @Composable
-private fun RainfallNoteScreen(
+private fun HomeScreen(
     state: FieldUiState,
+    onBaseUrlChange: (String) -> Unit,
+    onEmailChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onLogin: () -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onSync: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        LoginScreen(
+            state = state,
+            onBaseUrlChange = onBaseUrlChange,
+            onEmailChange = onEmailChange,
+            onPasswordChange = onPasswordChange,
+            onLogin = onLogin,
+        )
+        FarmHomeScreen(snapshot = state.snapshot)
+        WorkflowMenu(
+            state = state,
+            onOpenScreen = onOpenScreen,
+        )
+        SyncStatusScreen(
+            state = state,
+            onSync = onSync,
+        )
+    }
+}
+
+@Composable
+private fun WorkflowMenu(
+    state: FieldUiState,
+    onOpenScreen: (AppScreen) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionDivider()
+        SectionTitle("Field Actions")
+        WorkflowButton(
+            title = "Rainfall Capture",
+            detail = "Record rainfall against ${state.selectedFarm?.name ?: "the farm"}",
+            enabled = state.snapshot != null,
+            onClick = { onOpenScreen(AppScreen.Rainfall) },
+        )
+        WorkflowButton(
+            title = "Move Mob",
+            detail = "Move an active mob to a destination paddock",
+            enabled = (state.snapshot?.mobs?.isNotEmpty() == true) &&
+                (state.snapshot?.paddocks?.isNotEmpty() == true),
+            onClick = { onOpenScreen(AppScreen.MoveMob) },
+        )
+        WorkflowButton(
+            title = "Stock Count",
+            detail = "Update mob balances with an adjustment note",
+            enabled = state.snapshot?.mobs?.isNotEmpty() == true,
+            onClick = { onOpenScreen(AppScreen.StockCount) },
+        )
+    }
+}
+
+@Composable
+private fun WorkflowButton(
+    title: String,
+    detail: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.Start,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF5A6657),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FormScaffold(
+    title: String,
+    onBackHome: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedButton(onClick = onBackHome) {
+            Text("Back")
+        }
+        SectionDivider()
+        SectionTitle(title)
+        content()
+    }
+}
+
+@Composable
+private fun RainfallCaptureScreen(
+    state: FieldUiState,
+    onBackHome: () -> Unit,
     onRainfallDateChange: (String) -> Unit,
     onRainfallMmChange: (String) -> Unit,
     onRainfallNoteChange: (String) -> Unit,
-    onMobSelected: (String) -> Unit,
-    onMobNoteChange: (String) -> Unit,
-    onMobTagsChange: (String) -> Unit,
     onQueueRainfall: () -> Unit,
-    onQueueMobNote: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionDivider()
-        SectionTitle("Rainfall")
+    FormScaffold(
+        title = "Rainfall Capture",
+        onBackHome = onBackHome,
+    ) {
         OutlinedTextField(
             value = state.rainfallDate,
             onValueChange = onRainfallDateChange,
@@ -515,36 +779,98 @@ private fun RainfallNoteScreen(
             enabled = !state.isBusy && state.snapshot != null,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Queue Rainfall")
+            Text("Submit Rainfall")
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(4.dp))
-        SectionTitle("Mob Note")
+@Composable
+private fun MoveMobScreen(
+    state: FieldUiState,
+    onBackHome: () -> Unit,
+    onMobSelected: (String) -> Unit,
+    onPaddockSelected: (String) -> Unit,
+    onMoveNoteChange: (String) -> Unit,
+    onQueueMobMove: () -> Unit,
+) {
+    FormScaffold(
+        title = "Move Mob",
+        onBackHome = onBackHome,
+    ) {
         MobPicker(
             mobs = state.snapshot?.mobs.orEmpty(),
             selectedMobId = state.selectedMobId,
             onMobSelected = onMobSelected,
         )
-        OutlinedTextField(
-            value = state.mobTags,
-            onValueChange = onMobTagsChange,
-            label = { Text("Tags") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+        PaddockPicker(
+            paddocks = state.snapshot?.paddocks.orEmpty(),
+            selectedPaddockId = state.selectedPaddockId,
+            onPaddockSelected = onPaddockSelected,
         )
         OutlinedTextField(
-            value = state.mobNote,
-            onValueChange = onMobNoteChange,
-            label = { Text("Note") },
-            minLines = 3,
+            value = state.moveNote,
+            onValueChange = onMoveNoteChange,
+            label = { Text("Move note") },
+            minLines = 2,
             modifier = Modifier.fillMaxWidth(),
         )
         Button(
-            onClick = onQueueMobNote,
-            enabled = !state.isBusy && state.snapshot?.mobs?.isNotEmpty() == true,
+            onClick = onQueueMobMove,
+            enabled = !state.isBusy &&
+                (state.snapshot?.mobs?.isNotEmpty() == true) &&
+                (state.snapshot?.paddocks?.isNotEmpty() == true),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Queue Note")
+            Text("Submit Move")
+        }
+    }
+}
+
+@Composable
+private fun StockCountScreen(
+    state: FieldUiState,
+    onBackHome: () -> Unit,
+    onMobSelected: (String) -> Unit,
+    onAnimalGroupSelected: (String) -> Unit,
+    onStockQuantityChange: (String) -> Unit,
+    onStockNoteChange: (String) -> Unit,
+    onQueueStockCount: () -> Unit,
+) {
+    FormScaffold(
+        title = "Stock Count",
+        onBackHome = onBackHome,
+    ) {
+        MobPicker(
+            mobs = state.snapshot?.mobs.orEmpty(),
+            selectedMobId = state.selectedMobId,
+            onMobSelected = onMobSelected,
+        )
+        AnimalGroupPicker(
+            animalGroupTypes = state.animalGroupTypes,
+            selectedAnimalGroupTypeId = state.selectedAnimalGroupTypeId,
+            onAnimalGroupSelected = onAnimalGroupSelected,
+        )
+        OutlinedTextField(
+            value = state.stockQuantity,
+            onValueChange = onStockQuantityChange,
+            label = { Text("Head count") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = state.stockNote,
+            onValueChange = onStockNoteChange,
+            label = { Text("Adjustment note") },
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = onQueueStockCount,
+            enabled = !state.isBusy && (state.snapshot?.mobs?.isNotEmpty() == true),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Submit Stock Count")
         }
     }
 }
@@ -557,26 +883,102 @@ private fun MobPicker(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedMob = mobs.firstOrNull { it.id == selectedMobId } ?: mobs.firstOrNull()
-    Box {
-        OutlinedButton(
-            onClick = { expanded = true },
-            enabled = mobs.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(selectedMob?.name ?: "No mobs")
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FieldLabel("Mob")
+        Box {
+            OutlinedButton(
+                onClick = { expanded = true },
+                enabled = mobs.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(selectedMob?.name ?: "No mobs")
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                mobs.forEach { mob ->
+                    DropdownMenuItem(
+                        text = { Text(mob.name) },
+                        onClick = {
+                            expanded = false
+                            onMobSelected(mob.id)
+                        },
+                    )
+                }
+            }
         }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            mobs.forEach { mob ->
-                DropdownMenuItem(
-                    text = { Text(mob.name) },
-                    onClick = {
-                        expanded = false
-                        onMobSelected(mob.id)
-                    },
-                )
+    }
+}
+
+@Composable
+private fun PaddockPicker(
+    paddocks: List<PaddockSummary>,
+    selectedPaddockId: String,
+    onPaddockSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedPaddock = paddocks.firstOrNull { it.id == selectedPaddockId } ?: paddocks.firstOrNull()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FieldLabel("Destination paddock")
+        Box {
+            OutlinedButton(
+                onClick = { expanded = true },
+                enabled = paddocks.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(selectedPaddock?.name ?: "No paddocks")
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                paddocks.forEach { paddock ->
+                    DropdownMenuItem(
+                        text = { Text(paddock.name) },
+                        onClick = {
+                            expanded = false
+                            onPaddockSelected(paddock.id)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnimalGroupPicker(
+    animalGroupTypes: List<AnimalGroupTypeSummary>,
+    selectedAnimalGroupTypeId: String,
+    onAnimalGroupSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedGroup = animalGroupTypes.firstOrNull { it.id == selectedAnimalGroupTypeId }
+        ?: animalGroupTypes.firstOrNull()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FieldLabel("Animal group")
+        Box {
+            OutlinedButton(
+                onClick = { expanded = true },
+                enabled = animalGroupTypes.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(selectedGroup?.label ?: "No animal groups")
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                animalGroupTypes.forEach { group ->
+                    DropdownMenuItem(
+                        text = { Text(group.label) },
+                        onClick = {
+                            expanded = false
+                            onAnimalGroupSelected(group.id)
+                        },
+                    )
+                }
             }
         }
     }
@@ -684,6 +1086,40 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
+private fun FieldLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = Color(0xFF5A6657),
+    )
+}
+
+@Composable
 private fun SectionDivider() {
     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+}
+
+private fun selectedMob(state: FieldUiState): MobSummary? =
+    state.snapshot?.mobs?.firstOrNull { it.id == state.selectedMobId }
+        ?: state.snapshot?.mobs?.firstOrNull()
+
+private fun animalGroupTypesFromSnapshot(snapshot: FarmSnapshot?): List<AnimalGroupTypeSummary> {
+    if (snapshot == null) {
+        return emptyList()
+    }
+    return mergeAnimalGroupTypes(
+        emptyList(),
+        snapshot.mobs.flatMap { mob -> mob.balances.map { it.animalGroupType } },
+    )
+}
+
+private fun mergeAnimalGroupTypes(
+    primary: List<AnimalGroupTypeSummary>,
+    secondary: List<AnimalGroupTypeSummary>,
+): List<AnimalGroupTypeSummary> {
+    val byId = linkedMapOf<String, AnimalGroupTypeSummary>()
+    (primary + secondary)
+        .filter { it.id.isNotBlank() }
+        .forEach { group -> byId.putIfAbsent(group.id, group) }
+    return byId.values.toList()
 }

@@ -9,8 +9,10 @@ This is a native Kotlin + Jetpack Compose client for the Flask mobile API at
 - Stores the bearer token with Android Keystore-backed encryption.
 - Fetches `/bootstrap` and the first accessible farm snapshot.
 - Caches the latest farm snapshot for offline reference.
-- Queues rainfall and mob-note commands locally with unique `client_command_id`
-  values.
+- Presents a home screen with separate actions for rainfall capture, mob moves,
+  and stock counts.
+- Queues rainfall, mob-move, and stock-count commands locally with unique
+  `client_command_id` values.
 - Replays queued commands through `/sync/commands` and removes applied results.
 - Shows pending, applied, and failed sync counts after each sync.
 
@@ -45,8 +47,8 @@ This is a native Kotlin + Jetpack Compose client for the Flask mobile API at
    http://10.0.2.2:5000
    ```
 
-7. Confirm the app loads a farm snapshot, queue a rainfall record, queue a mob
-   note, then tap **Sync Now**.
+7. Confirm the app loads a farm snapshot, open each home action, submit rainfall,
+   move a mob, record a stock count adjustment, then tap **Sync Now**.
 8. Confirm the pending count drops after applied results return.
 
 On a physical device on the same Wi-Fi network, replace the base URL with
@@ -60,8 +62,8 @@ Production devices should use HTTPS only.
 
 ## Project Shape
 
-- `MainActivity.kt` hosts the Compose screens for login, farm summary, rainfall,
-  mob notes, and sync status.
+- `MainActivity.kt` hosts the Compose home screen, farm summary, rainfall
+  capture, mob move, stock count, and sync status views.
 - `data/MobileApiClient.kt` keeps the `/api/mobile/v1` HTTP contract stable.
 - `data/SecureTokenStore.kt`, `data/SnapshotCache.kt`, and
   `data/OfflineCommandQueue.kt` provide the offline-first storage layers.

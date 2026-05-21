@@ -62,5 +62,52 @@ data class MobileCommand(
                 payload = payload,
             )
         }
+
+        fun mobMove(
+            farmId: String,
+            mobId: String,
+            paddockId: String,
+            allocationFraction: Double = 1.0,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("mob_id", mobId)
+                .put(
+                    "allocations",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("paddock_id", paddockId)
+                                .put("allocation_fraction", allocationFraction)
+                        )
+                )
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "mob.move",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun stockCount(
+            farmId: String,
+            mobId: String,
+            animalGroupTypeId: String,
+            quantity: Int,
+            note: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("mob_id", mobId)
+                .put("animal_group_type_id", animalGroupTypeId)
+                .put("quantity", quantity)
+            if (note.isNotBlank()) {
+                payload.put("note", note.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "stock_count.record",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
     }
 }

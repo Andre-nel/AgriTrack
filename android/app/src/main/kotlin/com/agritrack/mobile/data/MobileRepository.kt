@@ -30,6 +30,38 @@ class MobileRepository(
         queue.enqueue(MobileCommand.mobNote(farmId, mobId, description, tags))
     }
 
+    fun queueMobMove(farmId: String, mobId: String, paddockId: String, note: String) {
+        queue.enqueue(MobileCommand.mobMove(farmId, mobId, paddockId))
+        if (note.isNotBlank()) {
+            queue.enqueue(
+                MobileCommand.mobNote(
+                    farmId = farmId,
+                    mobId = mobId,
+                    description = note,
+                    tags = listOf("move"),
+                )
+            )
+        }
+    }
+
+    fun queueStockCount(
+        farmId: String,
+        mobId: String,
+        animalGroupTypeId: String,
+        quantity: Int,
+        note: String,
+    ) {
+        queue.enqueue(
+            MobileCommand.stockCount(
+                farmId = farmId,
+                mobId = mobId,
+                animalGroupTypeId = animalGroupTypeId,
+                quantity = quantity,
+                note = note,
+            )
+        )
+    }
+
     fun syncQueuedCommands(): SyncSummary {
         val token = tokenStore.load() ?: error("No stored token. Log in first.")
         val response = apiClient.syncCommands(token, queue.pendingJson())

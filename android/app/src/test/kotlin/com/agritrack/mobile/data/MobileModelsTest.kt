@@ -17,7 +17,15 @@ class MobileModelsTest {
                         .put("name", "North Block")
                         .put("timezone", "Africa/Johannesburg")
                 )
-                .put("paddocks", JSONArray().put(JSONObject().put("id", "paddock-1")))
+                .put(
+                    "paddocks",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "paddock-1")
+                                .put("name", "North Camp")
+                        )
+                )
                 .put(
                     "mobs",
                     JSONArray()
@@ -26,6 +34,25 @@ class MobileModelsTest {
                                 .put("id", "mob-1")
                                 .put("name", "Main Mob")
                                 .put("status", "active")
+                                .put(
+                                    "balances",
+                                    JSONArray()
+                                        .put(
+                                            JSONObject()
+                                                .put("id", "balance-1")
+                                                .put("animal_group_type_id", "group-1")
+                                                .put("head_count", 37)
+                                                .put(
+                                                    "animal_group_type",
+                                                    JSONObject()
+                                                        .put("id", "group-1")
+                                                        .put("species", "Cattle")
+                                                        .put("breed", "Bonsmara")
+                                                        .put("sex", "cow")
+                                                        .put("age_class", "adult")
+                                                )
+                                        )
+                                )
                         )
                 )
                 .put("water_assets", JSONArray().put(JSONObject().put("id", "tank-1")))
@@ -37,7 +64,10 @@ class MobileModelsTest {
         assertEquals(1, snapshot.paddockCount)
         assertEquals(1, snapshot.mobCount)
         assertEquals(1, snapshot.waterAssetCount)
+        assertEquals("North Camp", snapshot.paddocks.first().name)
         assertEquals("Main Mob", snapshot.mobs.first().name)
+        assertEquals(37, snapshot.mobs.first().balances.first().headCount)
+        assertEquals("Cattle Bonsmara cow adult", snapshot.mobs.first().balances.first().animalGroupType.label)
     }
 
     @Test
