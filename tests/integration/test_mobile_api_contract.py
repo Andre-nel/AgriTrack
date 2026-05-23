@@ -47,6 +47,11 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
         "mob_event.create",
         "stock_count.record",
         "mob.move",
+        "mob.transfer",
+        "task.create",
+        "task.status.update",
+        "task.comment.create",
+        "paddock.update",
         "water_asset_status.update",
     ]
     for command_type in command_types:

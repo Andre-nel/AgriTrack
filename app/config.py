@@ -10,6 +10,7 @@ class Config:
 
 class DevelopmentConfig(Config):
     DEBUG = True
+    PROPAGATE_EXCEPTIONS = True
 
 
 class TestingConfig(Config):

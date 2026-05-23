@@ -109,5 +109,153 @@ data class MobileCommand(
                 payload = payload,
             )
         }
+
+        fun waterAssetStatus(
+            farmId: String,
+            waterAssetId: String,
+            status: String,
+            waterLevel: String,
+            active: Boolean = true,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("water_asset_id", waterAssetId)
+                .put("active", active)
+            if (status.isNotBlank()) {
+                payload.put("status", status.trim())
+            }
+            if (waterLevel.isNotBlank()) {
+                payload.put("water_level", waterLevel.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "water_asset_status.update",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun paddockUpdate(
+            farmId: String,
+            paddockId: String,
+            status: String,
+            notes: String,
+            tags: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("paddock_id", paddockId)
+            if (status.isNotBlank()) {
+                payload.put("status", status.trim())
+            }
+            payload.put("notes", notes.trim())
+            payload.put(
+                "tags",
+                JSONArray(
+                    tags.split(",", ";", "\n")
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+                )
+            )
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "paddock.update",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun taskCreate(
+            farmId: String,
+            heading: String,
+            description: String,
+            dueDate: String,
+            entityType: String,
+            entityId: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("heading", heading.trim())
+                .put("description", description.trim().ifBlank { heading.trim() })
+                .put("priority", "high")
+                .put("reporter_name", "Mobile user")
+            if (dueDate.isNotBlank()) {
+                payload.put("due_date", dueDate.trim())
+            }
+            when (entityType) {
+                "paddock" -> payload.put("paddock_id", entityId)
+                "mob" -> payload.put("mob_id", entityId)
+                "water_asset" -> payload.put("water_asset_id", entityId)
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "task.create",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun taskStatus(
+            farmId: String,
+            taskId: String,
+            status: String,
+            note: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("task_id", taskId)
+                .put("status", status)
+                .put("changed_by_name", "Mobile user")
+            if (note.isNotBlank()) {
+                payload.put("note", note.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "task.status.update",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun taskComment(
+            farmId: String,
+            taskId: String,
+            body: String,
+        ): MobileCommand = MobileCommand(
+            clientCommandId = UUID.randomUUID().toString(),
+            type = "task.comment.create",
+            farmId = farmId,
+            payload = JSONObject()
+                .put("task_id", taskId)
+                .put("author_name", "Mobile user")
+                .put("body", body.trim()),
+        )
+
+        fun mobTransfer(
+            farmId: String,
+            sourceMobId: String,
+            destinationMobId: String,
+            animalGroupTypeId: String,
+            quantity: Int,
+            note: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("source_mob_id", sourceMobId)
+                .put("destination_mob_id", destinationMobId)
+                .put(
+                    "transfers",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("animal_group_type_id", animalGroupTypeId)
+                                .put("quantity", quantity)
+                        )
+                )
+            if (note.isNotBlank()) {
+                payload.put("note", note.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "mob.transfer",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
     }
 }

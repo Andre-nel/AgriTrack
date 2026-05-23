@@ -5,6 +5,7 @@ from app.extensions import db
 from app.models import (
     AnimalGroupBalance,
     AnimalGroupType,
+    CalendarActivity,
     Farm,
     GrazingAllocation,
     GrazingSession,
@@ -14,11 +15,16 @@ from app.models import (
     MobEvent,
     Paddock,
     RainfallRecord,
+    Task,
+    TaskComment,
+    TaskEntityLink,
+    TaskSpace,
     User,
     UserFarmRole,
     WaterAsset,
     WaterConnection,
 )
+from app.services.task_service import TaskService
 
 
 def _token_hash(token: str) -> str:
@@ -180,6 +186,37 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
                 description="Checked in the field",
             )
         )
+        space = TaskSpace(
+            farm_id=farm.id,
+            key="MOBSNAP",
+            name="Mobile Snapshot",
+            description="Field work",
+        )
+        db.session.add(space)
+        db.session.flush()
+        task = TaskService.create_task(
+            space=space,
+            heading="Check north trough",
+            description="Confirm water level and float valve.",
+            raw_tags="water,field",
+            reporter_name="Mobile User",
+            assignee_name="Field Team",
+            status="todo",
+            priority="high",
+            original_estimate_days=None,
+            due_date=datetime.now(timezone.utc).date().isoformat(),
+        )
+        db.session.flush()
+        TaskService.add_entity_links(task=task, paddock_ids=[paddock.id], mob_ids=[mob.id])
+        db.session.add(
+            CalendarActivity(
+                farm_id=farm.id,
+                title="Weekly water run",
+                description="Check tanks and troughs.",
+                start_date=datetime.now(timezone.utc).date(),
+                duration_days=1,
+            )
+        )
         tank = WaterAsset(
             farm_id=farm.id,
             name="Header Tank",
@@ -223,6 +260,11 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert payload["mob_events"][0]["tags"] == ["health", "field note"]
     assert {asset["name"] for asset in payload["water_assets"]} == {"Header Tank", "North Trough"}
     assert payload["water_connections"][0]["flow_type"] == "gravity"
+    assert payload["tasks"][0]["heading"] == "Check north trough"
+    assert {link["entity_type"] for link in payload["tasks"][0]["entity_links"]} == {"paddock", "mob"}
+    assert payload["calendar_items"][0]["title"] in {"Check north trough", "Weekly water run"}
+    assert "decision_feed" in payload
+    assert "map_features" in payload
 
 
 def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, app):
@@ -239,6 +281,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             grazeable_area_ha=10,
         )
         mob = Mob(farm_id=farm.id, name="Sync Mob", status="active")
+        transfer_target = Mob(farm_id=farm.id, name="Transfer Target", status="active")
         group = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
         tank = WaterAsset(
             farm_id=farm.id,
@@ -248,16 +291,39 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             status="operational",
             water_level="low",
         )
-        db.session.add_all([source, destination, mob, group, tank])
+        db.session.add_all([source, destination, mob, transfer_target, group, tank])
         db.session.flush()
         db.session.add(
             AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=5)
         )
+        space = TaskSpace(
+            farm_id=farm.id,
+            key="SYNC",
+            name="Sync Tasks",
+            description="Mobile sync task space",
+        )
+        db.session.add(space)
+        db.session.flush()
+        task = TaskService.create_task(
+            space=space,
+            heading="Repair gate",
+            description="Gate is dragging.",
+            raw_tags="field",
+            reporter_name="Mobile User",
+            assignee_name="Field Team",
+            status="todo",
+            priority="high",
+            original_estimate_days=None,
+            due_date=None,
+        )
         farm_id = str(farm.id)
         destination_id = str(destination.id)
         mob_id = str(mob.id)
+        transfer_target_id = str(transfer_target.id)
         group_id = str(group.id)
         tank_id = str(tank.id)
+        task_id = str(task.id)
+        source_id = str(source.id)
         db.session.commit()
 
     token = _login(client)
@@ -301,6 +367,51 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             },
         },
         {
+            "client_command_id": "transfer-1",
+            "type": "mob.transfer",
+            "farm_id": farm_id,
+            "payload": {
+                "source_mob_id": mob_id,
+                "destination_mob_id": transfer_target_id,
+                "transfers": [{"animal_group_type_id": group_id, "quantity": 2}],
+                "note": "Mobile transfer",
+            },
+        },
+        {
+            "client_command_id": "task-create-1",
+            "type": "task.create",
+            "farm_id": farm_id,
+            "payload": {
+                "heading": "Mobile-created task",
+                "description": "Created while offline",
+                "paddock_id": source_id,
+                "due_date": "2026-05-18",
+            },
+        },
+        {
+            "client_command_id": "task-status-1",
+            "type": "task.status.update",
+            "farm_id": farm_id,
+            "payload": {"task_id": task_id, "status": "in_progress", "note": "Started in field"},
+        },
+        {
+            "client_command_id": "task-comment-1",
+            "type": "task.comment.create",
+            "farm_id": farm_id,
+            "payload": {"task_id": task_id, "body": "Photo checked on phone"},
+        },
+        {
+            "client_command_id": "paddock-1",
+            "type": "paddock.update",
+            "farm_id": farm_id,
+            "payload": {
+                "paddock_id": source_id,
+                "status": "resting",
+                "notes": "Gate latch needs attention",
+                "tags": ["gate", "field"],
+            },
+        },
+        {
             "client_command_id": "water-1",
             "type": "water_asset_status.update",
             "farm_id": farm_id,
@@ -314,7 +425,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
     )
     assert response.status_code == 200
     payload = response.get_json()
-    assert [result["status"] for result in payload["results"]] == ["applied"] * 5
+    assert [result["status"] for result in payload["results"]] == ["applied"] * 10
     assert all(result["duplicate"] is False for result in payload["results"])
 
     duplicate = client.post(
@@ -334,10 +445,20 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             mob_id=mob_id,
             animal_group_type_id=group_id,
         ).first()
-        assert balance.head_count == 7
+        assert balance.head_count == 5
+        target_balance = AnimalGroupBalance.query.filter_by(
+            mob_id=transfer_target_id,
+            animal_group_type_id=group_id,
+        ).first()
+        assert target_balance.head_count == 2
         assert GrazingSession.query.filter_by(farm_id=farm_id, mob_id=mob_id, end_at=None).count() == 1
         assert db.session.get(WaterAsset, tank_id).water_level == "full"
-        assert MobileSyncCommand.query.filter_by(status="applied").count() == 5
+        assert db.session.get(Paddock, source_id).status == "resting"
+        assert db.session.get(Paddock, source_id).notes == "Gate latch needs attention"
+        assert Task.query.filter_by(heading="Mobile-created task").count() == 1
+        assert db.session.get(Task, task_id).status == "in_progress"
+        assert TaskComment.query.filter_by(task_id=task_id).count() == 1
+        assert MobileSyncCommand.query.filter_by(status="applied").count() == 10
 
 
 def test_mobile_sync_commands_report_partial_failures_and_missing_records(client, app):

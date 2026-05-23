@@ -8,12 +8,17 @@ This is a native Kotlin + Jetpack Compose client for the Flask mobile API at
 - Logs in with email, password, and device name.
 - Stores the bearer token with Android Keystore-backed encryption.
 - Fetches `/bootstrap` and the first accessible farm snapshot.
-- Caches the latest farm snapshot for offline reference.
-- Presents a home screen with separate actions for rainfall capture, mob moves,
-  and stock counts.
-- Queues rainfall, mob-move, and stock-count commands locally with unique
-  `client_command_id` values.
-- Replays queued commands through `/sync/commands` and removes applied results.
+- Stores the latest current-state farm snapshot in a local SQLite read model for
+  offline reference.
+- Presents a field dashboard with entries for farm state, map features,
+  calendar, mobs, paddocks, water assets, rainfall, decision hints, and sync.
+- Queues rainfall, mob moves, stock counts, mob transfers, task updates,
+  paddock edits, and water asset updates with unique `client_command_id` values.
+- Replays queued commands through `/sync/commands`, removes applied results,
+  drops terminal validation failures, keeps retryable failures with their last
+  error, and refreshes the snapshot after applied syncs.
+- Attempts foreground auto-sync when connected on the configured interval,
+  default 5 minutes, and when connectivity returns.
 - Shows pending, applied, and failed sync counts after each sync.
 
 ## Local Smoke Test
@@ -62,13 +67,16 @@ Production devices should use HTTPS only.
 
 ## Project Shape
 
-- `MainActivity.kt` hosts the Compose home screen, farm summary, rainfall
-  capture, mob move, stock count, and sync status views.
+- `MainActivity.kt` hosts the Compose dashboard, entity screens, field forms,
+  decision feed, sync status, and foreground auto-sync hooks.
 - `data/MobileApiClient.kt` keeps the `/api/mobile/v1` HTTP contract stable.
-- `data/SecureTokenStore.kt`, `data/SnapshotCache.kt`, and
-  `data/OfflineCommandQueue.kt` provide the offline-first storage layers.
+- `data/SecureTokenStore.kt` stores the bearer token.
+- `data/LocalFieldStore.kt` stores the current snapshot as normalized SQLite
+  rows plus a durable outbox.
+- `data/SnapshotCache.kt` and `data/OfflineCommandQueue.kt` remain as
+  compatibility helpers for older tests and migration safety.
 - `data/MobileRepository.kt` coordinates API calls, token storage, snapshot
-  caching, queue writes, and sync replay.
+  storage, outbox writes, and sync replay.
 
 No Gradle wrapper is checked in yet. Use Android Studio's bundled Gradle or
 generate a wrapper once the local Android toolchain version is locked.

@@ -126,6 +126,7 @@
 
 <section class="card">
   <h2>Farm Entity Links</h2>
+  {% if entity_linking_available %}
   <form method="post" action="{{ url_for('tasks.create_task_entity_links', task_id=task.id) }}" class="grid-form">
     <div class="grid-two">
       <label>Paddocks
@@ -152,6 +153,9 @@
     </label>
     <button type="submit" class="btn">Add Farm Entity Links</button>
   </form>
+  {% else %}
+  <p class="muted">Farm entity linking is unavailable until database migrations are up to date.</p>
+  {% endif %}
   <ul class="link-list-clean">
     {% for link in entity_link_rows %}
     <li class="link-card">

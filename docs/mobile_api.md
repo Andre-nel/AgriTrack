@@ -127,6 +127,11 @@ Important response fields:
       "mob_event.create",
       "stock_count.record",
       "mob.move",
+      "mob.transfer",
+      "task.create",
+      "task.status.update",
+      "task.comment.create",
+      "paddock.update",
       "water_asset_status.update"
     ],
     "max_commands_per_request": 100
@@ -153,9 +158,31 @@ Response groups:
   "rainfall": [],
   "mob_events": [],
   "water_assets": [],
-  "water_connections": []
+  "water_connections": [],
+  "task_spaces": [],
+  "tasks": [],
+  "calendar_activities": [],
+  "calendar_items": [],
+  "decision_feed": [],
+  "map_features": [],
+  "map_warnings": []
 }
 ```
+
+The snapshot is the Android read model. It represents current working state:
+open tasks, upcoming calendar items, current grazing allocation, current water
+state, recent rainfall, and decision hints. It is not a historical browser.
+
+### Mobile Map Data
+
+`GET /api/mobile/v1/farms/<farm_id>/map-data`
+
+Returns a mobile-authenticated GeoJSON feature collection for a farm. The farm
+snapshot also includes a cached `map_features` summary for offline use.
+
+`GET /api/mobile/v1/map-data`
+
+Returns a combined feature collection for all farms assigned to the mobile user.
 
 ## Offline Sync Commands
 
@@ -209,7 +236,18 @@ Supported command types:
 - `mob_event.create`: `mob_id`, `description`, `tags`, optional `event_at`.
 - `stock_count.record`: `mob_id`, `animal_group_type_id`, `quantity`, optional `note`.
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
+- `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.
+- `task.create`: `heading`, `description`, optional `space_id`, optional `due_date`, optional entity link ids.
+- `task.status.update`: `task_id`, `status`, optional `note`, optional `changed_at`.
+- `task.comment.create`: `task_id`, `body`.
+- `paddock.update`: `paddock_id`, optional `status`, optional `notes`, optional `tags`.
 - `water_asset_status.update`: `water_asset_id`, and at least one of `active`, `status`, `water_level`.
+
+Android should keep these commands in a durable outbox until the backend returns
+`"status": "applied"`. Failed commands with terminal validation errors such as
+`invalid_command` or `unsupported_command` should be dropped locally because the
+payload cannot succeed on retry. Other failed commands remain local with their
+last error so the field user can retry after fixing data or connectivity.
 
 ## Error Shape
 
@@ -244,5 +282,7 @@ Common codes:
 3. Let the user pick a farm.
 4. Fetch `/farms/<farm_id>/snapshot` and cache it locally.
 5. Save field actions to a local offline queue with `client_command_id`.
-6. Replay queued actions with `/sync/commands` when connectivity returns.
+6. Replay queued actions with `/sync/commands` when connectivity returns and
+   on the foreground sync interval, default 5 minutes.
 7. Mark commands as applied or failed based on the server result.
+8. Refresh the current farm snapshot after applied commands.

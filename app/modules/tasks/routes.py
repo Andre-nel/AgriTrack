@@ -3,6 +3,7 @@ from collections import defaultdict
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
+from sqlalchemy import inspect as sa_inspect
 
 from app.extensions import db
 from app.models import (
@@ -31,6 +32,7 @@ from app.services.task_service import (
 
 bp = Blueprint("tasks", __name__)
 TASK_SUMMARY_OPEN_STATUSES = {"selected_for_execution", "in_progress", "ready_for_verification"}
+TASK_ENTITY_TABLES = ("paddocks", "water_assets", "mobs")
 
 
 def _space_redirect(space: TaskSpace):
@@ -55,6 +57,11 @@ def _format_linked_entity(task: Task | None = None, space: TaskSpace | None = No
     }
 
 
+def _entity_tables_available() -> bool:
+    inspector = sa_inspect(db.engine)
+    return all(inspector.has_table(table_name) for table_name in TASK_ENTITY_TABLES)
+
+
 def _source_list(source, *names: str) -> list[str]:
     values = []
     for name in names:
@@ -70,6 +77,8 @@ def _source_list(source, *names: str) -> list[str]:
 
 
 def _farm_entity_options(farm_id: str | None) -> dict:
+    if not _entity_tables_available():
+        return {"paddocks": [], "water_assets": [], "mobs": []}
     paddock_query = Paddock.query.order_by(Paddock.name.asc())
     water_asset_query = WaterAsset.query.order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
     mob_query = Mob.query.order_by(Mob.name.asc())
@@ -121,6 +130,8 @@ def _build_entity_link_rows(links: list[TaskEntityLink]) -> list[dict]:
 
 
 def _build_selected_entity_rows(form_values: dict) -> list[dict]:
+    if not _entity_tables_available():
+        return []
     rows = []
     for paddock in Paddock.query.filter(Paddock.id.in_(form_values["paddock_ids"])).order_by(Paddock.name.asc()).all():
         rows.append({"kind": "Paddock", "label": paddock.name, "url": _entity_target_url("Paddock", paddock)})
@@ -252,12 +263,13 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
         selected_space = TaskSpace.query.options(selectinload(TaskSpace.farm)).filter_by(id=selected_space_id).first()
 
     selected_entity_farm_ids = []
-    for paddock in Paddock.query.filter(Paddock.id.in_(paddock_ids)).all():
-        selected_entity_farm_ids.append(str(paddock.farm_id))
-    for asset in WaterAsset.query.filter(WaterAsset.id.in_(water_asset_ids)).all():
-        selected_entity_farm_ids.append(str(asset.farm_id))
-    for mob in Mob.query.filter(Mob.id.in_(mob_ids)).all():
-        selected_entity_farm_ids.append(str(mob.farm_id))
+    if _entity_tables_available():
+        for paddock in Paddock.query.filter(Paddock.id.in_(paddock_ids)).all():
+            selected_entity_farm_ids.append(str(paddock.farm_id))
+        for asset in WaterAsset.query.filter(WaterAsset.id.in_(water_asset_ids)).all():
+            selected_entity_farm_ids.append(str(asset.farm_id))
+        for mob in Mob.query.filter(Mob.id.in_(mob_ids)).all():
+            selected_entity_farm_ids.append(str(mob.farm_id))
 
     if not selected_farm_id and source_activity is not None:
         selected_farm_id = source_activity.farm_id
@@ -308,12 +320,14 @@ def _render_new_task_form(*, form_values: dict, source_activity: CalendarActivit
     if form_values["farm_id"]:
         space_query = space_query.filter(TaskSpace.farm_id == form_values["farm_id"])
     spaces = space_query.all()
+    entity_linking_available = _entity_tables_available()
     entity_options = _farm_entity_options(form_values["farm_id"])
     return (
         render_template(
             "tasks/new.html",
             farms=farms,
             spaces=spaces,
+            entity_linking_available=entity_linking_available,
             entity_options=entity_options,
             selected_entity_rows=_build_selected_entity_rows(form_values),
             form_values=form_values,
@@ -501,6 +515,7 @@ def space_detail(space_id: str):
         link_type_labels=TASK_LINK_TYPE_LABELS,
         comment_rows=_build_comment_rows(comments, tz_name),
         link_rows=_build_link_rows(links, current_space=space),
+        entity_linking_available=_entity_tables_available(),
         entity_options=_farm_entity_options(space.farm_id),
         available_spaces=TaskSpace.query.filter(TaskSpace.id != space.id).order_by(TaskSpace.key).all(),
     )
@@ -652,6 +667,7 @@ def task_detail(task_id: str):
         comment_rows=_build_comment_rows(comments, tz_name),
         link_rows=_build_link_rows(links, current_task=task),
         entity_link_rows=_build_entity_link_rows(entity_links),
+        entity_linking_available=_entity_tables_available(),
         entity_options=_farm_entity_options(task.space.farm_id),
         priority_options=TASK_PRIORITIES,
         priority_labels=TASK_PRIORITY_LABELS,

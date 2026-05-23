@@ -58,6 +58,50 @@ class MobileModelsTest {
                 .put("water_assets", JSONArray().put(JSONObject().put("id", "tank-1")))
                 .put("rainfall", JSONArray().put(JSONObject().put("id", "rain-1")))
                 .put("mob_events", JSONArray().put(JSONObject().put("id", "event-1")))
+                .put(
+                    "tasks",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "task-1")
+                                .put("display_key", "OPS-1")
+                                .put("heading", "Check water")
+                                .put("status", "todo")
+                                .put("status_label", "TO DO")
+                                .put(
+                                    "entity_links",
+                                    JSONArray()
+                                        .put(
+                                            JSONObject()
+                                                .put("id", "link-1")
+                                                .put("task_id", "task-1")
+                                                .put("entity_type", "paddock")
+                                                .put("entity_id", "paddock-1")
+                                        )
+                                )
+                        )
+                )
+                .put(
+                    "calendar_items",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("kind", "task")
+                                .put("date", "2026-05-22")
+                                .put("title", "Check water")
+                        )
+                )
+                .put(
+                    "decision_feed",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("severity", "high")
+                                .put("category", "water")
+                                .put("title", "Water risk")
+                                .put("detail", "North trough is empty")
+                        )
+                )
         )
 
         assertEquals("North Block", snapshot.farm.name)
@@ -68,6 +112,10 @@ class MobileModelsTest {
         assertEquals("Main Mob", snapshot.mobs.first().name)
         assertEquals(37, snapshot.mobs.first().balances.first().headCount)
         assertEquals("Cattle Bonsmara cow adult", snapshot.mobs.first().balances.first().animalGroupType.label)
+        assertEquals("OPS-1", snapshot.tasks.first().displayKey)
+        assertEquals(true, snapshot.tasks.first().isLinkedTo("paddock", "paddock-1"))
+        assertEquals(1, snapshot.calendarItemCount)
+        assertEquals(1, snapshot.decisionCount)
     }
 
     @Test

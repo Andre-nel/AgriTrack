@@ -92,6 +92,7 @@
       <label>Tags
         <input name="tags" placeholder="operations, fencing, supplies" />
       </label>
+      {% if entity_linking_available %}
       <div class="grid-two">
         <label>Paddocks
           <select name="paddock_ids" multiple size="5">
@@ -115,6 +116,7 @@
           {% endfor %}
         </select>
       </label>
+      {% endif %}
       <button type="submit" class="btn">Create Task</button>
     </form>
   </article>

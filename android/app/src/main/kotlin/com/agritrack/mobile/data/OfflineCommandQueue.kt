@@ -47,10 +47,10 @@ class OfflineCommandQueue(
     fun size(): Int = runCatching { readArray().length() }.getOrDefault(0)
 
     fun removeApplied(results: JSONArray) {
-        val appliedIds = buildSet {
+        val removableIds = buildSet {
             for (index in 0 until results.length()) {
                 val result = results.getJSONObject(index)
-                if (result.optString("status") == "applied") {
+                if (SyncOutboxPolicy.shouldDrop(result)) {
                     add(result.optString("client_command_id"))
                 }
             }
@@ -60,7 +60,7 @@ class OfflineCommandQueue(
         val retained = JSONArray()
         for (index in 0 until commands.length()) {
             val command = commands.getJSONObject(index)
-            if (command.optString("client_command_id") !in appliedIds) {
+            if (command.optString("client_command_id") !in removableIds) {
                 retained.put(command)
             }
         }

@@ -101,6 +101,7 @@
     <label>Tags
       <input name="tags" value="{{ form_values.tags }}" placeholder="operations, animal health, feed" />
     </label>
+    {% if entity_linking_available %}
     <div class="grid-two">
       <label>Paddocks
         <select name="paddock_ids" multiple size="5">
@@ -124,6 +125,9 @@
         {% endfor %}
       </select>
     </label>
+    {% else %}
+    <p class="muted">Farm entity linking is unavailable until database migrations are up to date.</p>
+    {% endif %}
     <button type="submit" class="btn">Create Task</button>
   </form>
 </section>

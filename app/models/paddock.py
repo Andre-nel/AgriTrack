@@ -10,6 +10,8 @@ class Paddock(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     area_ha = db.Column(db.Numeric(10, 2), nullable=False, default=0)
     grazeable_area_ha = db.Column(db.Numeric(10, 2), nullable=False, default=0)
     status = db.Column(db.String(20), nullable=False, default="active")
+    notes = db.Column(db.Text)
+    tags_csv = db.Column(db.String(500), nullable=False, default="")
     stocking_rate_ha_per_lsu_override = db.Column(db.Numeric(8, 2), nullable=True)
 
     farm = db.relationship("Farm", back_populates="paddocks")

@@ -13,7 +13,12 @@ data class PaddockSummary(
     val id: String,
     val name: String,
     val status: String,
-)
+    val notes: String?,
+    val tags: List<String>,
+) {
+    val tagLabel: String
+        get() = tags.joinToString(", ")
+}
 
 data class AnimalGroupTypeSummary(
     val id: String,
@@ -41,6 +46,109 @@ data class MobSummary(
     val name: String,
     val status: String,
     val balances: List<MobBalanceSummary>,
+) {
+    val totalHead: Int
+        get() = balances.sumOf { it.headCount }
+}
+
+data class GrazingAllocationSummary(
+    val paddockId: String,
+    val allocationFraction: Double,
+)
+
+data class ActiveGrazingSummary(
+    val id: String,
+    val mobId: String,
+    val startAt: String?,
+    val allocations: List<GrazingAllocationSummary>,
+)
+
+data class PaddockGrazingSummary(
+    val paddockId: String,
+    val totalHead: Double,
+    val mobs: List<PaddockMobSummary>,
+    val speciesHeads: List<SpeciesHeadSummary>,
+)
+
+data class PaddockMobSummary(
+    val mobId: String,
+    val mobName: String,
+    val allocationPct: Double,
+)
+
+data class SpeciesHeadSummary(
+    val species: String,
+    val head: Double,
+)
+
+data class WaterAssetSummary(
+    val id: String,
+    val name: String,
+    val assetType: String,
+    val assetTypeLabel: String,
+    val active: Boolean,
+    val status: String?,
+    val waterLevel: String?,
+    val locationPaddockId: String?,
+    val locationPaddockName: String?,
+    val servedPaddockIds: List<String>,
+    val networkWarning: String?,
+)
+
+data class RainfallSummary(
+    val id: String,
+    val recordedOn: String,
+    val mm: Double,
+    val note: String?,
+)
+
+data class TaskEntityLinkSummary(
+    val id: String,
+    val taskId: String,
+    val entityType: String,
+    val entityId: String,
+    val entityName: String?,
+)
+
+data class TaskSummary(
+    val id: String,
+    val displayKey: String,
+    val heading: String,
+    val description: String,
+    val status: String,
+    val statusLabel: String,
+    val priority: String,
+    val dueDate: String?,
+    val entityLinks: List<TaskEntityLinkSummary>,
+) {
+    fun isLinkedTo(entityType: String, entityId: String): Boolean =
+        entityLinks.any { it.entityType == entityType && it.entityId == entityId }
+}
+
+data class CalendarItemSummary(
+    val kind: String,
+    val date: String,
+    val title: String,
+    val badgeText: String?,
+    val subtitle: String?,
+)
+
+data class DecisionItemSummary(
+    val severity: String,
+    val category: String,
+    val title: String,
+    val detail: String,
+    val entityType: String?,
+    val entityId: String?,
+)
+
+data class MapFeatureSummary(
+    val featureType: String,
+    val name: String,
+    val paddockId: String?,
+    val waterAssetId: String?,
+    val waterAlertLevel: String?,
+    val waterAlertMessage: String?,
 )
 
 data class FarmSnapshot(
@@ -50,71 +158,283 @@ data class FarmSnapshot(
     val waterAssetCount: Int,
     val rainfallCount: Int,
     val mobEventCount: Int,
+    val taskCount: Int,
+    val calendarItemCount: Int,
+    val decisionCount: Int,
     val paddocks: List<PaddockSummary>,
     val mobs: List<MobSummary>,
+    val activeGrazing: List<ActiveGrazingSummary>,
+    val grazingByPaddock: List<PaddockGrazingSummary>,
+    val waterAssets: List<WaterAssetSummary>,
+    val rainfall: List<RainfallSummary>,
+    val tasks: List<TaskSummary>,
+    val calendarItems: List<CalendarItemSummary>,
+    val decisionFeed: List<DecisionItemSummary>,
+    val mapFeatures: List<MapFeatureSummary>,
+    val mapWarnings: List<String>,
     val rawJson: String,
 ) {
     companion object {
         fun fromJson(json: JSONObject): FarmSnapshot {
             val farmJson = json.getJSONObject("farm")
-            val paddocksJson = json.optJSONArray("paddocks") ?: JSONArray()
-            val paddocks = buildList {
-                for (index in 0 until paddocksJson.length()) {
-                    val paddock = paddocksJson.getJSONObject(index)
-                    add(
-                        PaddockSummary(
-                            id = paddock.getString("id"),
-                            name = paddock.optString("name", "Unnamed paddock"),
-                            status = paddock.optString("status", "active"),
-                        )
-                    )
-                }
-            }
-            val mobsJson = json.optJSONArray("mobs") ?: JSONArray()
-            val mobs = buildList {
-                for (index in 0 until mobsJson.length()) {
-                    val mob = mobsJson.getJSONObject(index)
-                    add(
-                        MobSummary(
-                            id = mob.getString("id"),
-                            name = mob.optString("name", "Unnamed mob"),
-                            status = mob.optString("status", "unknown"),
-                            balances = parseBalances(mob.optJSONArray("balances") ?: JSONArray()),
-                        )
-                    )
-                }
-            }
+            val paddocks = parsePaddocks(json.optJSONArray("paddocks") ?: JSONArray())
+            val mobs = parseMobs(json.optJSONArray("mobs") ?: JSONArray())
+            val activeGrazing = parseActiveGrazing(json.optJSONArray("active_grazing") ?: JSONArray())
+            val grazingByPaddock = parseGrazingByPaddock(json.optJSONArray("active_grazing_by_paddock") ?: JSONArray())
+            val waterAssets = parseWaterAssets(json.optJSONArray("water_assets") ?: JSONArray())
+            val rainfall = parseRainfall(json.optJSONArray("rainfall") ?: JSONArray())
+            val tasks = parseTasks(json.optJSONArray("tasks") ?: JSONArray())
+            val calendarItems = parseCalendarItems(json.optJSONArray("calendar_items") ?: JSONArray())
+            val decisions = parseDecisionFeed(json.optJSONArray("decision_feed") ?: JSONArray())
+            val mapFeatures = parseMapFeatures(json.optJSONArray("map_features") ?: JSONArray())
             return FarmSnapshot(
                 farm = FarmSummary(
                     id = farmJson.getString("id"),
                     name = farmJson.optString("name", "Farm"),
                     timezone = farmJson.optString("timezone", "UTC"),
                 ),
-                paddockCount = paddocksJson.length(),
-                mobCount = mobsJson.length(),
-                waterAssetCount = json.optJSONArray("water_assets")?.length() ?: 0,
-                rainfallCount = json.optJSONArray("rainfall")?.length() ?: 0,
+                paddockCount = paddocks.size,
+                mobCount = mobs.size,
+                waterAssetCount = waterAssets.size,
+                rainfallCount = rainfall.size,
                 mobEventCount = json.optJSONArray("mob_events")?.length() ?: 0,
+                taskCount = tasks.size,
+                calendarItemCount = calendarItems.size,
+                decisionCount = decisions.size,
                 paddocks = paddocks,
                 mobs = mobs,
+                activeGrazing = activeGrazing,
+                grazingByPaddock = grazingByPaddock,
+                waterAssets = waterAssets,
+                rainfall = rainfall,
+                tasks = tasks,
+                calendarItems = calendarItems,
+                decisionFeed = decisions,
+                mapFeatures = mapFeatures,
+                mapWarnings = json.optJSONArray("map_warnings")?.strings().orEmpty(),
                 rawJson = json.toString(),
             )
+        }
+
+        private fun parsePaddocks(json: JSONArray): List<PaddockSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val paddock = json.getJSONObject(index)
+                add(
+                    PaddockSummary(
+                        id = paddock.getString("id"),
+                        name = paddock.optString("name", "Unnamed paddock"),
+                        status = paddock.optString("status", "active"),
+                        notes = paddock.optNullableString("notes"),
+                        tags = paddock.optJSONArray("tags").strings(),
+                    )
+                )
+            }
+        }
+
+        private fun parseMobs(json: JSONArray): List<MobSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val mob = json.getJSONObject(index)
+                add(
+                    MobSummary(
+                        id = mob.getString("id"),
+                        name = mob.optString("name", "Unnamed mob"),
+                        status = mob.optString("status", "unknown"),
+                        balances = parseBalances(mob.optJSONArray("balances") ?: JSONArray()),
+                    )
+                )
+            }
         }
 
         private fun parseBalances(json: JSONArray): List<MobBalanceSummary> = buildList {
             for (index in 0 until json.length()) {
                 val balance = json.getJSONObject(index)
                 val groupJson = balance.optJSONObject("animal_group_type") ?: JSONObject()
-                val groupId = balance.optString(
-                    "animal_group_type_id",
-                    groupJson.optString("id"),
-                )
+                val groupId = balance.optString("animal_group_type_id", groupJson.optString("id"))
                 add(
                     MobBalanceSummary(
                         id = balance.optString("id"),
                         animalGroupTypeId = groupId,
                         animalGroupType = parseAnimalGroupType(groupJson, groupId),
                         headCount = balance.optInt("head_count", 0),
+                    )
+                )
+            }
+        }
+
+        private fun parseActiveGrazing(json: JSONArray): List<ActiveGrazingSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val item = json.getJSONObject(index)
+                val allocationsJson = item.optJSONArray("allocations") ?: JSONArray()
+                val allocations = buildList {
+                    for (allocationIndex in 0 until allocationsJson.length()) {
+                        val allocation = allocationsJson.getJSONObject(allocationIndex)
+                        add(
+                            GrazingAllocationSummary(
+                                paddockId = allocation.optString("paddock_id"),
+                                allocationFraction = allocation.optDouble("allocation_fraction", 1.0),
+                            )
+                        )
+                    }
+                }
+                add(
+                    ActiveGrazingSummary(
+                        id = item.optString("id"),
+                        mobId = item.optString("mob_id"),
+                        startAt = item.optNullableString("start_at"),
+                        allocations = allocations,
+                    )
+                )
+            }
+        }
+
+        private fun parseGrazingByPaddock(json: JSONArray): List<PaddockGrazingSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val item = json.getJSONObject(index)
+                val mobsJson = item.optJSONArray("mobs") ?: JSONArray()
+                val speciesJson = item.optJSONArray("species_heads") ?: JSONArray()
+                add(
+                    PaddockGrazingSummary(
+                        paddockId = item.optString("paddock_id"),
+                        totalHead = item.optDouble("total_head", 0.0),
+                        mobs = buildList {
+                            for (mobIndex in 0 until mobsJson.length()) {
+                                val mob = mobsJson.getJSONObject(mobIndex)
+                                add(
+                                    PaddockMobSummary(
+                                        mobId = mob.optString("mob_id"),
+                                        mobName = mob.optString("mob_name", "Mob"),
+                                        allocationPct = mob.optDouble("allocation_pct", 100.0),
+                                    )
+                                )
+                            }
+                        },
+                        speciesHeads = buildList {
+                            for (speciesIndex in 0 until speciesJson.length()) {
+                                val species = speciesJson.getJSONObject(speciesIndex)
+                                add(
+                                    SpeciesHeadSummary(
+                                        species = species.optString("species", "Stock"),
+                                        head = species.optDouble("head", 0.0),
+                                    )
+                                )
+                            }
+                        },
+                    )
+                )
+            }
+        }
+
+        private fun parseWaterAssets(json: JSONArray): List<WaterAssetSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val asset = json.getJSONObject(index)
+                add(
+                    WaterAssetSummary(
+                        id = asset.getString("id"),
+                        name = asset.optString("name", "Water asset"),
+                        assetType = asset.optString("asset_type"),
+                        assetTypeLabel = asset.optString("asset_type_label", asset.optString("asset_type")),
+                        active = asset.optBoolean("active", true),
+                        status = asset.optNullableString("status"),
+                        waterLevel = asset.optNullableString("water_level"),
+                        locationPaddockId = asset.optNullableString("location_paddock_id"),
+                        locationPaddockName = asset.optNullableString("location_paddock_name"),
+                        servedPaddockIds = asset.optJSONArray("served_paddock_ids").strings(),
+                        networkWarning = asset.optNullableString("network_warning"),
+                    )
+                )
+            }
+        }
+
+        private fun parseRainfall(json: JSONArray): List<RainfallSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val rain = json.getJSONObject(index)
+                add(
+                    RainfallSummary(
+                        id = rain.optString("id"),
+                        recordedOn = rain.optString("recorded_on"),
+                        mm = rain.optDouble("mm", 0.0),
+                        note = rain.optNullableString("note"),
+                    )
+                )
+            }
+        }
+
+        private fun parseTasks(json: JSONArray): List<TaskSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val task = json.getJSONObject(index)
+                val linksJson = task.optJSONArray("entity_links") ?: JSONArray()
+                add(
+                    TaskSummary(
+                        id = task.optString("id"),
+                        displayKey = task.optString("display_key", "TASK"),
+                        heading = task.optString("heading", "Task"),
+                        description = task.optString("description"),
+                        status = task.optString("status", "todo"),
+                        statusLabel = task.optString("status_label", task.optString("status", "Task")),
+                        priority = task.optString("priority", "low"),
+                        dueDate = task.optNullableString("due_date"),
+                        entityLinks = buildList {
+                            for (linkIndex in 0 until linksJson.length()) {
+                                val link = linksJson.getJSONObject(linkIndex)
+                                add(
+                                    TaskEntityLinkSummary(
+                                        id = link.optString("id"),
+                                        taskId = link.optString("task_id"),
+                                        entityType = link.optString("entity_type"),
+                                        entityId = link.optString("entity_id"),
+                                        entityName = link.optNullableString("entity_name"),
+                                    )
+                                )
+                            }
+                        },
+                    )
+                )
+            }
+        }
+
+        private fun parseCalendarItems(json: JSONArray): List<CalendarItemSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val item = json.getJSONObject(index)
+                add(
+                    CalendarItemSummary(
+                        kind = item.optString("kind"),
+                        date = item.optString("date"),
+                        title = item.optString("title", "Calendar item"),
+                        badgeText = item.optNullableString("badge_text"),
+                        subtitle = item.optNullableString("subtitle"),
+                    )
+                )
+            }
+        }
+
+        private fun parseDecisionFeed(json: JSONArray): List<DecisionItemSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val item = json.getJSONObject(index)
+                add(
+                    DecisionItemSummary(
+                        severity = item.optString("severity", "medium"),
+                        category = item.optString("category", "field"),
+                        title = item.optString("title", "Field decision"),
+                        detail = item.optString("detail"),
+                        entityType = item.optNullableString("entity_type"),
+                        entityId = item.optNullableString("entity_id"),
+                    )
+                )
+            }
+        }
+
+        private fun parseMapFeatures(json: JSONArray): List<MapFeatureSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val feature = json.getJSONObject(index)
+                val properties = feature.optJSONObject("properties") ?: JSONObject()
+                add(
+                    MapFeatureSummary(
+                        featureType = properties.optString("feature_type", "feature"),
+                        name = properties.optString("name", "Map feature"),
+                        paddockId = properties.optNullableString("paddock_id"),
+                        waterAssetId = properties.optNullableString("id"),
+                        waterAlertLevel = properties.optNullableString("water_alert_level"),
+                        waterAlertMessage = properties.optNullableString("water_alert_message"),
                     )
                 )
             }
@@ -155,11 +475,7 @@ data class BootstrapResult(
             return BootstrapResult(
                 farms = farms,
                 animalGroupTypes = groupTypes,
-                supportedCommandTypes = buildList {
-                    for (index in 0 until supported.length()) {
-                        add(supported.getString(index))
-                    }
-                },
+                supportedCommandTypes = supported.strings(),
             )
         }
     }
@@ -189,6 +505,7 @@ data class SyncResult(
 data class SyncSummary(
     val results: List<SyncResult>,
     val remainingQueueCount: Int,
+    val refreshedSnapshot: FarmSnapshot? = null,
 ) {
     val appliedCount: Int = results.count { it.status == "applied" }
     val failedCount: Int = results.count { it.status == "failed" }
@@ -207,3 +524,20 @@ private fun parseAnimalGroupType(json: JSONObject, fallbackId: String = ""): Ani
         sex = json.optString("sex"),
         ageClass = json.optString("age_class"),
     )
+
+private fun JSONArray?.strings(): List<String> {
+    if (this == null) {
+        return emptyList()
+    }
+    return buildList {
+        for (index in 0 until length()) {
+            val value = optString(index)
+            if (value.isNotBlank()) {
+                add(value)
+            }
+        }
+    }
+}
+
+private fun JSONObject.optNullableString(name: String): String? =
+    if (isNull(name)) null else optString(name).takeIf { it.isNotBlank() }

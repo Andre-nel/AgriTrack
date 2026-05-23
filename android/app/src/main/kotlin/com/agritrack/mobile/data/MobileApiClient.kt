@@ -22,6 +22,8 @@ class MobileApiClient(baseUrl: String) {
         return request("POST", "/api/mobile/v1/auth/login", null, body)
     }
 
+    fun logout(token: String): JSONObject = request("POST", "/api/mobile/v1/auth/logout", token, null)
+
     fun bootstrap(token: String): JSONObject = request("GET", "/api/mobile/v1/bootstrap", token, null)
 
     fun farmSnapshot(token: String, farmId: String): JSONObject =
