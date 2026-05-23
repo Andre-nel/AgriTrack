@@ -98,6 +98,11 @@ import com.agritrack.mobile.data.filterCalendarItems
 import com.agritrack.mobile.data.filterMobs
 import com.agritrack.mobile.data.filterPaddocks
 import com.agritrack.mobile.data.filterWaterAssets
+import com.agritrack.mobile.data.paddockGrazing
+import com.agritrack.mobile.data.paddockMapFeature
+import com.agritrack.mobile.data.paddockStockLines
+import com.agritrack.mobile.data.paddockWaterAvailability
+import com.agritrack.mobile.data.servedPaddockNames
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -699,8 +704,11 @@ private enum class AppScreen {
     CalendarItemDetail,
     Decisions,
     Mobs,
+    MobDetail,
     Paddocks,
+    PaddockDetail,
     WaterAssets,
+    WaterAssetDetail,
     Rainfall,
     MoveMob,
     StockCount,
@@ -817,6 +825,7 @@ private fun AgriTrackApp(
                     onBackHome,
                     onPaddockSelected,
                     onMobSelected,
+                    onWaterAssetSelected,
                     onOpenScreen,
                 )
                 AppScreen.FarmMapFullscreen -> FarmMapFullscreenScreen(
@@ -824,6 +833,7 @@ private fun AgriTrackApp(
                     onBackHome,
                     onPaddockSelected,
                     onMobSelected,
+                    onWaterAssetSelected,
                     onOpenScreen,
                 )
                 AppScreen.Calendar -> CalendarScreen(
@@ -862,6 +872,12 @@ private fun AgriTrackApp(
                     onBackHome,
                     onMobSelected,
                     onOpenScreen,
+                )
+                AppScreen.MobDetail -> MobDetailScreen(
+                    state,
+                    { onOpenScreen(AppScreen.Mobs) },
+                    onMobSelected,
+                    onOpenScreen,
                     onStartTaskForEntity,
                 )
                 AppScreen.Paddocks -> PaddocksScreen(
@@ -869,11 +885,23 @@ private fun AgriTrackApp(
                     onBackHome,
                     onPaddockSelected,
                     onOpenScreen,
+                )
+                AppScreen.PaddockDetail -> PaddockDetailScreen(
+                    state,
+                    { onOpenScreen(AppScreen.Paddocks) },
+                    onPaddockSelected,
+                    onOpenScreen,
                     onStartTaskForEntity,
                 )
                 AppScreen.WaterAssets -> WaterAssetsScreen(
                     state,
                     onBackHome,
+                    onWaterAssetSelected,
+                    onOpenScreen,
+                )
+                AppScreen.WaterAssetDetail -> WaterAssetDetailScreen(
+                    state,
+                    { onOpenScreen(AppScreen.WaterAssets) },
                     onWaterAssetSelected,
                     onOpenScreen,
                     onStartTaskForEntity,
@@ -1194,6 +1222,7 @@ private fun FarmMapScreen(
     onBackHome: () -> Unit,
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
+    onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
 ) {
     FormScaffold("Farm Map", onBackHome) {
@@ -1205,6 +1234,7 @@ private fun FarmMapScreen(
             onFullscreen = { onOpenScreen(AppScreen.FarmMapFullscreen) },
             onPaddockSelected = onPaddockSelected,
             onMobSelected = onMobSelected,
+            onWaterAssetSelected = onWaterAssetSelected,
             onOpenScreen = onOpenScreen,
         )
     }
@@ -1216,6 +1246,7 @@ private fun FarmMapFullscreenScreen(
     onBackHome: () -> Unit,
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
+    onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
 ) {
     val snapshot = state.snapshot ?: return
@@ -1233,6 +1264,7 @@ private fun FarmMapFullscreenScreen(
             onFullscreen = {},
             onPaddockSelected = onPaddockSelected,
             onMobSelected = onMobSelected,
+            onWaterAssetSelected = onWaterAssetSelected,
             onOpenScreen = onOpenScreen,
         )
     }
@@ -1246,6 +1278,7 @@ private fun FarmMapContent(
     onFullscreen: () -> Unit,
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
+    onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
 ) {
     var selectedMapItem by remember(snapshot.farm.id, fullscreen) { mutableStateOf<MapSelection?>(null) }
@@ -1268,12 +1301,19 @@ private fun FarmMapContent(
                 val mob = selection.mob
                 if (mob != null) {
                     onMobSelected(mob.mobId)
-                    onOpenScreen(AppScreen.Mobs)
+                    onOpenScreen(AppScreen.MobDetail)
                 } else {
+                    val waterAssetId = selection.feature.waterAssetId
                     val paddockId = selection.feature.paddockId
-                    if (paddockId != null) {
-                        onPaddockSelected(paddockId)
-                        onOpenScreen(AppScreen.Paddocks)
+                    when {
+                        waterAssetId != null -> {
+                            onWaterAssetSelected(waterAssetId)
+                            onOpenScreen(AppScreen.WaterAssetDetail)
+                        }
+                        paddockId != null -> {
+                            onPaddockSelected(paddockId)
+                            onOpenScreen(AppScreen.PaddockDetail)
+                        }
                     }
                 }
             },
@@ -2033,7 +2073,6 @@ private fun MobsScreen(
     onBackHome: () -> Unit,
     onMobSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
-    onStartTaskForEntity: (String, String, String) -> Unit,
 ) {
     FormScaffold("Mobs", onBackHome) {
         val snapshot = state.snapshot ?: return@FormScaffold
@@ -2044,28 +2083,73 @@ private fun MobsScreen(
             EntityCard("No mobs", "No mobs match the current filters.")
         }
         filteredMobs.forEach { mob ->
-            EntityCard("${mob.name} (${mob.totalHead})", mob.balances.joinToString(", ") { "${it.headCount} ${it.animalGroupType.label}" })
+            ClickableEntityCard(
+                title = mob.name,
+                detail = "${mob.totalHead} head | ${mob.status}",
+            ) {
+                onMobSelected(mob.id)
+                onOpenScreen(AppScreen.MobDetail)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobDetailScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onMobSelected: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onStartTaskForEntity: (String, String, String) -> Unit,
+) {
+    FormScaffold("Mob Detail", onBackToList) {
+        val snapshot = state.snapshot ?: return@FormScaffold
+        val mob = selectedMob(state) ?: return@FormScaffold
+        EntityCard(mob.name, "${mob.status} | ${mob.totalHead} head")
+        MetricRows(
+            listOf(
+                "Status" to mob.status,
+                "Total head" to mob.totalHead.toString(),
+            )
+        )
+        SectionCard("Balances") {
+            if (mob.balances.isEmpty()) {
+                Text("No stock balances recorded", color = Color(0xFF516052))
+            }
+            mob.balances.forEach { balance ->
+                EntityCard(balance.animalGroupType.label, "${balance.headCount} head")
+            }
+        }
+        SectionCard("Linked Tasks") {
             RelatedTasks(snapshot.tasks, "mob", mob.id)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { onMobSelected(mob.id); onOpenScreen(AppScreen.MoveMob) }, modifier = Modifier.weight(1f)) {
-                    Text("Move")
-                }
-                OutlinedButton(onClick = { onMobSelected(mob.id); onOpenScreen(AppScreen.StockCount) }, modifier = Modifier.weight(1f)) {
-                    Text("Count")
-                }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { onMobSelected(mob.id); onOpenScreen(AppScreen.StockCount) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Adjust Counts")
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { onMobSelected(mob.id); onOpenScreen(AppScreen.TransferMob) }, modifier = Modifier.weight(1f)) {
-                    Text("Transfer")
-                }
-                OutlinedButton(
-                    onClick = { onStartTaskForEntity("mob", mob.id, "Check ${mob.name}") },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Task")
-                }
+            OutlinedButton(
+                onClick = { onMobSelected(mob.id); onOpenScreen(AppScreen.MoveMob) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Move Mob")
             }
-            SectionDivider()
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { onMobSelected(mob.id); onOpenScreen(AppScreen.TransferMob) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Transfer Stock")
+            }
+            OutlinedButton(
+                onClick = { onStartTaskForEntity("mob", mob.id, "Check ${mob.name}") },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Create Linked Task")
+            }
         }
     }
 }
@@ -2076,7 +2160,6 @@ private fun PaddocksScreen(
     onBackHome: () -> Unit,
     onPaddockSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
-    onStartTaskForEntity: (String, String, String) -> Unit,
 ) {
     FormScaffold("Paddocks", onBackHome) {
         val snapshot = state.snapshot ?: return@FormScaffold
@@ -2089,41 +2172,87 @@ private fun PaddocksScreen(
         filteredPaddocks.forEach { paddock ->
             val grazing = snapshot.grazingByPaddock.firstOrNull { it.paddockId == paddock.id }
             val water = snapshot.waterAssets.filter { it.locationPaddockId == paddock.id || paddock.id in it.servedPaddockIds }
-            EntityCard(
+            ClickableEntityCard(
                 title = "${paddock.name} | ${paddock.status}",
                 detail = "Expected stock: ${grazing?.totalHead ?: 0.0}; Water links: ${water.size}; Tags: ${paddock.tagLabel.ifBlank { "none" }}",
+            ) {
+                onPaddockSelected(paddock.id)
+                onOpenScreen(AppScreen.PaddockDetail)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaddockDetailScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onPaddockSelected: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onStartTaskForEntity: (String, String, String) -> Unit,
+) {
+    FormScaffold("Paddock Detail", onBackToList) {
+        val snapshot = state.snapshot ?: return@FormScaffold
+        val paddock = selectedPaddock(state) ?: return@FormScaffold
+        val grazing = paddockGrazing(snapshot, paddock.id)
+        val feature = paddockMapFeature(snapshot, paddock.id)
+        val water = paddockWaterAvailability(snapshot, paddock.id)
+        EntityCard(
+            title = "${paddock.name} | ${paddock.status}",
+            detail = "Expected stock: ${grazing?.totalHead ?: 0.0}; Water links: ${water.assets.size}; Tags: ${paddock.tagLabel.ifBlank { "none" }}",
+        )
+        paddock.notes?.takeIf { it.isNotBlank() }?.let { Text(it, color = Color(0xFF516052)) }
+        SectionCard("Pressure") {
+            MetricRows(
+                listOf(
+                    "Pressure" to (feature?.grazingPressureRatio?.let { "${"%.0f".format(it * 100.0)}%" } ?: "unknown"),
+                    "Current LSU" to (feature?.currentLsu?.let(::formatHeadCount) ?: "-"),
+                    "Ha/current LSU" to (feature?.hectaresPerCurrentLsu?.let { "%.2f".format(it) } ?: "-"),
+                )
             )
-            if (grazing?.groupHeads?.isNotEmpty() == true) {
-                Text("Stock in paddock", fontWeight = FontWeight.SemiBold)
-                grazing.groupHeads.forEach { group ->
-                    Text(
-                        "${formatHeadCount(group.head)} ${group.animalGroupType.label}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF516052),
-                    )
-                }
-            } else if (grazing?.speciesHeads?.isNotEmpty() == true) {
-                Text("Stock in paddock", fontWeight = FontWeight.SemiBold)
-                grazing.speciesHeads.forEach { species ->
-                    Text("${species.species}: ${formatHeadCount(species.head)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
-                }
-            } else {
-                Text("Stock in paddock: none", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+        }
+        SectionCard("Water Availability") {
+            water.alertMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                Text("${water.alertLevel ?: "alert"}: $message", color = Color(0xFF7A3424))
             }
-            grazing?.mobs.orEmpty().forEach { mob -> Text("${mob.mobName}: ${mob.allocationPct}%") }
+            if (water.assets.isEmpty()) {
+                Text("No linked water assets", color = Color(0xFF516052))
+            }
+            water.assets.forEach { asset ->
+                EntityCard(
+                    title = asset.name,
+                    detail = "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevel ?: "unknown"}",
+                )
+            }
+        }
+        SectionCard("Stock In Paddock") {
+            val stockLines = paddockStockLines(grazing)
+            if (stockLines.isEmpty()) {
+                Text("No stock recorded in this paddock", color = Color(0xFF516052))
+            }
+            stockLines.forEach { line ->
+                Text("${formatHeadCount(line.head)} ${line.label}", style = MaterialTheme.typography.bodySmall)
+            }
+            grazing?.mobs.orEmpty().forEach { mob ->
+                Text("${mob.mobName}: ${mob.allocationPct}% allocation", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+        }
+        SectionCard("Linked Tasks") {
             RelatedTasks(snapshot.tasks, "paddock", paddock.id)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { onPaddockSelected(paddock.id); onOpenScreen(AppScreen.PaddockEdit) }, modifier = Modifier.weight(1f)) {
-                    Text("Edit")
-                }
-                OutlinedButton(
-                    onClick = { onStartTaskForEntity("paddock", paddock.id, "Inspect ${paddock.name}") },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Task")
-                }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { onPaddockSelected(paddock.id); onOpenScreen(AppScreen.PaddockEdit) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Edit Paddock")
             }
-            SectionDivider()
+            OutlinedButton(
+                onClick = { onStartTaskForEntity("paddock", paddock.id, "Inspect ${paddock.name}") },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Create Linked Task")
+            }
         }
     }
 }
@@ -2134,7 +2263,6 @@ private fun WaterAssetsScreen(
     onBackHome: () -> Unit,
     onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
-    onStartTaskForEntity: (String, String, String) -> Unit,
 ) {
     FormScaffold("Water Assets", onBackHome) {
         val snapshot = state.snapshot ?: return@FormScaffold
@@ -2145,24 +2273,66 @@ private fun WaterAssetsScreen(
             EntityCard("No water assets", "No water assets match the current filters.")
         }
         filteredAssets.forEach { asset ->
-            EntityCard(
+            ClickableEntityCard(
                 title = asset.name,
                 detail = "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevel ?: "unknown"}",
-            )
-            asset.networkWarning?.let { Text(it, color = Color(0xFF7A3424)) }
-            RelatedTasks(snapshot.tasks, "water_asset", asset.id)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { onWaterAssetSelected(asset.id); onOpenScreen(AppScreen.WaterEdit) }, modifier = Modifier.weight(1f)) {
-                    Text("Update")
-                }
-                OutlinedButton(
-                    onClick = { onStartTaskForEntity("water_asset", asset.id, "Check ${asset.name}") },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Task")
-                }
+            ) {
+                onWaterAssetSelected(asset.id)
+                onOpenScreen(AppScreen.WaterAssetDetail)
             }
-            SectionDivider()
+        }
+    }
+}
+
+@Composable
+private fun WaterAssetDetailScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onWaterAssetSelected: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onStartTaskForEntity: (String, String, String) -> Unit,
+) {
+    FormScaffold("Water Asset Detail", onBackToList) {
+        val snapshot = state.snapshot ?: return@FormScaffold
+        val asset = selectedWaterAsset(state) ?: return@FormScaffold
+        EntityCard(asset.name, "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevel ?: "unknown"}")
+        MetricRows(
+            listOf(
+                "Type" to asset.assetTypeLabel,
+                "Active" to if (asset.active) "Yes" else "No",
+                "Status" to (asset.status ?: "unknown"),
+                "Water level" to (asset.waterLevel ?: "unknown"),
+                "Location" to (asset.locationPaddockName ?: asset.locationPaddockId ?: "Unlocated"),
+            )
+        )
+        SectionCard("Served Paddocks") {
+            val servedNames = servedPaddockNames(snapshot, asset)
+            if (servedNames.isEmpty()) {
+                Text("No served paddocks listed", color = Color(0xFF516052))
+            }
+            servedNames.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+        asset.networkWarning?.takeIf { it.isNotBlank() }?.let { warning ->
+            SectionCard("Network Warning") {
+                Text(warning, color = Color(0xFF7A3424))
+            }
+        }
+        SectionCard("Linked Tasks") {
+            RelatedTasks(snapshot.tasks, "water_asset", asset.id)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { onWaterAssetSelected(asset.id); onOpenScreen(AppScreen.WaterEdit) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Update Water")
+            }
+            OutlinedButton(
+                onClick = { onStartTaskForEntity("water_asset", asset.id, "Check ${asset.name}") },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Create Linked Task")
+            }
         }
     }
 }
@@ -2569,6 +2739,25 @@ private fun EntityCard(title: String, detail: String) {
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            if (detail.isNotBlank()) {
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClickableEntityCard(title: String, detail: String, onClick: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
     ) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold)
