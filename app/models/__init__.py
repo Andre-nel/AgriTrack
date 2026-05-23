@@ -14,6 +14,7 @@ from app.models.snapshot import DailyStockSnapshot
 from app.models.stock_ledger import StockLedgerEntry
 from app.models.task import (
     Task,
+    TaskAttachment,
     TaskComment,
     TaskEntityLink,
     TaskLink,
@@ -48,6 +49,7 @@ __all__ = [
     "RainfallRecord",
     "StockLedgerEntry",
     "Task",
+    "TaskAttachment",
     "TaskComment",
     "TaskEntityLink",
     "TaskLink",

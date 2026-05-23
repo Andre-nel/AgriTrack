@@ -2,6 +2,7 @@ package com.agritrack.mobile.data
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStream
@@ -13,6 +14,8 @@ import java.nio.charset.StandardCharsets
 
 class MobileApiClient(baseUrl: String) {
     private val baseUrl: String = trimTrailingSlash(baseUrl)
+
+    fun ping(token: String): JSONObject = request("GET", "/api/mobile/v1/ping", token, null)
 
     fun login(email: String, password: String, deviceName: String): JSONObject {
         val body = JSONObject()
@@ -32,6 +35,49 @@ class MobileApiClient(baseUrl: String) {
     fun syncCommands(token: String, commands: JSONArray): JSONObject {
         val body = JSONObject().put("commands", commands)
         return request("POST", "/api/mobile/v1/sync/commands", token, body)
+    }
+
+    fun uploadTaskAttachment(token: String, photo: TaskPhotoOutboxItem): JSONObject {
+        val file = File(photo.filePath)
+        if (!file.exists()) {
+            throw IOException("Photo file is missing")
+        }
+
+        val boundary = "AgriTrackBoundary${System.currentTimeMillis()}"
+        val connection = URL(
+            "$baseUrl/api/mobile/v1/farms/${photo.farmId}/tasks/${photo.serverTaskId}/attachments"
+        ).openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 30_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Authorization", "Bearer $token")
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            connection.outputStream.use { output ->
+                writePart(output, boundary, "client_attachment_id", photo.clientAttachmentId)
+                photo.caption?.takeIf { it.isNotBlank() }?.let {
+                    writePart(output, boundary, "caption", it)
+                }
+                photo.capturedAt?.takeIf { it.isNotBlank() }?.let {
+                    writePart(output, boundary, "captured_at", it)
+                }
+                writeFilePart(output, boundary, "file", file, photo.originalFilename, photo.contentType)
+                output.write("--$boundary--\r\n".toByteArray(StandardCharsets.UTF_8))
+            }
+            val status = connection.responseCode
+            val responseBody = readBody(if (status >= 400) connection.errorStream else connection.inputStream)
+            val response = if (responseBody.isBlank()) JSONObject() else JSONObject(responseBody)
+            if (status >= 400) {
+                val message = response.optJSONObject("error")?.optString("message")
+                    ?: "HTTP $status"
+                throw IOException(message)
+            }
+            return response
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun request(method: String, path: String, token: String?, body: JSONObject?): JSONObject {
@@ -85,6 +131,32 @@ class MobileApiClient(baseUrl: String) {
             }
         }
         return builder.toString()
+    }
+
+    private fun writePart(output: OutputStream, boundary: String, name: String, value: String) {
+        output.write("--$boundary\r\n".toByteArray(StandardCharsets.UTF_8))
+        output.write("Content-Disposition: form-data; name=\"$name\"\r\n\r\n".toByteArray(StandardCharsets.UTF_8))
+        output.write(value.toByteArray(StandardCharsets.UTF_8))
+        output.write("\r\n".toByteArray(StandardCharsets.UTF_8))
+    }
+
+    private fun writeFilePart(
+        output: OutputStream,
+        boundary: String,
+        name: String,
+        file: File,
+        filename: String,
+        contentType: String,
+    ) {
+        output.write("--$boundary\r\n".toByteArray(StandardCharsets.UTF_8))
+        output.write(
+            (
+                "Content-Disposition: form-data; name=\"$name\"; filename=\"$filename\"\r\n" +
+                    "Content-Type: $contentType\r\n\r\n"
+                ).toByteArray(StandardCharsets.UTF_8)
+        )
+        file.inputStream().use { input -> input.copyTo(output) }
+        output.write("\r\n".toByteArray(StandardCharsets.UTF_8))
     }
 
     private fun trimTrailingSlash(value: String?): String {

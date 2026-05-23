@@ -175,6 +175,28 @@
   </ul>
 </section>
 
+<section class="card">
+  <h2>Attachments</h2>
+  <div class="task-attachment-grid">
+    {% for attachment in attachment_rows %}
+    <article class="task-attachment-card">
+      <a href="{{ attachment.url }}" target="_blank" rel="noopener">
+        <img src="{{ attachment.url }}" alt="{{ attachment.caption or attachment.original_filename }}" />
+      </a>
+      <div>
+        <strong>{{ attachment.original_filename }}</strong>
+        <p class="muted">{{ attachment.content_type }} | {{ attachment.byte_size }} bytes | {{ attachment.created_at }}</p>
+        {% if attachment.caption %}
+        <p class="text-body">{{ attachment.caption }}</p>
+        {% endif %}
+      </div>
+    </article>
+    {% else %}
+    <div class="task-empty-state">No task photos or attachments yet.</div>
+    {% endfor %}
+  </div>
+</section>
+
 <section class="split">
   <article class="card">
     <h2>Links</h2>

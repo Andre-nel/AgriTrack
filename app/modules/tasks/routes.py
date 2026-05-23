@@ -1,6 +1,7 @@
 from collections import defaultdict
+from pathlib import Path
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, send_file, url_for
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy import inspect as sa_inspect
@@ -12,6 +13,7 @@ from app.models import (
     Mob,
     Paddock,
     Task,
+    TaskAttachment,
     TaskComment,
     TaskEntityLink,
     TaskLink,
@@ -178,6 +180,34 @@ def _build_comment_rows(comments, tz_name: str):
     ]
 
 
+def _attachment_file_url(task: Task, attachment: TaskAttachment) -> str:
+    return url_for(
+        "tasks.task_attachment_file",
+        task_id=task.id,
+        attachment_id=attachment.id,
+    )
+
+
+def _build_attachment_rows(task: Task, attachments: list[TaskAttachment], tz_name: str) -> list[dict]:
+    rows = []
+    for attachment in attachments:
+        rows.append(
+            {
+                "id": str(attachment.id),
+                "original_filename": attachment.original_filename,
+                "content_type": attachment.content_type,
+                "byte_size": attachment.byte_size,
+                "caption": attachment.caption,
+                "captured_at": TaskService.format_local_datetime(attachment.captured_at, tz_name)
+                if attachment.captured_at
+                else None,
+                "created_at": TaskService.format_local_datetime(attachment.created_at, tz_name),
+                "url": _attachment_file_url(task, attachment),
+            }
+        )
+    return rows
+
+
 def _build_task_card(task: Task, tz_name: str) -> dict:
     return {
         "id": task.id,
@@ -237,6 +267,14 @@ def _load_task(task_id: str) -> Task:
         .filter_by(id=task_id)
         .first_or_404()
     )
+
+
+def _attachment_absolute_path(attachment: TaskAttachment) -> Path:
+    root = Path(current_app.instance_path).resolve()
+    target = (root / attachment.storage_path).resolve()
+    if not target.is_relative_to(root):
+        raise FileNotFoundError(attachment.storage_path)
+    return target
 
 
 def _load_optional_activity(activity_id: str | None) -> CalendarActivity | None:
@@ -635,6 +673,11 @@ def task_detail(task_id: str):
         .order_by(TaskComment.created_at.desc(), TaskComment.id.desc())
         .all()
     )
+    attachments = (
+        TaskAttachment.query.filter_by(task_id=task.id)
+        .order_by(TaskAttachment.created_at.desc(), TaskAttachment.id.desc())
+        .all()
+    )
     links = (
         TaskLink.query.filter((TaskLink.source_task_id == task.id) | (TaskLink.target_task_id == task.id))
         .order_by(TaskLink.created_at.desc(), TaskLink.id.desc())
@@ -665,6 +708,7 @@ def task_detail(task_id: str):
             for transition in transitions
         ],
         comment_rows=_build_comment_rows(comments, tz_name),
+        attachment_rows=_build_attachment_rows(task, attachments, tz_name),
         link_rows=_build_link_rows(links, current_task=task),
         entity_link_rows=_build_entity_link_rows(entity_links),
         entity_linking_available=_entity_tables_available(),
@@ -676,6 +720,21 @@ def task_detail(task_id: str):
         link_type_options=TASK_LINK_TYPES,
         link_type_labels=TASK_LINK_TYPE_LABELS,
         available_spaces=TaskSpace.query.order_by(TaskSpace.key).all(),
+    )
+
+
+@bp.get("/tasks/<task_id>/attachments/<attachment_id>")
+def task_attachment_file(task_id: str, attachment_id: str):
+    task = _load_task(task_id)
+    attachment = TaskAttachment.query.filter_by(id=attachment_id, task_id=task.id).first_or_404()
+    target = _attachment_absolute_path(attachment)
+    if not target.exists():
+        return ("Attachment file not found", 404)
+    return send_file(
+        target,
+        mimetype=attachment.content_type,
+        as_attachment=False,
+        download_name=attachment.original_filename,
     )
 
 

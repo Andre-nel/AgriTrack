@@ -106,6 +106,24 @@ Response:
 }
 ```
 
+### Ping
+
+`GET /api/mobile/v1/ping`
+
+Use this authenticated endpoint for the mobile connection badge. A successful
+response means the backend is reachable and the stored bearer token is accepted.
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "server_time": "2026-05-18T10:00:00+00:00",
+  "user": {},
+  "farms": []
+}
+```
+
 ## Bootstrap
 
 `GET /api/mobile/v1/bootstrap`
@@ -135,6 +153,13 @@ Important response fields:
       "water_asset_status.update"
     ],
     "max_commands_per_request": 100
+  },
+  "form_options": {
+    "task_statuses": [],
+    "task_priorities": [],
+    "water_status_options_by_type": {},
+    "water_level_asset_types": [],
+    "water_level_options": []
   }
 }
 ```
@@ -183,6 +208,38 @@ snapshot also includes a cached `map_features` summary for offline use.
 `GET /api/mobile/v1/map-data`
 
 Returns a combined feature collection for all farms assigned to the mobile user.
+
+### Task Photo Attachments
+
+`POST /api/mobile/v1/farms/<farm_id>/tasks/<task_id>/attachments`
+
+Uploads a task photo as multipart form data. Required fields are
+`client_attachment_id` and `file`; optional fields are `caption`, `captured_at`,
+and `sha256`. Uploads are idempotent for each mobile user and
+`client_attachment_id`.
+
+Successful responses include:
+
+```json
+{
+  "duplicate": false,
+  "attachment": {
+    "id": "attachment-id",
+    "task_id": "task-id",
+    "client_attachment_id": "device-photo-id",
+    "original_filename": "trough.jpg",
+    "content_type": "image/jpeg",
+    "byte_size": 12345,
+    "sha256": "hex-digest",
+    "caption": "North trough",
+    "captured_at": "2026-05-18T10:00:00+00:00",
+    "created_at": "2026-05-18T10:00:02+00:00"
+  }
+}
+```
+
+Task objects in snapshots include `attachment_count` and a lightweight
+`attachments` array.
 
 ## Offline Sync Commands
 

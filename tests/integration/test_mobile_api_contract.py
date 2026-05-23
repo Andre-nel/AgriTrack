@@ -42,6 +42,7 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
 
     assert response.status_code == 200
     command_types = response.get_json()["sync"]["supported_command_types"]
+    form_options = response.get_json()["form_options"]
     assert command_types == [
         "rainfall.create",
         "mob_event.create",
@@ -56,6 +57,11 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
     ]
     for command_type in command_types:
         assert command_type in docs
+    assert "task_statuses" in form_options
+    assert "task_priorities" in form_options
+    assert "water_status_options_by_type" in form_options
+    assert "water_level_asset_types" in form_options
+    assert "water_level_options" in form_options
 
 
 def test_mobile_api_error_shape_matches_documentation(client):

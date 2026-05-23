@@ -52,6 +52,11 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         cascade="all, delete-orphan",
     )
     comments = db.relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")
+    attachments = db.relationship(
+        "TaskAttachment",
+        back_populates="task",
+        cascade="all, delete-orphan",
+    )
     entity_links = db.relationship("TaskEntityLink", back_populates="task", cascade="all, delete-orphan")
     outgoing_links = db.relationship(
         "TaskLink",
@@ -95,6 +100,33 @@ class TaskComment(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     body = db.Column(db.Text, nullable=False)
 
     task = db.relationship("Task", back_populates="comments")
+
+
+class TaskAttachment(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "task_attachments"
+
+    task_id = db.Column(db.String(36), db.ForeignKey("tasks.id"), nullable=False, index=True)
+    uploaded_by_user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    client_attachment_id = db.Column(db.String(120), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    content_type = db.Column(db.String(120), nullable=False)
+    byte_size = db.Column(db.Integer, nullable=False)
+    sha256 = db.Column(db.String(64), nullable=False)
+    caption = db.Column(db.Text)
+    captured_at = db.Column(db.DateTime(timezone=True))
+    storage_path = db.Column(db.String(500), nullable=False)
+
+    task = db.relationship("Task", back_populates="attachments")
+    uploaded_by = db.relationship("User")
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "uploaded_by_user_id",
+            "client_attachment_id",
+            name="uq_task_attachments_user_client_attachment",
+        ),
+        db.CheckConstraint("byte_size >= 0", name="ck_task_attachments_byte_size_non_negative"),
+    )
 
 
 class TaskEntityLink(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):

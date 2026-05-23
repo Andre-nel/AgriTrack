@@ -54,10 +54,16 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
         )
         db.execSQL("CREATE INDEX idx_entities_farm_type ON entities(farm_id, entity_type)")
         db.execSQL("CREATE INDEX idx_outbox_status ON outbox(status)")
+        createTaskPhotoOutbox(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            createTaskPhotoOutbox(db)
+            return
+        }
         db.execSQL("DROP TABLE IF EXISTS settings")
+        db.execSQL("DROP TABLE IF EXISTS task_photo_outbox")
         db.execSQL("DROP TABLE IF EXISTS outbox")
         db.execSQL("DROP TABLE IF EXISTS entities")
         db.execSQL("DROP TABLE IF EXISTS snapshots")
@@ -148,7 +154,7 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
         return array
     }
 
-    fun pendingCount(): Int = countOutbox("pending") + countOutbox("failed")
+    fun pendingCount(): Int = countOutbox("pending") + countOutbox("failed") + pendingTaskPhotoCount()
 
     fun failedCommands(limit: Int = 20): List<OutboxFailure> {
         val failures = mutableListOf<OutboxFailure>()
@@ -207,6 +213,134 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
         }
     }
 
+    fun resolveTaskPhotoTargets(results: JSONArray) {
+        writableDatabase.beginTransaction()
+        try {
+            for (index in 0 until results.length()) {
+                val result = results.getJSONObject(index)
+                if (result.optString("status") != "applied" || result.optString("type") != "task.create") {
+                    continue
+                }
+                val clientCommandId = result.optString("client_command_id")
+                val taskId = result.optJSONObject("response")
+                    ?.optJSONObject("task")
+                    ?.optString("id")
+                    .orEmpty()
+                if (clientCommandId.isBlank() || taskId.isBlank()) {
+                    continue
+                }
+                writableDatabase.update(
+                    "task_photo_outbox",
+                    ContentValues().apply { put("server_task_id", taskId) },
+                    "target_client_command_id = ? AND server_task_id IS NULL",
+                    arrayOf(clientCommandId),
+                )
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    fun enqueueTaskPhoto(
+        farmId: String,
+        serverTaskId: String?,
+        targetClientCommandId: String?,
+        filePath: String,
+        originalFilename: String,
+        contentType: String,
+        byteSize: Long,
+        caption: String?,
+        capturedAt: String?,
+    ): String {
+        val clientAttachmentId = java.util.UUID.randomUUID().toString()
+        writableDatabase.insert(
+            "task_photo_outbox",
+            null,
+            ContentValues().apply {
+                put("client_attachment_id", clientAttachmentId)
+                put("farm_id", farmId)
+                put("server_task_id", serverTaskId)
+                put("target_client_command_id", targetClientCommandId)
+                put("file_path", filePath)
+                put("original_filename", originalFilename)
+                put("content_type", contentType)
+                put("byte_size", byteSize)
+                put("caption", caption)
+                put("captured_at", capturedAt)
+                put("status", "pending")
+                put("created_at", System.currentTimeMillis())
+                put("retry_count", 0)
+            },
+        )
+        return clientAttachmentId
+    }
+
+    fun pendingTaskPhotos(limit: Int = 20): List<TaskPhotoOutboxItem> {
+        val photos = mutableListOf<TaskPhotoOutboxItem>()
+        readableDatabase.rawQuery(
+            """
+            SELECT client_attachment_id, farm_id, server_task_id, target_client_command_id,
+                   file_path, original_filename, content_type, byte_size, caption, captured_at,
+                   retry_count, last_error
+            FROM task_photo_outbox
+            WHERE status IN ('pending', 'failed') AND server_task_id IS NOT NULL
+            ORDER BY created_at ASC
+            LIMIT ?
+            """.trimIndent(),
+            arrayOf(limit.toString()),
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                photos.add(
+                    TaskPhotoOutboxItem(
+                        clientAttachmentId = cursor.getString(0),
+                        farmId = cursor.getString(1),
+                        serverTaskId = cursor.getString(2),
+                        targetClientCommandId = cursor.getString(3),
+                        filePath = cursor.getString(4),
+                        originalFilename = cursor.getString(5),
+                        contentType = cursor.getString(6),
+                        byteSize = cursor.getLong(7),
+                        caption = cursor.getString(8),
+                        capturedAt = cursor.getString(9),
+                        retryCount = cursor.getInt(10),
+                        lastError = cursor.getString(11),
+                    )
+                )
+            }
+        }
+        return photos
+    }
+
+    fun markTaskPhotoUploaded(clientAttachmentId: String) {
+        writableDatabase.delete(
+            "task_photo_outbox",
+            "client_attachment_id = ?",
+            arrayOf(clientAttachmentId),
+        )
+    }
+
+    fun markTaskPhotoFailed(clientAttachmentId: String, message: String) {
+        writableDatabase.update(
+            "task_photo_outbox",
+            ContentValues().apply {
+                put("status", "failed")
+                put("last_error", message)
+                put("retry_count", taskPhotoRetryCount(clientAttachmentId) + 1)
+            },
+            "client_attachment_id = ?",
+            arrayOf(clientAttachmentId),
+        )
+    }
+
+    fun pendingTaskPhotoCount(): Int =
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM task_photo_outbox WHERE status IN ('pending', 'failed')",
+            emptyArray(),
+        ).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+
     fun getSyncIntervalMinutes(): Int =
         getSetting("sync_interval_minutes")?.toIntOrNull()?.coerceAtLeast(1) ?: DEFAULT_SYNC_INTERVAL_MINUTES
 
@@ -263,6 +397,41 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
             if (cursor.moveToFirst()) cursor.getInt(0) else 0
         }
 
+    private fun taskPhotoRetryCount(clientAttachmentId: String): Int =
+        readableDatabase.rawQuery(
+            "SELECT retry_count FROM task_photo_outbox WHERE client_attachment_id = ?",
+            arrayOf(clientAttachmentId),
+        ).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+
+    private fun createTaskPhotoOutbox(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS task_photo_outbox (
+                client_attachment_id TEXT PRIMARY KEY,
+                farm_id TEXT NOT NULL,
+                server_task_id TEXT,
+                target_client_command_id TEXT,
+                file_path TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                byte_size INTEGER NOT NULL,
+                caption TEXT,
+                captured_at TEXT,
+                status TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_task_photo_outbox_status ON task_photo_outbox(status)")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_task_photo_outbox_target ON task_photo_outbox(target_client_command_id)"
+        )
+    }
+
     private fun retryCount(clientCommandId: String): Int =
         readableDatabase.rawQuery(
             "SELECT retry_count FROM outbox WHERE client_command_id = ?",
@@ -293,7 +462,7 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
 
     private companion object {
         const val DB_NAME = "agritrack_field_store.db"
-        const val DB_VERSION = 1
+        const val DB_VERSION = 2
         const val DEFAULT_SYNC_INTERVAL_MINUTES = 5
     }
 }
@@ -303,4 +472,19 @@ data class OutboxFailure(
     val type: String,
     val lastError: String?,
     val retryCount: Int,
+)
+
+data class TaskPhotoOutboxItem(
+    val clientAttachmentId: String,
+    val farmId: String,
+    val serverTaskId: String,
+    val targetClientCommandId: String?,
+    val filePath: String,
+    val originalFilename: String,
+    val contentType: String,
+    val byteSize: Long,
+    val caption: String?,
+    val capturedAt: String?,
+    val retryCount: Int,
+    val lastError: String?,
 )

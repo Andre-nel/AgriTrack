@@ -68,6 +68,19 @@ class MobileModelsTest {
                                 .put("heading", "Check water")
                                 .put("status", "todo")
                                 .put("status_label", "TO DO")
+                                .put("attachment_count", 1)
+                                .put(
+                                    "attachments",
+                                    JSONArray()
+                                        .put(
+                                            JSONObject()
+                                                .put("id", "attachment-1")
+                                                .put("client_attachment_id", "photo-1")
+                                                .put("original_filename", "trough.jpg")
+                                                .put("content_type", "image/jpeg")
+                                                .put("byte_size", 12)
+                                        )
+                                )
                                 .put(
                                     "entity_links",
                                     JSONArray()
@@ -102,6 +115,28 @@ class MobileModelsTest {
                                 .put("detail", "North trough is empty")
                         )
                 )
+                .put(
+                    "map_features",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("type", "Feature")
+                                .put(
+                                    "geometry",
+                                    JSONObject()
+                                        .put("type", "Point")
+                                        .put("coordinates", JSONArray().put(18.0).put(-34.0))
+                                )
+                                .put(
+                                    "properties",
+                                    JSONObject()
+                                        .put("feature_type", "paddock")
+                                        .put("name", "North Camp")
+                                        .put("paddock_id", "paddock-1")
+                                        .put("grazing_pressure_ratio", 0.42)
+                                )
+                        )
+                )
         )
 
         assertEquals("North Block", snapshot.farm.name)
@@ -114,16 +149,57 @@ class MobileModelsTest {
         assertEquals("Cattle Bonsmara cow adult", snapshot.mobs.first().balances.first().animalGroupType.label)
         assertEquals("OPS-1", snapshot.tasks.first().displayKey)
         assertEquals(true, snapshot.tasks.first().isLinkedTo("paddock", "paddock-1"))
+        assertEquals(1, snapshot.tasks.first().attachmentCount)
+        assertEquals("trough.jpg", snapshot.tasks.first().attachments.first().originalFilename)
+        assertEquals(0.42, snapshot.mapFeatures.first().grazingPressureRatio ?: 0.0, 0.0)
         assertEquals(1, snapshot.calendarItemCount)
         assertEquals(1, snapshot.decisionCount)
+    }
+
+    @Test
+    fun bootstrapParserKeepsFormOptions() {
+        val bootstrap = BootstrapResult.fromJson(
+            JSONObject()
+                .put("farms", JSONArray())
+                .put("animal_group_types", JSONArray())
+                .put(
+                    "sync",
+                    JSONObject().put("supported_command_types", JSONArray().put("task.create"))
+                )
+                .put(
+                    "form_options",
+                    JSONObject()
+                        .put(
+                            "task_statuses",
+                            JSONArray().put(JSONObject().put("value", "todo").put("label", "TO DO"))
+                        )
+                        .put(
+                            "water_status_options_by_type",
+                            JSONObject().put(
+                                "tank",
+                                JSONArray().put(JSONObject().put("value", "operational").put("label", "Operational"))
+                            )
+                        )
+                        .put("water_level_asset_types", JSONArray().put("tank"))
+                        .put(
+                            "water_level_options",
+                            JSONArray().put(JSONObject().put("value", "full").put("label", "Full"))
+                        )
+                )
+        )
+
+        assertEquals("task.create", bootstrap.supportedCommandTypes.first())
+        assertEquals("todo", bootstrap.formOptions.taskStatuses.first().value)
+        assertEquals("operational", bootstrap.formOptions.waterStatusOptionsByType["tank"]?.first()?.value)
+        assertEquals(true, "tank" in bootstrap.formOptions.waterLevelAssetTypes)
     }
 
     @Test
     fun syncSummaryCountsAppliedAndFailedResults() {
         val summary = SyncSummary(
             results = listOf(
-                SyncResult("rain-1", "rainfall.create", "applied", false, null),
-                SyncResult("note-1", "mob_event.create", "failed", false, "Mob not found"),
+                SyncResult("rain-1", "rainfall.create", "applied", false, null, null),
+                SyncResult("note-1", "mob_event.create", "failed", false, "Mob not found", null),
             ),
             remainingQueueCount = 1,
         )
@@ -131,5 +207,19 @@ class MobileModelsTest {
         assertEquals(1, summary.appliedCount)
         assertEquals(1, summary.failedCount)
         assertEquals(1, summary.remainingQueueCount)
+    }
+
+    @Test
+    fun syncResultKeepsResponsePayload() {
+        val result = SyncResult.fromJson(
+            JSONObject()
+                .put("client_command_id", "task-create-1")
+                .put("type", "task.create")
+                .put("status", "applied")
+                .put("duplicate", false)
+                .put("response", JSONObject().put("task", JSONObject().put("id", "task-1")))
+        )
+
+        assertEquals("task-1", result.response?.getJSONObject("task")?.getString("id"))
     }
 }

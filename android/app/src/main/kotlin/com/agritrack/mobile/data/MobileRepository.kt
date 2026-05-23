@@ -7,6 +7,12 @@ class MobileRepository(
 ) {
     fun loadCachedSnapshot(): FarmSnapshot? = fieldStore.loadLastSnapshot()
 
+    fun ping(): Boolean {
+        val token = tokenStore.load() ?: return false
+        apiClient.ping(token)
+        return true
+    }
+
     fun loginAndLoad(email: String, password: String, deviceName: String): LoginLoadResult {
         val login = apiClient.login(email.trim(), password, deviceName)
         val token = login.getString("token")
@@ -115,8 +121,10 @@ class MobileRepository(
         dueDate: String,
         entityType: String,
         entityId: String,
-    ) {
-        fieldStore.enqueue(MobileCommand.taskCreate(farmId, heading, description, dueDate, entityType, entityId))
+    ): String {
+        val command = MobileCommand.taskCreate(farmId, heading, description, dueDate, entityType, entityId)
+        fieldStore.enqueue(command)
+        return command.clientCommandId
     }
 
     fun queueTaskStatus(farmId: String, taskId: String, status: String, note: String) {
@@ -147,25 +155,56 @@ class MobileRepository(
         )
     }
 
+    fun queueTaskPhoto(
+        farmId: String,
+        serverTaskId: String?,
+        targetClientCommandId: String?,
+        filePath: String,
+        originalFilename: String,
+        contentType: String,
+        byteSize: Long,
+        caption: String?,
+        capturedAt: String?,
+    ) {
+        fieldStore.enqueueTaskPhoto(
+            farmId = farmId,
+            serverTaskId = serverTaskId,
+            targetClientCommandId = targetClientCommandId,
+            filePath = filePath,
+            originalFilename = originalFilename,
+            contentType = contentType,
+            byteSize = byteSize,
+            caption = caption,
+            capturedAt = capturedAt,
+        )
+    }
+
     fun syncQueuedCommands(refreshAfterSync: Boolean = true): SyncSummary {
         val token = tokenStore.load() ?: error("No stored token. Log in first.")
         val pending = fieldStore.pendingJson()
         if (pending.length() == 0) {
+            uploadPendingTaskPhotos(token)
             val snapshot = if (refreshAfterSync) {
                 runCatching { refreshLastSnapshot(token) }.getOrNull()
             } else {
                 null
             }
-            return SyncSummary(results = emptyList(), remainingQueueCount = 0, refreshedSnapshot = snapshot)
+            return SyncSummary(
+                results = emptyList(),
+                remainingQueueCount = fieldStore.pendingCount(),
+                refreshedSnapshot = snapshot,
+            )
         }
         val response = apiClient.syncCommands(token, pending)
         val resultsJson = response.getJSONArray("results")
         fieldStore.applySyncResults(resultsJson)
+        fieldStore.resolveTaskPhotoTargets(resultsJson)
         val results = buildList {
             for (index in 0 until resultsJson.length()) {
                 add(SyncResult.fromJson(resultsJson.getJSONObject(index)))
             }
         }
+        uploadPendingTaskPhotos(token)
         val refreshed = if (refreshAfterSync && results.any { it.status == "applied" }) {
             runCatching { refreshLastSnapshot(token) }.getOrNull()
         } else {
@@ -200,6 +239,17 @@ class MobileRepository(
     private fun refreshLastSnapshot(token: String): FarmSnapshot {
         val farmId = fieldStore.loadLastSnapshot()?.farm?.id ?: error("No cached farm to refresh.")
         return refreshSnapshot(farmId, token)
+    }
+
+    private fun uploadPendingTaskPhotos(token: String) {
+        fieldStore.pendingTaskPhotos().forEach { photo ->
+            val error = runCatching { apiClient.uploadTaskAttachment(token, photo) }.exceptionOrNull()
+            if (error == null) {
+                fieldStore.markTaskPhotoUploaded(photo.clientAttachmentId)
+            } else {
+                fieldStore.markTaskPhotoFailed(photo.clientAttachmentId, error.message ?: "Photo upload failed")
+            }
+        }
     }
 }
 

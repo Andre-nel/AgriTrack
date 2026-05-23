@@ -1,4 +1,5 @@
 import hashlib
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
 
 from app.extensions import db
@@ -16,6 +17,7 @@ from app.models import (
     Paddock,
     RainfallRecord,
     Task,
+    TaskAttachment,
     TaskComment,
     TaskEntityLink,
     TaskSpace,
@@ -80,6 +82,11 @@ def test_mobile_login_bootstrap_logout_and_revocation(client, app):
     bootstrap_response = client.get("/api/mobile/v1/bootstrap", headers=_auth(token))
     assert bootstrap_response.status_code == 200
     assert bootstrap_response.get_json()["user"]["email"] == "mobile@example.com"
+    assert "form_options" in bootstrap_response.get_json()
+
+    ping_response = client.get("/api/mobile/v1/ping", headers=_auth(token))
+    assert ping_response.status_code == 200
+    assert ping_response.get_json()["status"] == "ok"
 
     logout_response = client.post("/api/mobile/v1/auth/logout", headers=_auth(token))
     assert logout_response.status_code == 200
@@ -265,6 +272,85 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert payload["calendar_items"][0]["title"] in {"Check north trough", "Weekly water run"}
     assert "decision_feed" in payload
     assert "map_features" in payload
+
+
+def test_mobile_task_attachment_upload_is_idempotent_and_visible_in_snapshot(client, app):
+    with app.app_context():
+        farm = Farm(name="Attachment Mobile Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        space = TaskSpace(
+            farm_id=farm.id,
+            key="PHOTO",
+            name="Photo Tasks",
+            description="Mobile photo task space",
+        )
+        db.session.add(space)
+        db.session.flush()
+        task = TaskService.create_task(
+            space=space,
+            heading="Photograph trough",
+            description="Attach a current water photo.",
+            raw_tags="water",
+            reporter_name="Mobile User",
+            assignee_name=None,
+            status="todo",
+            priority="high",
+            original_estimate_days=None,
+            due_date=None,
+        )
+        farm_id = str(farm.id)
+        task_id = str(task.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.post(
+        f"/api/mobile/v1/farms/{farm_id}/tasks/{task_id}/attachments",
+        headers=_auth(token),
+        data={
+            "client_attachment_id": "photo-1",
+            "caption": "North trough before repair",
+            "file": (BytesIO(b"fake jpeg bytes"), "trough.jpg", "image/jpeg"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["duplicate"] is False
+    attachment_id = payload["attachment"]["id"]
+
+    duplicate = client.post(
+        f"/api/mobile/v1/farms/{farm_id}/tasks/{task_id}/attachments",
+        headers=_auth(token),
+        data={
+            "client_attachment_id": "photo-1",
+            "caption": "Duplicate upload",
+            "file": (BytesIO(b"other bytes"), "duplicate.jpg", "image/jpeg"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert duplicate.status_code == 200
+    assert duplicate.get_json()["duplicate"] is True
+    assert duplicate.get_json()["attachment"]["id"] == attachment_id
+
+    snapshot = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+    assert snapshot.status_code == 200
+    task_payload = snapshot.get_json()["tasks"][0]
+    assert task_payload["attachment_count"] == 1
+    assert task_payload["attachments"][0]["caption"] == "North trough before repair"
+
+    file_response = client.get(
+        f"/api/mobile/v1/farms/{farm_id}/tasks/{task_id}/attachments/{attachment_id}",
+        headers=_auth(token),
+    )
+    assert file_response.status_code == 200
+    assert file_response.data == b"fake jpeg bytes"
+
+    with app.app_context():
+        assert TaskAttachment.query.filter_by(task_id=task_id).count() == 1
 
 
 def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, app):

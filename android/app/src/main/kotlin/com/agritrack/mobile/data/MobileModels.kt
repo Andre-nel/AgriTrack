@@ -110,6 +110,16 @@ data class TaskEntityLinkSummary(
     val entityName: String?,
 )
 
+data class TaskAttachmentSummary(
+    val id: String,
+    val clientAttachmentId: String,
+    val originalFilename: String,
+    val contentType: String,
+    val byteSize: Int,
+    val caption: String?,
+    val capturedAt: String?,
+)
+
 data class TaskSummary(
     val id: String,
     val displayKey: String,
@@ -120,6 +130,8 @@ data class TaskSummary(
     val priority: String,
     val dueDate: String?,
     val entityLinks: List<TaskEntityLinkSummary>,
+    val attachmentCount: Int,
+    val attachments: List<TaskAttachmentSummary>,
 ) {
     fun isLinkedTo(entityType: String, entityId: String): Boolean =
         entityLinks.any { it.entityType == entityType && it.entityId == entityId }
@@ -145,10 +157,19 @@ data class DecisionItemSummary(
 data class MapFeatureSummary(
     val featureType: String,
     val name: String,
+    val farmId: String?,
+    val farmName: String?,
     val paddockId: String?,
     val waterAssetId: String?,
     val waterAlertLevel: String?,
     val waterAlertMessage: String?,
+    val grazingPressureRatio: Double?,
+    val currentLsu: Double?,
+    val hectaresPerCurrentLsu: Double?,
+    val mobs: List<PaddockMobSummary>,
+    val geometryType: String,
+    val geometryJson: String,
+    val propertiesJson: String,
 )
 
 data class FarmSnapshot(
@@ -363,6 +384,7 @@ data class FarmSnapshot(
             for (index in 0 until json.length()) {
                 val task = json.getJSONObject(index)
                 val linksJson = task.optJSONArray("entity_links") ?: JSONArray()
+                val attachmentsJson = task.optJSONArray("attachments") ?: JSONArray()
                 add(
                     TaskSummary(
                         id = task.optString("id"),
@@ -383,6 +405,23 @@ data class FarmSnapshot(
                                         entityType = link.optString("entity_type"),
                                         entityId = link.optString("entity_id"),
                                         entityName = link.optNullableString("entity_name"),
+                                    )
+                                )
+                            }
+                        },
+                        attachmentCount = task.optInt("attachment_count", attachmentsJson.length()),
+                        attachments = buildList {
+                            for (attachmentIndex in 0 until attachmentsJson.length()) {
+                                val attachment = attachmentsJson.getJSONObject(attachmentIndex)
+                                add(
+                                    TaskAttachmentSummary(
+                                        id = attachment.optString("id"),
+                                        clientAttachmentId = attachment.optString("client_attachment_id"),
+                                        originalFilename = attachment.optString("original_filename", "photo"),
+                                        contentType = attachment.optString("content_type", "image/jpeg"),
+                                        byteSize = attachment.optInt("byte_size", 0),
+                                        caption = attachment.optNullableString("caption"),
+                                        capturedAt = attachment.optNullableString("captured_at"),
                                     )
                                 )
                             }
@@ -427,14 +466,36 @@ data class FarmSnapshot(
             for (index in 0 until json.length()) {
                 val feature = json.getJSONObject(index)
                 val properties = feature.optJSONObject("properties") ?: JSONObject()
+                val geometry = feature.optJSONObject("geometry") ?: JSONObject()
+                val mobsJson = properties.optJSONArray("mobs") ?: JSONArray()
                 add(
                     MapFeatureSummary(
                         featureType = properties.optString("feature_type", "feature"),
                         name = properties.optString("name", "Map feature"),
+                        farmId = properties.optNullableString("farm_id"),
+                        farmName = properties.optNullableString("farm_name"),
                         paddockId = properties.optNullableString("paddock_id"),
                         waterAssetId = properties.optNullableString("id"),
                         waterAlertLevel = properties.optNullableString("water_alert_level"),
                         waterAlertMessage = properties.optNullableString("water_alert_message"),
+                        grazingPressureRatio = properties.optNullableDouble("grazing_pressure_ratio"),
+                        currentLsu = properties.optNullableDouble("current_lsu"),
+                        hectaresPerCurrentLsu = properties.optNullableDouble("paddock_ha_per_current_lsu"),
+                        mobs = buildList {
+                            for (mobIndex in 0 until mobsJson.length()) {
+                                val mob = mobsJson.getJSONObject(mobIndex)
+                                add(
+                                    PaddockMobSummary(
+                                        mobId = mob.optString("mob_id"),
+                                        mobName = mob.optString("mob_name", "Mob"),
+                                        allocationPct = mob.optDouble("allocation_pct", 100.0),
+                                    )
+                                )
+                            }
+                        },
+                        geometryType = geometry.optString("type"),
+                        geometryJson = geometry.toString(),
+                        propertiesJson = properties.toString(),
                     )
                 )
             }
@@ -446,6 +507,7 @@ data class BootstrapResult(
     val farms: List<FarmSummary>,
     val animalGroupTypes: List<AnimalGroupTypeSummary>,
     val supportedCommandTypes: List<String>,
+    val formOptions: MobileFormOptions = MobileFormOptions(),
 ) {
     companion object {
         fun fromJson(json: JSONObject): BootstrapResult {
@@ -476,7 +538,50 @@ data class BootstrapResult(
                 farms = farms,
                 animalGroupTypes = groupTypes,
                 supportedCommandTypes = supported.strings(),
+                formOptions = MobileFormOptions.fromJson(json.optJSONObject("form_options") ?: JSONObject()),
             )
+        }
+    }
+}
+
+data class MobileOption(
+    val value: String,
+    val label: String,
+)
+
+data class MobileFormOptions(
+    val taskStatuses: List<MobileOption> = emptyList(),
+    val taskPriorities: List<MobileOption> = emptyList(),
+    val waterStatusOptionsByType: Map<String, List<MobileOption>> = emptyMap(),
+    val waterLevelAssetTypes: Set<String> = emptySet(),
+    val waterLevelOptions: List<MobileOption> = emptyList(),
+) {
+    companion object {
+        fun fromJson(json: JSONObject): MobileFormOptions {
+            val waterStatusJson = json.optJSONObject("water_status_options_by_type") ?: JSONObject()
+            val waterStatus = linkedMapOf<String, List<MobileOption>>()
+            val keys = waterStatusJson.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                waterStatus[key] = parseOptions(waterStatusJson.optJSONArray(key) ?: JSONArray())
+            }
+            return MobileFormOptions(
+                taskStatuses = parseOptions(json.optJSONArray("task_statuses") ?: JSONArray()),
+                taskPriorities = parseOptions(json.optJSONArray("task_priorities") ?: JSONArray()),
+                waterStatusOptionsByType = waterStatus,
+                waterLevelAssetTypes = json.optJSONArray("water_level_asset_types").strings().toSet(),
+                waterLevelOptions = parseOptions(json.optJSONArray("water_level_options") ?: JSONArray()),
+            )
+        }
+
+        private fun parseOptions(json: JSONArray): List<MobileOption> = buildList {
+            for (index in 0 until json.length()) {
+                val item = json.getJSONObject(index)
+                val value = item.optString("value")
+                if (value.isNotBlank()) {
+                    add(MobileOption(value = value, label = item.optString("label", value)))
+                }
+            }
         }
     }
 }
@@ -487,6 +592,7 @@ data class SyncResult(
     val status: String,
     val duplicate: Boolean,
     val errorMessage: String?,
+    val response: JSONObject?,
 ) {
     companion object {
         fun fromJson(json: JSONObject): SyncResult {
@@ -497,6 +603,7 @@ data class SyncResult(
                 status = json.optString("status"),
                 duplicate = json.optBoolean("duplicate", false),
                 errorMessage = error?.optString("message"),
+                response = json.optJSONObject("response"),
             )
         }
     }
@@ -541,3 +648,9 @@ private fun JSONArray?.strings(): List<String> {
 
 private fun JSONObject.optNullableString(name: String): String? =
     if (isNull(name)) null else optString(name).takeIf { it.isNotBlank() }
+
+private fun JSONObject.optNullableDouble(name: String): Double? {
+    if (isNull(name)) return null
+    val value = optDouble(name, Double.NaN)
+    return if (value.isNaN()) null else value
+}

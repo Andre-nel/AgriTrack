@@ -1257,6 +1257,33 @@ a { color: #1b5f49; }
   white-space: pre-wrap;
 }
 
+.task-attachment-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.task-attachment-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfa;
+  overflow: hidden;
+}
+
+.task-attachment-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #eef3ea;
+}
+
+.task-attachment-card div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+}
+
 .task-card-link {
   margin-top: 0.35rem;
 }

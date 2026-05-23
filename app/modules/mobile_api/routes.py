@@ -2,10 +2,12 @@ import hashlib
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request, send_file
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
+from werkzeug.utils import secure_filename
 
 from app.extensions import db
 from app.models import (
@@ -21,6 +23,7 @@ from app.models import (
     Paddock,
     RainfallRecord,
     Task,
+    TaskAttachment,
     TaskComment,
     TaskEntityLink,
     TaskSpace,
@@ -34,13 +37,22 @@ from app.services.calendar_service import CalendarService
 from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
 from app.services.stock_service import StockService
-from app.services.task_service import TASK_PRIORITY_LABELS, TASK_STATUS_LABELS, TaskService
+from app.services.task_service import (
+    TASK_PRIORITIES,
+    TASK_PRIORITY_LABELS,
+    TASK_STATUSES,
+    TASK_STATUS_LABELS,
+    TaskService,
+)
 from app.services.water_network_service import WaterNetworkService
 
 bp = Blueprint("mobile_api", __name__)
 
 TOKEN_TTL_DAYS = 90
 MAX_COMMANDS_PER_REQUEST = 100
+MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
+ATTACHMENT_ROOT = "task_attachments"
+ALLOWED_ATTACHMENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 
 
 class MobileApiError(Exception):
@@ -309,7 +321,23 @@ def _serialize_task_entity_link(link: TaskEntityLink) -> dict:
     }
 
 
+def _serialize_task_attachment(attachment: TaskAttachment) -> dict:
+    return {
+        "id": str(attachment.id),
+        "task_id": str(attachment.task_id),
+        "client_attachment_id": attachment.client_attachment_id,
+        "original_filename": attachment.original_filename,
+        "content_type": attachment.content_type,
+        "byte_size": attachment.byte_size,
+        "sha256": attachment.sha256,
+        "caption": attachment.caption,
+        "captured_at": _iso_datetime(attachment.captured_at),
+        "created_at": _iso_datetime(attachment.created_at),
+    }
+
+
 def _serialize_task(task: Task) -> dict:
+    attachments = sorted(task.attachments, key=lambda item: item.created_at, reverse=True)
     return {
         "id": str(task.id),
         "space_id": str(task.space_id),
@@ -330,6 +358,8 @@ def _serialize_task(task: Task) -> dict:
         "updated_at": _iso_datetime(task.updated_at),
         "entity_links": [_serialize_task_entity_link(link) for link in task.entity_links],
         "comment_count": len(task.comments),
+        "attachment_count": len(attachments),
+        "attachments": [_serialize_task_attachment(attachment) for attachment in attachments[:12]],
     }
 
 
@@ -568,6 +598,22 @@ def logout():
     return jsonify({"status": "ok"})
 
 
+@bp.get("/ping")
+def ping():
+    return jsonify(
+        {
+            "status": "ok",
+            "server_time": _iso_datetime(_utcnow()),
+            "user": _serialize_user(g.mobile_user),
+            "farms": [
+                _serialize_farm(role.farm)
+                for role in g.mobile_user.farm_roles
+                if role.farm is not None and role.farm.active
+            ],
+        }
+    )
+
+
 @bp.get("/bootstrap")
 def bootstrap():
     user = g.mobile_user
@@ -603,6 +649,27 @@ def bootstrap():
                     "water_asset_status.update",
                 ],
                 "max_commands_per_request": MAX_COMMANDS_PER_REQUEST,
+            },
+            "form_options": {
+                "task_statuses": [
+                    {"value": status, "label": TASK_STATUS_LABELS[status]} for status in TASK_STATUSES
+                ],
+                "task_priorities": [
+                    {"value": priority, "label": TASK_PRIORITY_LABELS[priority]}
+                    for priority in TASK_PRIORITIES
+                ],
+                "water_status_options_by_type": {
+                    asset_type: [
+                        {"value": option, "label": option.replace("_", " ").title()}
+                        for option in sorted(options)
+                    ]
+                    for asset_type, options in WaterNetworkService.STATUS_OPTIONS_BY_TYPE.items()
+                },
+                "water_level_asset_types": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
+                "water_level_options": [
+                    {"value": option, "label": option.replace("_", " ").title()}
+                    for option in WaterNetworkService.WATER_LEVEL_OPTIONS
+                ],
             },
         }
     )
@@ -755,6 +822,121 @@ def all_farms_map_data():
             "warnings": warnings,
             "features": features,
         }
+    )
+
+
+def _attachment_storage_path(*, farm_id: str, task_id: str, attachment_id: str, filename: str) -> Path:
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}:
+        suffix = ".jpg"
+    return Path(ATTACHMENT_ROOT) / str(farm_id) / str(task_id) / f"{attachment_id}{suffix}"
+
+
+def _absolute_attachment_path(relative_path: str | Path) -> Path:
+    root = Path(current_app.instance_path).resolve()
+    target = (root / relative_path).resolve()
+    if not target.is_relative_to(root):
+        raise MobileApiError("invalid_attachment", "Attachment storage path is invalid", 500)
+    return target
+
+
+def _store_task_attachment(farm: Farm, task: Task) -> tuple[TaskAttachment, bool]:
+    client_attachment_id = str(request.form.get("client_attachment_id") or "").strip()
+    if not client_attachment_id:
+        raise MobileApiError("invalid_payload", "client_attachment_id is required")
+
+    existing = TaskAttachment.query.filter_by(
+        uploaded_by_user_id=g.mobile_user.id,
+        client_attachment_id=client_attachment_id,
+    ).first()
+    if existing is not None:
+        if str(existing.task_id) != str(task.id):
+            raise MobileApiError("conflict", "client_attachment_id already belongs to another task", 409)
+        return existing, True
+
+    uploaded = request.files.get("file")
+    if uploaded is None or not uploaded.filename:
+        raise MobileApiError("invalid_payload", "file is required")
+
+    original_filename = secure_filename(uploaded.filename) or "mobile-photo.jpg"
+    content_type = (uploaded.mimetype or "application/octet-stream").lower()
+    if content_type not in ALLOWED_ATTACHMENT_TYPES:
+        raise MobileApiError("invalid_payload", "Only image attachments are supported")
+
+    data = uploaded.read()
+    if not data:
+        raise MobileApiError("invalid_payload", "Attachment file is empty")
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise MobileApiError("invalid_payload", "Attachment file is too large")
+
+    digest = hashlib.sha256(data).hexdigest()
+    requested_digest = str(request.form.get("sha256") or "").strip().lower()
+    if requested_digest and requested_digest != digest:
+        raise MobileApiError("invalid_payload", "Attachment checksum does not match")
+
+    attachment = TaskAttachment(
+        task_id=task.id,
+        uploaded_by_user_id=g.mobile_user.id,
+        client_attachment_id=client_attachment_id,
+        original_filename=original_filename[:255],
+        content_type=content_type,
+        byte_size=len(data),
+        sha256=digest,
+        caption=TaskService.optional_text(
+            request.form.get("caption"),
+            TaskService.MAX_DESCRIPTION_LENGTH,
+        ),
+        captured_at=_parse_iso_datetime(request.form.get("captured_at"), "captured_at"),
+        storage_path="",
+    )
+    db.session.add(attachment)
+    db.session.flush()
+
+    relative_path = _attachment_storage_path(
+        farm_id=str(farm.id),
+        task_id=str(task.id),
+        attachment_id=str(attachment.id),
+        filename=original_filename,
+    )
+    target = _absolute_attachment_path(relative_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    attachment.storage_path = relative_path.as_posix()
+    db.session.flush()
+    return attachment, False
+
+
+@bp.post("/farms/<farm_id>/tasks/<task_id>/attachments")
+def upload_task_attachment(farm_id, task_id):
+    farm = _get_accessible_farm(farm_id)
+    task = _get_task_for_farm(farm, str(task_id).strip())
+    try:
+        attachment, duplicate = _store_task_attachment(farm, task)
+        db.session.commit()
+        return jsonify({"attachment": _serialize_task_attachment(attachment), "duplicate": duplicate})
+    except MobileApiError:
+        db.session.rollback()
+        raise
+    except ValueError as exc:
+        db.session.rollback()
+        raise MobileApiError("invalid_payload", str(exc), 400) from exc
+
+
+@bp.get("/farms/<farm_id>/tasks/<task_id>/attachments/<attachment_id>")
+def task_attachment_file(farm_id, task_id, attachment_id):
+    farm = _get_accessible_farm(farm_id)
+    _get_task_for_farm(farm, str(task_id).strip())
+    attachment = TaskAttachment.query.filter_by(id=attachment_id, task_id=task_id).first()
+    if attachment is None:
+        raise MobileApiError("not_found", "Attachment not found", 404)
+    target = _absolute_attachment_path(attachment.storage_path)
+    if not target.exists():
+        raise MobileApiError("not_found", "Attachment file not found", 404)
+    return send_file(
+        target,
+        mimetype=attachment.content_type,
+        as_attachment=False,
+        download_name=attachment.original_filename,
     )
 
 
