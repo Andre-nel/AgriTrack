@@ -98,6 +98,7 @@ import com.agritrack.mobile.data.filterCalendarItems
 import com.agritrack.mobile.data.filterMobs
 import com.agritrack.mobile.data.filterPaddocks
 import com.agritrack.mobile.data.filterWaterAssets
+import com.agritrack.mobile.data.mobGrazingPaddocks
 import com.agritrack.mobile.data.paddockGrazing
 import com.agritrack.mobile.data.paddockMapFeature
 import com.agritrack.mobile.data.paddockStockLines
@@ -877,6 +878,7 @@ private fun AgriTrackApp(
                     state,
                     { onOpenScreen(AppScreen.Mobs) },
                     onMobSelected,
+                    onPaddockSelected,
                     onOpenScreen,
                     onStartTaskForEntity,
                 )
@@ -890,6 +892,7 @@ private fun AgriTrackApp(
                     state,
                     { onOpenScreen(AppScreen.Paddocks) },
                     onPaddockSelected,
+                    onMobSelected,
                     onOpenScreen,
                     onStartTaskForEntity,
                 )
@@ -2099,6 +2102,7 @@ private fun MobDetailScreen(
     state: FieldUiState,
     onBackToList: () -> Unit,
     onMobSelected: (String) -> Unit,
+    onPaddockSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
 ) {
@@ -2118,6 +2122,26 @@ private fun MobDetailScreen(
             }
             mob.balances.forEach { balance ->
                 EntityCard(balance.animalGroupType.label, "${balance.headCount} head")
+            }
+        }
+        SectionCard("Grazing Paddocks") {
+            val paddocks = mobGrazingPaddocks(snapshot, mob.id)
+            if (paddocks.isEmpty()) {
+                Text("No active paddock allocations", color = Color(0xFF516052))
+            }
+            paddocks.forEach { paddock ->
+                OutlinedButton(
+                    onClick = {
+                        onPaddockSelected(paddock.paddockId)
+                        onOpenScreen(AppScreen.PaddockDetail)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(paddock.paddockName, fontWeight = FontWeight.SemiBold)
+                        Text("${formatHeadCount(paddock.allocationPct)}% allocation", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
         }
         SectionCard("Linked Tasks") {
@@ -2188,6 +2212,7 @@ private fun PaddockDetailScreen(
     state: FieldUiState,
     onBackToList: () -> Unit,
     onPaddockSelected: (String) -> Unit,
+    onMobSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
 ) {
@@ -2233,8 +2258,24 @@ private fun PaddockDetailScreen(
             stockLines.forEach { line ->
                 Text("${formatHeadCount(line.head)} ${line.label}", style = MaterialTheme.typography.bodySmall)
             }
-            grazing?.mobs.orEmpty().forEach { mob ->
-                Text("${mob.mobName}: ${mob.allocationPct}% allocation", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            val grazingMobs = grazing?.mobs.orEmpty()
+            Text("Mobs grazing", fontWeight = FontWeight.SemiBold)
+            if (grazingMobs.isEmpty()) {
+                Text("No active mob allocation links", color = Color(0xFF516052))
+            }
+            grazingMobs.forEach { mob ->
+                OutlinedButton(
+                    onClick = {
+                        onMobSelected(mob.mobId)
+                        onOpenScreen(AppScreen.MobDetail)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(mob.mobName, fontWeight = FontWeight.SemiBold)
+                        Text("${formatHeadCount(mob.allocationPct)}% allocation", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
         }
         SectionCard("Linked Tasks") {

@@ -59,6 +59,17 @@ class MobileDetailsTest {
         assertEquals(listOf("North Camp", "missing-paddock"), servedPaddockNames(snapshot, asset))
     }
 
+    @Test
+    fun mobGrazingPaddocksUsesPaddockGrazingSummaries() {
+        val snapshot = detailSnapshot()
+
+        val paddocks = mobGrazingPaddocks(snapshot, "mob-1")
+
+        assertEquals(listOf("paddock-1"), paddocks.map { it.paddockId })
+        assertEquals(listOf("North Camp"), paddocks.map { it.paddockName })
+        assertEquals(listOf(65.0), paddocks.map { it.allocationPct })
+    }
+
     private fun detailSnapshot(): FarmSnapshot =
         FarmSnapshot.fromJson(
             JSONObject()
@@ -74,6 +85,23 @@ class MobileDetailsTest {
                     JSONArray()
                         .put(JSONObject().put("id", "paddock-1").put("name", "North Camp").put("status", "active"))
                         .put(JSONObject().put("id", "paddock-2").put("name", "South Camp").put("status", "resting")),
+                )
+                .put(
+                    "active_grazing_by_paddock",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("paddock_id", "paddock-1")
+                                .put(
+                                    "mobs",
+                                    JSONArray().put(
+                                        JSONObject()
+                                            .put("mob_id", "mob-1")
+                                            .put("mob_name", "Main Mob")
+                                            .put("allocation_pct", 65.0),
+                                    ),
+                                ),
+                        ),
                 )
                 .put(
                     "water_assets",
