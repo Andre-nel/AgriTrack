@@ -365,7 +365,7 @@ def test_task_workspace_supports_comments_links_and_counts(client, app):
         _create_task(source_space, "String hotwire", status="in_progress")
         _create_task(source_space, "Verify gate repair", status="ready_for_verification")
         closed_task = _create_task(source_space, "Archive supplier follow-up", status="selected_for_execution")
-        TaskService.apply_status_transition(closed_task, "closed", "Reporter")
+        TaskService.apply_status_transition(closed_task, "closed", "Reporter", "Archived supplier follow-up.")
         target_task = _create_task(target_space, "Approve budget", status="todo")
         db.session.commit()
         source_space_id = str(source_space.id)

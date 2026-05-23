@@ -68,6 +68,7 @@ data class PaddockGrazingSummary(
     val totalHead: Double,
     val mobs: List<PaddockMobSummary>,
     val speciesHeads: List<SpeciesHeadSummary>,
+    val groupHeads: List<PaddockGroupHeadSummary>,
 )
 
 data class PaddockMobSummary(
@@ -78,6 +79,12 @@ data class PaddockMobSummary(
 
 data class SpeciesHeadSummary(
     val species: String,
+    val head: Double,
+)
+
+data class PaddockGroupHeadSummary(
+    val animalGroupTypeId: String,
+    val animalGroupType: AnimalGroupTypeSummary,
     val head: Double,
 )
 
@@ -125,9 +132,12 @@ data class TaskSummary(
     val displayKey: String,
     val heading: String,
     val description: String,
+    val tags: List<String>,
+    val assigneeName: String?,
     val status: String,
     val statusLabel: String,
     val priority: String,
+    val priorityLabel: String,
     val dueDate: String?,
     val entityLinks: List<TaskEntityLinkSummary>,
     val attachmentCount: Int,
@@ -140,9 +150,22 @@ data class TaskSummary(
 data class CalendarItemSummary(
     val kind: String,
     val date: String,
+    val sourceId: String?,
+    val taskId: String?,
+    val activityId: String?,
     val title: String,
+    val description: String?,
     val badgeText: String?,
     val subtitle: String?,
+    val durationText: String?,
+    val stage: String?,
+    val stageLabel: String?,
+    val assigneeName: String?,
+    val tags: List<String>,
+    val priority: String?,
+    val priorityLabel: String?,
+    val entityLinks: List<TaskEntityLinkSummary>,
+    val recurrenceText: String?,
 )
 
 data class DecisionItemSummary(
@@ -313,6 +336,7 @@ data class FarmSnapshot(
                 val item = json.getJSONObject(index)
                 val mobsJson = item.optJSONArray("mobs") ?: JSONArray()
                 val speciesJson = item.optJSONArray("species_heads") ?: JSONArray()
+                val groupHeadsJson = item.optJSONArray("group_heads") ?: JSONArray()
                 add(
                     PaddockGrazingSummary(
                         paddockId = item.optString("paddock_id"),
@@ -325,6 +349,20 @@ data class FarmSnapshot(
                                         mobId = mob.optString("mob_id"),
                                         mobName = mob.optString("mob_name", "Mob"),
                                         allocationPct = mob.optDouble("allocation_pct", 100.0),
+                                    )
+                                )
+                            }
+                        },
+                        groupHeads = buildList {
+                            for (groupIndex in 0 until groupHeadsJson.length()) {
+                                val groupHead = groupHeadsJson.getJSONObject(groupIndex)
+                                val groupJson = groupHead.optJSONObject("animal_group_type") ?: JSONObject()
+                                val groupId = groupHead.optString("animal_group_type_id", groupJson.optString("id"))
+                                add(
+                                    PaddockGroupHeadSummary(
+                                        animalGroupTypeId = groupId,
+                                        animalGroupType = parseAnimalGroupType(groupJson, groupId),
+                                        head = groupHead.optDouble("head", 0.0),
                                     )
                                 )
                             }
@@ -391,24 +429,14 @@ data class FarmSnapshot(
                         displayKey = task.optString("display_key", "TASK"),
                         heading = task.optString("heading", "Task"),
                         description = task.optString("description"),
+                        tags = task.optJSONArray("tags").strings(),
+                        assigneeName = task.optNullableString("assignee_name"),
                         status = task.optString("status", "todo"),
                         statusLabel = task.optString("status_label", task.optString("status", "Task")),
                         priority = task.optString("priority", "low"),
+                        priorityLabel = task.optString("priority_label", task.optString("priority", "Low")),
                         dueDate = task.optNullableString("due_date"),
-                        entityLinks = buildList {
-                            for (linkIndex in 0 until linksJson.length()) {
-                                val link = linksJson.getJSONObject(linkIndex)
-                                add(
-                                    TaskEntityLinkSummary(
-                                        id = link.optString("id"),
-                                        taskId = link.optString("task_id"),
-                                        entityType = link.optString("entity_type"),
-                                        entityId = link.optString("entity_id"),
-                                        entityName = link.optNullableString("entity_name"),
-                                    )
-                                )
-                            }
-                        },
+                        entityLinks = parseTaskEntityLinks(linksJson),
                         attachmentCount = task.optInt("attachment_count", attachmentsJson.length()),
                         attachments = buildList {
                             for (attachmentIndex in 0 until attachmentsJson.length()) {
@@ -438,9 +466,37 @@ data class FarmSnapshot(
                     CalendarItemSummary(
                         kind = item.optString("kind"),
                         date = item.optString("date"),
+                        sourceId = item.optNullableString("source_id"),
+                        taskId = item.optNullableString("task_id"),
+                        activityId = item.optNullableString("activity_id"),
                         title = item.optString("title", "Calendar item"),
+                        description = item.optNullableString("description"),
                         badgeText = item.optNullableString("badge_text"),
                         subtitle = item.optNullableString("subtitle"),
+                        durationText = item.optNullableString("duration_text"),
+                        stage = item.optNullableString("stage"),
+                        stageLabel = item.optNullableString("stage_label"),
+                        assigneeName = item.optNullableString("assignee_name"),
+                        tags = item.optJSONArray("tags").strings(),
+                        priority = item.optNullableString("priority"),
+                        priorityLabel = item.optNullableString("priority_label"),
+                        entityLinks = parseTaskEntityLinks(item.optJSONArray("entity_links") ?: JSONArray()),
+                        recurrenceText = item.optNullableString("recurrence_text"),
+                    )
+                )
+            }
+        }
+
+        private fun parseTaskEntityLinks(json: JSONArray): List<TaskEntityLinkSummary> = buildList {
+            for (linkIndex in 0 until json.length()) {
+                val link = json.getJSONObject(linkIndex)
+                add(
+                    TaskEntityLinkSummary(
+                        id = link.optString("id"),
+                        taskId = link.optString("task_id"),
+                        entityType = link.optString("entity_type"),
+                        entityId = link.optString("entity_id"),
+                        entityName = link.optNullableString("entity_name"),
                     )
                 )
             }

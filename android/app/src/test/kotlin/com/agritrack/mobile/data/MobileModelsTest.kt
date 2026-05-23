@@ -56,6 +56,33 @@ class MobileModelsTest {
                         )
                 )
                 .put("water_assets", JSONArray().put(JSONObject().put("id", "tank-1")))
+                .put(
+                    "active_grazing_by_paddock",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("paddock_id", "paddock-1")
+                                .put("total_head", 37.0)
+                                .put(
+                                    "group_heads",
+                                    JSONArray()
+                                        .put(
+                                            JSONObject()
+                                                .put("animal_group_type_id", "group-1")
+                                                .put("head", 37.0)
+                                                .put(
+                                                    "animal_group_type",
+                                                    JSONObject()
+                                                        .put("id", "group-1")
+                                                        .put("species", "Cattle")
+                                                        .put("breed", "Bonsmara")
+                                                        .put("sex", "cow")
+                                                        .put("age_class", "adult")
+                                                )
+                                        )
+                                )
+                        )
+                )
                 .put("rainfall", JSONArray().put(JSONObject().put("id", "rain-1")))
                 .put("mob_events", JSONArray().put(JSONObject().put("id", "event-1")))
                 .put(
@@ -66,8 +93,11 @@ class MobileModelsTest {
                                 .put("id", "task-1")
                                 .put("display_key", "OPS-1")
                                 .put("heading", "Check water")
+                                .put("tags", JSONArray().put("water").put("field"))
+                                .put("assignee_name", "Field Team")
                                 .put("status", "todo")
                                 .put("status_label", "TO DO")
+                                .put("priority_label", "High")
                                 .put("attachment_count", 1)
                                 .put(
                                     "attachments",
@@ -101,7 +131,25 @@ class MobileModelsTest {
                             JSONObject()
                                 .put("kind", "task")
                                 .put("date", "2026-05-22")
+                                .put("source_id", "task-1")
+                                .put("task_id", "task-1")
                                 .put("title", "Check water")
+                                .put("description", "Confirm level")
+                                .put("stage", "todo")
+                                .put("stage_label", "TO DO")
+                                .put("assignee_name", "Field Team")
+                                .put("tags", JSONArray().put("water"))
+                                .put(
+                                    "entity_links",
+                                    JSONArray()
+                                        .put(
+                                            JSONObject()
+                                                .put("id", "link-1")
+                                                .put("task_id", "task-1")
+                                                .put("entity_type", "paddock")
+                                                .put("entity_id", "paddock-1")
+                                        )
+                                )
                         )
                 )
                 .put(
@@ -147,12 +195,22 @@ class MobileModelsTest {
         assertEquals("Main Mob", snapshot.mobs.first().name)
         assertEquals(37, snapshot.mobs.first().balances.first().headCount)
         assertEquals("Cattle Bonsmara cow adult", snapshot.mobs.first().balances.first().animalGroupType.label)
+        assertEquals("Cattle Bonsmara cow adult", snapshot.grazingByPaddock.first().groupHeads.first().animalGroupType.label)
+        assertEquals(37.0, snapshot.grazingByPaddock.first().groupHeads.first().head, 0.0)
         assertEquals("OPS-1", snapshot.tasks.first().displayKey)
+        assertEquals(listOf("water", "field"), snapshot.tasks.first().tags)
+        assertEquals("Field Team", snapshot.tasks.first().assigneeName)
+        assertEquals("High", snapshot.tasks.first().priorityLabel)
         assertEquals(true, snapshot.tasks.first().isLinkedTo("paddock", "paddock-1"))
         assertEquals(1, snapshot.tasks.first().attachmentCount)
         assertEquals("trough.jpg", snapshot.tasks.first().attachments.first().originalFilename)
         assertEquals(0.42, snapshot.mapFeatures.first().grazingPressureRatio ?: 0.0, 0.0)
         assertEquals(1, snapshot.calendarItemCount)
+        assertEquals("task-1", snapshot.calendarItems.first().taskId)
+        assertEquals("Confirm level", snapshot.calendarItems.first().description)
+        assertEquals("todo", snapshot.calendarItems.first().stage)
+        assertEquals("Field Team", snapshot.calendarItems.first().assigneeName)
+        assertEquals(true, snapshot.calendarItems.first().entityLinks.first().entityId == "paddock-1")
         assertEquals(1, snapshot.decisionCount)
     }
 

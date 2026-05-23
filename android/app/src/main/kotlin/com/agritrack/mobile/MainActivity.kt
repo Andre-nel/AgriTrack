@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +46,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -68,6 +69,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.onSizeChanged
 import com.agritrack.mobile.data.AnimalGroupTypeSummary
+import com.agritrack.mobile.data.CalendarFilterState
+import com.agritrack.mobile.data.CalendarItemSummary
 import com.agritrack.mobile.data.DecisionItemSummary
 import com.agritrack.mobile.data.FarmSnapshot
 import com.agritrack.mobile.data.FarmSummary
@@ -77,16 +80,24 @@ import com.agritrack.mobile.data.LogoutResult
 import com.agritrack.mobile.data.MapFeatureSummary
 import com.agritrack.mobile.data.MobileFormOptions
 import com.agritrack.mobile.data.MobileOption
+import com.agritrack.mobile.data.MobFilterState
 import com.agritrack.mobile.data.MobSummary
 import com.agritrack.mobile.data.MobileApiClient
 import com.agritrack.mobile.data.MobileRepository
 import com.agritrack.mobile.data.OutboxFailure
+import com.agritrack.mobile.data.PaddockFilterState
+import com.agritrack.mobile.data.PaddockMobSummary
 import com.agritrack.mobile.data.PaddockSummary
 import com.agritrack.mobile.data.SecureTokenStore
 import com.agritrack.mobile.data.SyncResult
 import com.agritrack.mobile.data.SyncSummary
 import com.agritrack.mobile.data.TaskSummary
+import com.agritrack.mobile.data.WaterFilterState
 import com.agritrack.mobile.data.WaterAssetSummary
+import com.agritrack.mobile.data.filterCalendarItems
+import com.agritrack.mobile.data.filterMobs
+import com.agritrack.mobile.data.filterPaddocks
+import com.agritrack.mobile.data.filterWaterAssets
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -140,6 +151,7 @@ class MainActivity : ComponentActivity() {
             )
 
             var pendingPhotoTarget by remember { mutableStateOf<PhotoTarget?>(null) }
+            var pendingImageChoice by remember { mutableStateOf<ImageChoiceTarget?>(null) }
 
             fun <T> runTask(
                 statusMessage: String,
@@ -220,6 +232,51 @@ class MainActivity : ComponentActivity() {
                     runCatching { saveBitmapToLocalPhoto(bitmap) }
                         .onSuccess { queuePhotoFile(target, it) }
                         .onFailure { exc -> uiState = uiState.copy(statusMessage = exc.message ?: "Photo could not be queued.") }
+                }
+            }
+
+            fun attachNewTaskPhoto(capture: Boolean) {
+                val farm = uiState.selectedFarm
+                if (farm == null) {
+                    uiState = uiState.copy(statusMessage = "Load a farm snapshot before creating a task.")
+                } else if (uiState.taskHeading.isBlank()) {
+                    uiState = uiState.copy(statusMessage = "Task heading is required.")
+                } else {
+                    val commandId = repository().queueTaskCreate(
+                        farm.id,
+                        uiState.taskHeading,
+                        uiState.taskDescription.ifBlank { uiState.taskHeading },
+                        uiState.taskDueDate,
+                        uiState.taskEntityType,
+                        uiState.taskEntityId,
+                    )
+                    uiState = uiState.copy(
+                        pendingCount = fieldStore.pendingCount(),
+                        currentScreen = AppScreen.Home,
+                        taskHeading = "",
+                        taskDescription = "",
+                        statusMessage = "Queued task. Attach the photo next.",
+                    )
+                    pendingPhotoTarget = PhotoTarget(farm.id, null, commandId)
+                    if (capture) {
+                        cameraLauncher.launch(null)
+                    } else {
+                        photoPickerLauncher.launch("image/*")
+                    }
+                }
+            }
+
+            fun attachTaskPhoto(task: TaskSummary, capture: Boolean) {
+                val farm = uiState.selectedFarm
+                if (farm == null) {
+                    uiState = uiState.copy(statusMessage = "Load a farm snapshot before attaching a photo.")
+                } else {
+                    pendingPhotoTarget = PhotoTarget(farm.id, task.id, null)
+                    if (capture) {
+                        cameraLauncher.launch(null)
+                    } else {
+                        photoPickerLauncher.launch("image/*")
+                    }
                 }
             }
 
@@ -359,46 +416,19 @@ class MainActivity : ComponentActivity() {
                     onTaskDueDateChange = { uiState = uiState.copy(taskDueDate = it) },
                     onTaskCommentChange = { uiState = uiState.copy(taskComment = it) },
                     onTaskSelected = { uiState = uiState.copy(selectedTaskId = it, currentScreen = AppScreen.TaskDetail) },
-                    onAttachNewTaskPhoto = { capture ->
-                        val farm = uiState.selectedFarm
-                        if (farm == null) {
-                            uiState = uiState.copy(statusMessage = "Load a farm snapshot before creating a task.")
-                        } else if (uiState.taskHeading.isBlank()) {
-                            uiState = uiState.copy(statusMessage = "Task heading is required.")
+                    onCalendarItemSelected = { item ->
+                        if (item.kind == "task" && item.taskId != null) {
+                            uiState = uiState.copy(selectedTaskId = item.taskId, currentScreen = AppScreen.TaskDetail)
                         } else {
-                            val commandId = repository().queueTaskCreate(
-                                farm.id,
-                                uiState.taskHeading,
-                                uiState.taskDescription.ifBlank { uiState.taskHeading },
-                                uiState.taskDueDate,
-                                uiState.taskEntityType,
-                                uiState.taskEntityId,
-                            )
                             uiState = uiState.copy(
-                                pendingCount = fieldStore.pendingCount(),
-                                statusMessage = "Queued task. Attach the photo next.",
+                                selectedCalendarItemSourceId = item.sourceId.orEmpty(),
+                                selectedCalendarItemDate = item.date,
+                                currentScreen = AppScreen.CalendarItemDetail,
                             )
-                            pendingPhotoTarget = PhotoTarget(farm.id, null, commandId)
-                            if (capture) {
-                                cameraLauncher.launch(null)
-                            } else {
-                                photoPickerLauncher.launch("image/*")
-                            }
                         }
                     },
-                    onAttachTaskPhoto = { task, capture ->
-                        val farm = uiState.selectedFarm
-                        if (farm == null) {
-                            uiState = uiState.copy(statusMessage = "Load a farm snapshot before attaching a photo.")
-                        } else {
-                            pendingPhotoTarget = PhotoTarget(farm.id, task.id, null)
-                            if (capture) {
-                                cameraLauncher.launch(null)
-                            } else {
-                                photoPickerLauncher.launch("image/*")
-                            }
-                        }
-                    },
+                    onAttachNewTaskPhoto = { pendingImageChoice = ImageChoiceTarget(newTask = true) },
+                    onAttachTaskPhoto = { task -> pendingImageChoice = ImageChoiceTarget(task = task) },
                     onStartTaskForEntity = { entityType, entityId, heading ->
                         uiState = uiState.copy(
                             currentScreen = AppScreen.TaskCreate,
@@ -424,6 +454,41 @@ class MainActivity : ComponentActivity() {
                     },
                     onSync = { syncNow("Syncing ${fieldStore.pendingCount()} queued command(s)...") },
                 )
+                pendingImageChoice?.let { target ->
+                    AlertDialog(
+                        onDismissRequest = { pendingImageChoice = null },
+                        title = { Text("Add Image") },
+                        text = { Text("Choose an image source for this task.") },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    pendingImageChoice = null
+                                    if (target.newTask) {
+                                        attachNewTaskPhoto(true)
+                                    } else {
+                                        target.task?.let { attachTaskPhoto(it, true) }
+                                    }
+                                },
+                            ) {
+                                Text("Camera")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = {
+                                    pendingImageChoice = null
+                                    if (target.newTask) {
+                                        attachNewTaskPhoto(false)
+                                    } else {
+                                        target.task?.let { attachTaskPhoto(it, false) }
+                                    }
+                                },
+                            ) {
+                                Text("Choose Image")
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -550,6 +615,8 @@ private data class FieldUiState(
     val taskDueDate: String = LocalDate.now().toString(),
     val taskComment: String = "",
     val selectedTaskId: String = "",
+    val selectedCalendarItemSourceId: String = "",
+    val selectedCalendarItemDate: String = "",
 ) {
     companion object {
         fun fromSnapshot(
@@ -584,6 +651,8 @@ private data class FieldUiState(
                 waterLevel = firstWater?.waterLevel.orEmpty(),
                 waterActive = firstWater?.active ?: true,
                 selectedTaskId = snapshot?.tasks?.firstOrNull()?.id.orEmpty(),
+                selectedCalendarItemSourceId = snapshot?.calendarItems?.firstOrNull()?.sourceId.orEmpty(),
+                selectedCalendarItemDate = snapshot?.calendarItems?.firstOrNull()?.date.orEmpty(),
             )
         }
     }
@@ -609,13 +678,25 @@ private data class LocalPhotoFile(
     val byteSize: Long,
 )
 
+private data class ImageChoiceTarget(
+    val task: TaskSummary? = null,
+    val newTask: Boolean = false,
+)
+
+private data class MapSelection(
+    val feature: MapFeatureSummary,
+    val mob: PaddockMobSummary? = null,
+)
+
 private enum class AppScreen {
     Home,
     Farm,
     FarmMap,
+    FarmMapFullscreen,
     Calendar,
     Tasks,
     TaskDetail,
+    CalendarItemDetail,
     Decisions,
     Mobs,
     Paddocks,
@@ -684,8 +765,9 @@ private fun AgriTrackApp(
     onTaskDueDateChange: (String) -> Unit,
     onTaskCommentChange: (String) -> Unit,
     onTaskSelected: (String) -> Unit,
-    onAttachNewTaskPhoto: (Boolean) -> Unit,
-    onAttachTaskPhoto: (TaskSummary, Boolean) -> Unit,
+    onCalendarItemSelected: (CalendarItemSummary) -> Unit,
+    onAttachNewTaskPhoto: () -> Unit,
+    onAttachTaskPhoto: (TaskSummary) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
     onQueueRainfall: () -> Unit,
     onQueueMobMove: () -> Unit,
@@ -699,14 +781,17 @@ private fun AgriTrackApp(
     onSync: () -> Unit,
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        val isMapFullscreen = state.currentScreen == AppScreen.FarmMapFullscreen
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .then(if (isMapFullscreen) Modifier else Modifier.verticalScroll(rememberScrollState()))
+                .padding(if (isMapFullscreen) 8.dp else 18.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isMapFullscreen) 8.dp else 16.dp),
         ) {
-            Header(state, onLogout)
+            if (!isMapFullscreen) {
+                Header(state, onLogout)
+            }
             if (!state.isAuthenticated) {
                 LoginScreen(
                     state,
@@ -734,12 +819,23 @@ private fun AgriTrackApp(
                     onMobSelected,
                     onOpenScreen,
                 )
+                AppScreen.FarmMapFullscreen -> FarmMapFullscreenScreen(
+                    state,
+                    onBackHome,
+                    onPaddockSelected,
+                    onMobSelected,
+                    onOpenScreen,
+                )
                 AppScreen.Calendar -> CalendarScreen(
                     state,
                     onBackHome,
+                    onOpenScreen,
+                    onTaskSelected,
+                    onCalendarItemSelected,
                     onQueueTaskStatus,
                     onTaskCommentChange,
                     onQueueTaskComment,
+                    onAttachTaskPhoto,
                 )
                 AppScreen.Tasks -> TasksScreen(
                     state,
@@ -759,6 +855,7 @@ private fun AgriTrackApp(
                     onQueueTaskComment,
                     onAttachTaskPhoto,
                 )
+                AppScreen.CalendarItemDetail -> CalendarItemDetailScreen(state, onBackHome)
                 AppScreen.Decisions -> DecisionsScreen(state, onBackHome, onOpenScreen)
                 AppScreen.Mobs -> MobsScreen(
                     state,
@@ -979,7 +1076,6 @@ private fun FarmSummaryPanel(state: FieldUiState, onRefresh: () -> Unit, onOpenS
                 MetricAction("Paddocks", snapshot.paddockCount.toString(), AppScreen.Paddocks),
                 MetricAction("Mobs", snapshot.mobCount.toString(), AppScreen.Mobs),
                 MetricAction("Water", snapshot.waterAssetCount.toString(), AppScreen.WaterAssets),
-                MetricAction("Tasks", snapshot.taskCount.toString(), AppScreen.Tasks),
                 MetricAction("Calendar", snapshot.calendarItemCount.toString(), AppScreen.Calendar),
                 MetricAction("Decisions", snapshot.decisionCount.toString(), AppScreen.Decisions),
             )
@@ -1001,12 +1097,6 @@ private fun DashboardMenu(state: FieldUiState, onOpenScreen: (AppScreen) -> Unit
         }
         DashboardButton("Calendar", "Tasks and activities for the coming days", state.snapshot != null) {
             onOpenScreen(AppScreen.Calendar)
-        }
-        DashboardButton("Tasks", "Create, start, close, and comment on field work", state.snapshot != null) {
-            onOpenScreen(AppScreen.Tasks)
-        }
-        DashboardButton("Farm", "Farm counts, current state, and quick metrics", state.snapshot != null) {
-            onOpenScreen(AppScreen.Farm)
         }
         DashboardButton("Mobs", "Counts, moves, transfers, and linked tasks", state.snapshot?.mobs?.isNotEmpty() == true) {
             onOpenScreen(AppScreen.Mobs)
@@ -1108,34 +1198,128 @@ private fun FarmMapScreen(
 ) {
     FormScaffold("Farm Map", onBackHome) {
         val snapshot = state.snapshot ?: return@FormScaffold
-        snapshot.mapWarnings.forEach { warning -> Text(warning, color = Color(0xFF7A3424)) }
-        OfflineFarmMap(
-            features = snapshot.mapFeatures,
-            onPaddockTap = { paddockId ->
-                onPaddockSelected(paddockId)
-                onOpenScreen(AppScreen.Paddocks)
-            },
-            onMobTap = { mobId ->
-                onMobSelected(mobId)
-                onOpenScreen(AppScreen.Mobs)
+        FarmMapContent(
+            snapshot = snapshot,
+            fullscreen = false,
+            mapModifier = Modifier.height(420.dp),
+            onFullscreen = { onOpenScreen(AppScreen.FarmMapFullscreen) },
+            onPaddockSelected = onPaddockSelected,
+            onMobSelected = onMobSelected,
+            onOpenScreen = onOpenScreen,
+        )
+    }
+}
+
+@Composable
+private fun FarmMapFullscreenScreen(
+    state: FieldUiState,
+    onBackHome: () -> Unit,
+    onPaddockSelected: (String) -> Unit,
+    onMobSelected: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+) {
+    val snapshot = state.snapshot ?: return
+    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onBackHome, modifier = Modifier.weight(1f)) { Text("Exit Map") }
+            OutlinedButton(onClick = { onOpenScreen(AppScreen.FarmMap) }, modifier = Modifier.weight(1f)) {
+                Text("Normal View")
+            }
+        }
+        FarmMapContent(
+            snapshot = snapshot,
+            fullscreen = true,
+            mapModifier = Modifier.weight(1f),
+            onFullscreen = {},
+            onPaddockSelected = onPaddockSelected,
+            onMobSelected = onMobSelected,
+            onOpenScreen = onOpenScreen,
+        )
+    }
+}
+
+@Composable
+private fun FarmMapContent(
+    snapshot: FarmSnapshot,
+    fullscreen: Boolean,
+    mapModifier: Modifier,
+    onFullscreen: () -> Unit,
+    onPaddockSelected: (String) -> Unit,
+    onMobSelected: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+) {
+    var selectedMapItem by remember(snapshot.farm.id, fullscreen) { mutableStateOf<MapSelection?>(null) }
+    snapshot.mapWarnings.forEach { warning -> Text(warning, color = Color(0xFF7A3424)) }
+    if (!fullscreen) {
+        OutlinedButton(onClick = onFullscreen, modifier = Modifier.fillMaxWidth()) {
+            Text("Full Screen Map")
+        }
+    }
+    OfflineFarmMap(
+        features = snapshot.mapFeatures,
+        fullscreen = fullscreen,
+        modifier = mapModifier,
+        onSelection = { selectedMapItem = it },
+    )
+    selectedMapItem?.let { selection ->
+        MapSelectionPanel(
+            selection = selection,
+            onOpen = {
+                val mob = selection.mob
+                if (mob != null) {
+                    onMobSelected(mob.mobId)
+                    onOpenScreen(AppScreen.Mobs)
+                } else {
+                    val paddockId = selection.feature.paddockId
+                    if (paddockId != null) {
+                        onPaddockSelected(paddockId)
+                        onOpenScreen(AppScreen.Paddocks)
+                    }
+                }
             },
         )
+    }
+    if (!fullscreen) {
         snapshot.mapFeatures
             .filter { it.featureType == "paddock" || it.featureType == "water_asset" }
             .take(12)
             .forEach { feature ->
                 EntityCard(
                     title = feature.name,
-                    detail = listOf(
-                        feature.featureType,
-                        feature.grazingPressureRatio?.let { "pressure ${(it * 100).toInt()}%" },
-                        feature.waterAlertLevel,
-                        feature.waterAlertMessage,
-                    ).filterNotNull().filter { it.isNotBlank() }.joinToString(" | "),
+                    detail = mapFeatureDetail(feature),
                 )
             }
+    }
+}
+
+@Composable
+private fun MapSelectionPanel(selection: MapSelection, onOpen: () -> Unit) {
+    val feature = selection.feature
+    val title = selection.mob?.mobName ?: feature.name
+    val detail = if (selection.mob != null) {
+        "${feature.name} | ${selection.mob.allocationPct}% allocation"
+    } else {
+        mapFeatureDetail(feature)
+    }
+    SectionCard(title) {
+        Text(detail.ifBlank { feature.featureType }, color = Color(0xFF516052))
+        Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+            Text("Open")
         }
     }
+}
+
+private fun mapFeatureDetail(feature: MapFeatureSummary): String =
+    listOf(
+        feature.featureType,
+        feature.grazingPressureRatio?.let { "pressure ${(it * 100).toInt()}%" },
+        feature.currentLsu?.let { "LSU $it" },
+        feature.waterAlertLevel,
+        feature.waterAlertMessage,
+    ).filterNotNull().filter { it.isNotBlank() }.joinToString(" | ")
+
+private fun formatHeadCount(value: Double): String =
+    if (value % 1.0 == 0.0) value.toInt().toString() else "%.2f".format(value)
 
 private data class MapDrawFeature(
     val source: MapFeatureSummary,
@@ -1149,14 +1333,19 @@ private data class MapBounds(val minX: Float, val minY: Float, val maxX: Float, 
 @Composable
 private fun OfflineFarmMap(
     features: List<MapFeatureSummary>,
-    onPaddockTap: (String) -> Unit,
-    onMobTap: (String) -> Unit,
+    fullscreen: Boolean,
+    modifier: Modifier,
+    onSelection: (MapSelection) -> Unit,
 ) {
     val drawFeatures = remember(features) { features.mapNotNull(::parseMapDrawFeature) }
     val bounds = remember(drawFeatures) { mapBounds(drawFeatures) }
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(features, canvasSize) {
+        zoom = 1f
+        pan = Offset.Zero
+    }
 
     if (drawFeatures.isEmpty() || bounds == null) {
         EntityCard("Map unavailable", "No cached map geometry is available for this farm.")
@@ -1166,16 +1355,12 @@ private fun OfflineFarmMap(
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(1.15f)
+            .then(modifier)
             .onSizeChanged { canvasSize = it }
             .pointerInput(drawFeatures, bounds, canvasSize, zoom, pan) {
                 detectTapGestures { tap ->
                     findMapTap(drawFeatures, bounds, canvasSize, zoom, pan, tap)?.let { hit ->
-                        hit.source.mobs.firstOrNull()?.let { mob ->
-                            onMobTap(mob.mobId)
-                            return@detectTapGestures
-                        }
-                        hit.source.paddockId?.let(onPaddockTap)
+                        onSelection(hit)
                     }
                 }
             }
@@ -1270,7 +1455,10 @@ private fun parsePoint(json: JSONArray): Offset =
     Offset(json.optDouble(0).toFloat(), json.optDouble(1).toFloat())
 
 private fun mapBounds(features: List<MapDrawFeature>): MapBounds? {
-    val points = features.flatMap { it.polygons.flatten() + it.lines.flatten() + it.points }
+    val paddockPoints = features
+        .filter { it.source.featureType == "paddock" && it.polygons.isNotEmpty() }
+        .flatMap { it.polygons.flatten() }
+    val points = paddockPoints.ifEmpty { features.flatMap { it.polygons.flatten() + it.lines.flatten() + it.points } }
     if (points.isEmpty()) return null
     return MapBounds(
         minX = points.minOf { it.x },
@@ -1285,7 +1473,7 @@ private fun projectMapPoint(point: Offset, bounds: MapBounds, size: IntSize, zoo
     val height = max(1f, bounds.maxY - bounds.minY)
     val canvasWidth = max(1, size.width).toFloat()
     val canvasHeight = max(1, size.height).toFloat()
-    val scale = min(canvasWidth / width, canvasHeight / height) * 0.88f * zoom
+    val scale = min(canvasWidth / width, canvasHeight / height) * 0.97f * zoom
     val left = (canvasWidth - width * scale) / 2f
     val top = (canvasHeight - height * scale) / 2f
     return Offset(
@@ -1301,20 +1489,20 @@ private fun findMapTap(
     zoom: Float,
     pan: Offset,
     tap: Offset,
-): MapDrawFeature? {
+): MapSelection? {
     val mobHit = features
         .filter { it.source.featureType == "paddock" && it.source.mobs.isNotEmpty() }
         .firstOrNull { item ->
             val center = projectMapPoint(centroid(item.polygons.firstOrNull()), bounds, size, zoom, pan)
             abs(center.x - tap.x) < 28f && abs(center.y - tap.y) < 28f
         }
-    if (mobHit != null) return mobHit
+    if (mobHit != null) return MapSelection(mobHit.source, mobHit.source.mobs.firstOrNull())
     return features
         .filter { it.source.featureType == "paddock" }
         .firstOrNull { item ->
             val center = projectMapPoint(centroid(item.polygons.firstOrNull()), bounds, size, zoom, pan)
             abs(center.x - tap.x) < 60f && abs(center.y - tap.y) < 60f
-        }
+        }?.let { MapSelection(it.source) }
 }
 
 private fun centroid(points: List<Offset>?): Offset {
@@ -1338,51 +1526,200 @@ private fun paddockPressureColor(ratio: Double?): Color {
 private fun CalendarScreen(
     state: FieldUiState,
     onBackHome: () -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onTaskSelected: (String) -> Unit,
+    onCalendarItemSelected: (CalendarItemSummary) -> Unit,
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
     onTaskCommentChange: (String) -> Unit,
     onQueueTaskComment: (TaskSummary) -> Unit,
+    onAttachTaskPhoto: (TaskSummary) -> Unit,
 ) {
     FormScaffold("Calendar", onBackHome) {
         val snapshot = state.snapshot ?: return@FormScaffold
-        SectionTitle("Upcoming")
-        snapshot.calendarItems.take(30).forEach { item ->
-            EntityCard(item.title, "${item.date} | ${item.badgeText ?: item.kind}")
+        var filters by remember(snapshot.farm.id) { mutableStateOf(CalendarFilterState(startDate = LocalDate.now().toString())) }
+        val filteredItems = filterCalendarItems(snapshot.calendarItems, filters)
+
+        Button(onClick = { onOpenScreen(AppScreen.TaskCreate) }, modifier = Modifier.fillMaxWidth()) {
+            Text("New Task")
         }
-        SectionTitle("Tasks")
-        snapshot.tasks.forEach { task ->
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${task.displayKey} ${task.heading}", fontWeight = FontWeight.SemiBold)
-                    Text("${task.statusLabel} | ${task.dueDate ?: "no due date"}", color = Color(0xFF516052))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { onQueueTaskStatus(task, "in_progress") }, modifier = Modifier.weight(1f)) {
-                            Text("Start")
-                        }
-                        OutlinedButton(onClick = { onQueueTaskStatus(task, "closed") }, modifier = Modifier.weight(1f)) {
-                            Text("Close")
-                        }
-                    }
-                    OutlinedTextField(
-                        value = state.taskComment,
-                        onValueChange = onTaskCommentChange,
-                        label = { Text("Task note") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Button(
-                        onClick = { onQueueTaskComment(task) },
-                        enabled = state.taskComment.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Add Note")
-                    }
-                }
+        CalendarFilters(
+            filters = filters,
+            snapshot = snapshot,
+            onFiltersChange = { filters = it },
+        )
+        if (filteredItems.isEmpty()) {
+            EntityCard("No calendar items", "No tasks or activities match the current filters.")
+        }
+        filteredItems.take(80).forEach { item ->
+            val task = item.taskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
+            CalendarItemCard(
+                item = item,
+                task = task,
+                state = state,
+                onCalendarItemSelected = onCalendarItemSelected,
+                onTaskSelected = onTaskSelected,
+                onQueueTaskStatus = onQueueTaskStatus,
+                onTaskCommentChange = onTaskCommentChange,
+                onQueueTaskComment = onQueueTaskComment,
+                onAttachTaskPhoto = onAttachTaskPhoto,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CalendarFilters(
+    filters: CalendarFilterState,
+    snapshot: FarmSnapshot,
+    onFiltersChange: (CalendarFilterState) -> Unit,
+) {
+    SectionCard("Filters") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = filters.startDate,
+                onValueChange = { onFiltersChange(filters.copy(startDate = it)) },
+                label = { Text("From") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = filters.endDate,
+                onValueChange = { onFiltersChange(filters.copy(endDate = it)) },
+                label = { Text("To") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FilterChoice("All", filters.itemType.isBlank(), Modifier.weight(1f)) {
+                onFiltersChange(filters.copy(itemType = ""))
+            }
+            FilterChoice("Tasks", filters.itemType == "task", Modifier.weight(1f)) {
+                onFiltersChange(filters.copy(itemType = "task"))
+            }
+            FilterChoice("Activity", filters.itemType == "activity", Modifier.weight(1f)) {
+                onFiltersChange(filters.copy(itemType = "activity"))
             }
         }
+        OutlinedTextField(
+            value = filters.name,
+            onValueChange = { onFiltersChange(filters.copy(name = it)) },
+            label = { Text("Name") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = filters.stage,
+                onValueChange = { onFiltersChange(filters.copy(stage = it)) },
+                label = { Text("Stage") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = filters.assignee,
+                onValueChange = { onFiltersChange(filters.copy(assignee = it)) },
+                label = { Text("Assignee") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        OutlinedTextField(
+            value = filters.tag,
+            onValueChange = { onFiltersChange(filters.copy(tag = it)) },
+            label = { Text("Tag") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        EntityFilterPickers(snapshot, filters, onFiltersChange)
+    }
+}
+
+@Composable
+private fun EntityFilterPickers(
+    snapshot: FarmSnapshot,
+    filters: CalendarFilterState,
+    onFiltersChange: (CalendarFilterState) -> Unit,
+) {
+    PaddockFilterPicker(
+        paddocks = snapshot.paddocks,
+        selectedPaddockId = filters.paddockId,
+        onPaddockSelected = { onFiltersChange(filters.copy(paddockId = it)) },
+    )
+    WaterAssetFilterPicker(
+        assets = snapshot.waterAssets,
+        selectedWaterAssetId = filters.waterAssetId,
+        onWaterAssetSelected = { onFiltersChange(filters.copy(waterAssetId = it)) },
+    )
+    MobFilterPicker(
+        mobs = snapshot.mobs,
+        selectedMobId = filters.mobId,
+        onMobSelected = { onFiltersChange(filters.copy(mobId = it)) },
+    )
+    OutlinedButton(
+        onClick = { onFiltersChange(filters.copy(paddockId = "", waterAssetId = "", mobId = "")) },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Clear Entity Filters")
+    }
+}
+
+@Composable
+private fun CalendarItemCard(
+    item: CalendarItemSummary,
+    task: TaskSummary?,
+    state: FieldUiState,
+    onCalendarItemSelected: (CalendarItemSummary) -> Unit,
+    onTaskSelected: (String) -> Unit,
+    onQueueTaskStatus: (TaskSummary, String) -> Unit,
+    onTaskCommentChange: (String) -> Unit,
+    onQueueTaskComment: (TaskSummary) -> Unit,
+    onAttachTaskPhoto: (TaskSummary) -> Unit,
+) {
+    if (task != null) {
+        TaskCard(
+            state = state,
+            task = task,
+            onTaskSelected = onTaskSelected,
+            onQueueTaskStatus = onQueueTaskStatus,
+            onTaskCommentChange = onTaskCommentChange,
+            onQueueTaskComment = onQueueTaskComment,
+            onAttachTaskPhoto = onAttachTaskPhoto,
+        )
+        return
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCalendarItemSelected(item) },
+    ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(item.title, fontWeight = FontWeight.SemiBold)
+            Text("${item.date} | ${item.stageLabel ?: item.badgeText ?: item.kind}", color = Color(0xFF516052))
+            item.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052)) }
+        }
+    }
+}
+
+@Composable
+private fun CalendarItemDetailScreen(state: FieldUiState, onBackHome: () -> Unit) {
+    FormScaffold("Calendar Detail", onBackHome) {
+        val item = state.snapshot?.calendarItems?.firstOrNull {
+            it.sourceId == state.selectedCalendarItemSourceId && it.date == state.selectedCalendarItemDate
+        } ?: state.snapshot?.calendarItems?.firstOrNull() ?: return@FormScaffold
+        EntityCard(item.title, "${item.date} | ${item.stageLabel ?: item.badgeText ?: item.kind}")
+        item.description?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium)
+        }
+        MetricRows(
+            listOf(
+                "Type" to item.kind.replaceFirstChar(Char::titlecase),
+                "Duration" to (item.durationText ?: "-"),
+                "Recurrence" to (item.recurrenceText ?: "-"),
+            )
+        )
     }
 }
 
@@ -1395,7 +1732,7 @@ private fun TasksScreen(
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
     onTaskCommentChange: (String) -> Unit,
     onQueueTaskComment: (TaskSummary) -> Unit,
-    onAttachTaskPhoto: (TaskSummary, Boolean) -> Unit,
+    onAttachTaskPhoto: (TaskSummary) -> Unit,
 ) {
     FormScaffold("Tasks", onBackHome) {
         Button(onClick = { onOpenScreen(AppScreen.TaskCreate) }, modifier = Modifier.fillMaxWidth()) {
@@ -1426,7 +1763,7 @@ private fun TaskDetailScreen(
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
     onTaskCommentChange: (String) -> Unit,
     onQueueTaskComment: (TaskSummary) -> Unit,
-    onAttachTaskPhoto: (TaskSummary, Boolean) -> Unit,
+    onAttachTaskPhoto: (TaskSummary) -> Unit,
 ) {
     FormScaffold("Task Detail", onBackHome) {
         val task = state.snapshot?.tasks?.firstOrNull { it.id == state.selectedTaskId }
@@ -1459,7 +1796,7 @@ private fun TaskCard(
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
     onTaskCommentChange: (String) -> Unit,
     onQueueTaskComment: (TaskSummary) -> Unit,
-    onAttachTaskPhoto: (TaskSummary, Boolean) -> Unit,
+    onAttachTaskPhoto: (TaskSummary) -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -1471,7 +1808,11 @@ private fun TaskCard(
     ) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("${task.displayKey} ${task.heading}", fontWeight = FontWeight.SemiBold)
-            Text("${task.statusLabel} | ${task.priority} | ${task.dueDate ?: "no due date"}", color = Color(0xFF516052))
+            Text("${task.statusLabel} | ${task.priorityLabel} | ${task.dueDate ?: "no due date"}", color = Color(0xFF516052))
+            task.assigneeName?.let { Text("Assignee: $it", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052)) }
+            if (task.tags.isNotEmpty()) {
+                Text("Tags: ${task.tags.joinToString(", ")}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
             if (task.attachmentCount > 0) {
                 Text("${task.attachmentCount} photo(s)", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
             }
@@ -1483,13 +1824,8 @@ private fun TaskCard(
                     Text("Close")
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { onAttachTaskPhoto(task, true) }, modifier = Modifier.weight(1f)) {
-                    Text("Camera")
-                }
-                OutlinedButton(onClick = { onAttachTaskPhoto(task, false) }, modifier = Modifier.weight(1f)) {
-                    Text("Photo")
-                }
+            OutlinedButton(onClick = { onAttachTaskPhoto(task) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Add Image")
             }
             OutlinedTextField(
                 value = state.taskComment,
@@ -1533,8 +1869,8 @@ private fun DecisionsScreen(
                         "paddock" -> AppScreen.Paddocks
                         "mob" -> AppScreen.Mobs
                         "water_asset" -> AppScreen.WaterAssets
-                        "task" -> AppScreen.Tasks
-                        else -> AppScreen.Farm
+                        "task" -> AppScreen.Calendar
+                        else -> AppScreen.Calendar
                     }
                     OutlinedButton(onClick = { onOpenScreen(target) }, modifier = Modifier.fillMaxWidth()) {
                         Text("Open")
@@ -1542,6 +1878,152 @@ private fun DecisionsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MobFilters(mobs: List<MobSummary>, filters: MobFilterState, onFiltersChange: (MobFilterState) -> Unit) {
+    val species = mobs.flatMap { mob -> mob.balances.map { it.animalGroupType.species } }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sorted()
+    SectionCard("Filters") {
+        OutlinedTextField(
+            value = filters.name,
+            onValueChange = { onFiltersChange(filters.copy(name = it)) },
+            label = { Text("Name") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = filters.countMin,
+                onValueChange = { onFiltersChange(filters.copy(countMin = it)) },
+                label = { Text("Min count") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = filters.countMax,
+                onValueChange = { onFiltersChange(filters.copy(countMax = it)) },
+                label = { Text("Max count") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (species.isNotEmpty()) {
+            FieldLabel("Species")
+            species.chunked(2).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    row.forEach { value ->
+                        val selected = value in filters.species
+                        FilterChoice(value, selected, Modifier.weight(1f)) {
+                            onFiltersChange(
+                                filters.copy(
+                                    species = if (selected) filters.species - value else filters.species + value,
+                                )
+                            )
+                        }
+                    }
+                    if (row.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaddockFilters(filters: PaddockFilterState, onFiltersChange: (PaddockFilterState) -> Unit) {
+    SectionCard("Filters") {
+        OutlinedTextField(
+            value = filters.name,
+            onValueChange = { onFiltersChange(filters.copy(name = it)) },
+            label = { Text("Name") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = filters.stockMin,
+                onValueChange = { onFiltersChange(filters.copy(stockMin = it)) },
+                label = { Text("Min stock") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = filters.stockMax,
+                onValueChange = { onFiltersChange(filters.copy(stockMax = it)) },
+                label = { Text("Max stock") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        OutlinedTextField(
+            value = filters.tag,
+            onValueChange = { onFiltersChange(filters.copy(tag = it)) },
+            label = { Text("Tag") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = filters.pressureMin,
+                onValueChange = { onFiltersChange(filters.copy(pressureMin = it)) },
+                label = { Text("Min pressure %") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = filters.pressureMax,
+                onValueChange = { onFiltersChange(filters.copy(pressureMax = it)) },
+                label = { Text("Max pressure %") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun WaterFilters(
+    assets: List<WaterAssetSummary>,
+    filters: WaterFilterState,
+    onFiltersChange: (WaterFilterState) -> Unit,
+) {
+    SectionCard("Filters") {
+        OutlinedTextField(
+            value = filters.name,
+            onValueChange = { onFiltersChange(filters.copy(name = it)) },
+            label = { Text("Name") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SimpleValuePicker(
+            label = "Type",
+            selectedValue = filters.assetType,
+            values = assets.map { it.assetType }.filter { it.isNotBlank() }.distinct().sorted(),
+            allLabel = "All types",
+            onSelected = { onFiltersChange(filters.copy(assetType = it)) },
+        )
+        SimpleValuePicker(
+            label = "Status",
+            selectedValue = filters.status,
+            values = (assets.mapNotNull { it.status }.filter { it.isNotBlank() } + "unknown").distinct().sorted(),
+            allLabel = "All statuses",
+            onSelected = { onFiltersChange(filters.copy(status = it)) },
+        )
+        SimpleValuePicker(
+            label = "Water level",
+            selectedValue = filters.waterLevel,
+            values = (assets.mapNotNull { it.waterLevel }.filter { it.isNotBlank() } + "unknown").distinct().sorted(),
+            allLabel = "All levels",
+            onSelected = { onFiltersChange(filters.copy(waterLevel = it)) },
+        )
     }
 }
 
@@ -1554,9 +2036,16 @@ private fun MobsScreen(
     onStartTaskForEntity: (String, String, String) -> Unit,
 ) {
     FormScaffold("Mobs", onBackHome) {
-        state.snapshot?.mobs.orEmpty().forEach { mob ->
+        val snapshot = state.snapshot ?: return@FormScaffold
+        var filters by remember(snapshot.farm.id) { mutableStateOf(MobFilterState()) }
+        val filteredMobs = filterMobs(snapshot.mobs, filters)
+        MobFilters(snapshot.mobs, filters) { filters = it }
+        if (filteredMobs.isEmpty()) {
+            EntityCard("No mobs", "No mobs match the current filters.")
+        }
+        filteredMobs.forEach { mob ->
             EntityCard("${mob.name} (${mob.totalHead})", mob.balances.joinToString(", ") { "${it.headCount} ${it.animalGroupType.label}" })
-            RelatedTasks(state.snapshot?.tasks.orEmpty(), "mob", mob.id)
+            RelatedTasks(snapshot.tasks, "mob", mob.id)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { onMobSelected(mob.id); onOpenScreen(AppScreen.MoveMob) }, modifier = Modifier.weight(1f)) {
                     Text("Move")
@@ -1591,13 +2080,36 @@ private fun PaddocksScreen(
 ) {
     FormScaffold("Paddocks", onBackHome) {
         val snapshot = state.snapshot ?: return@FormScaffold
-        snapshot.paddocks.forEach { paddock ->
+        var filters by remember(snapshot.farm.id) { mutableStateOf(PaddockFilterState()) }
+        val filteredPaddocks = filterPaddocks(snapshot, filters)
+        PaddockFilters(filters) { filters = it }
+        if (filteredPaddocks.isEmpty()) {
+            EntityCard("No paddocks", "No paddocks match the current filters.")
+        }
+        filteredPaddocks.forEach { paddock ->
             val grazing = snapshot.grazingByPaddock.firstOrNull { it.paddockId == paddock.id }
             val water = snapshot.waterAssets.filter { it.locationPaddockId == paddock.id || paddock.id in it.servedPaddockIds }
             EntityCard(
                 title = "${paddock.name} | ${paddock.status}",
                 detail = "Expected stock: ${grazing?.totalHead ?: 0.0}; Water links: ${water.size}; Tags: ${paddock.tagLabel.ifBlank { "none" }}",
             )
+            if (grazing?.groupHeads?.isNotEmpty() == true) {
+                Text("Stock in paddock", fontWeight = FontWeight.SemiBold)
+                grazing.groupHeads.forEach { group ->
+                    Text(
+                        "${formatHeadCount(group.head)} ${group.animalGroupType.label}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF516052),
+                    )
+                }
+            } else if (grazing?.speciesHeads?.isNotEmpty() == true) {
+                Text("Stock in paddock", fontWeight = FontWeight.SemiBold)
+                grazing.speciesHeads.forEach { species ->
+                    Text("${species.species}: ${formatHeadCount(species.head)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+                }
+            } else {
+                Text("Stock in paddock: none", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
             grazing?.mobs.orEmpty().forEach { mob -> Text("${mob.mobName}: ${mob.allocationPct}%") }
             RelatedTasks(snapshot.tasks, "paddock", paddock.id)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -1626,7 +2138,13 @@ private fun WaterAssetsScreen(
 ) {
     FormScaffold("Water Assets", onBackHome) {
         val snapshot = state.snapshot ?: return@FormScaffold
-        snapshot.waterAssets.forEach { asset ->
+        var filters by remember(snapshot.farm.id) { mutableStateOf(WaterFilterState()) }
+        val filteredAssets = filterWaterAssets(snapshot.waterAssets, filters)
+        WaterFilters(snapshot.waterAssets, filters) { filters = it }
+        if (filteredAssets.isEmpty()) {
+            EntityCard("No water assets", "No water assets match the current filters.")
+        }
+        filteredAssets.forEach { asset ->
             EntityCard(
                 title = asset.name,
                 detail = "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevel ?: "unknown"}",
@@ -1813,7 +2331,7 @@ private fun TaskCreateScreen(
     onTaskDescriptionChange: (String) -> Unit,
     onTaskDueDateChange: (String) -> Unit,
     onQueueTaskCreate: () -> Unit,
-    onAttachNewTaskPhoto: (Boolean) -> Unit,
+    onAttachNewTaskPhoto: () -> Unit,
 ) {
     FormScaffold("New Task", onBackHome) {
         Text("Linked to ${state.taskEntityType}", color = Color(0xFF516052))
@@ -1823,13 +2341,8 @@ private fun TaskCreateScreen(
         Button(onClick = onQueueTaskCreate, enabled = state.taskHeading.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
             Text("Queue Task")
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(onClick = { onAttachNewTaskPhoto(true) }, enabled = state.taskHeading.isNotBlank(), modifier = Modifier.weight(1f)) {
-                Text("Queue + Camera")
-            }
-            OutlinedButton(onClick = { onAttachNewTaskPhoto(false) }, enabled = state.taskHeading.isNotBlank(), modifier = Modifier.weight(1f)) {
-                Text("Queue + Photo")
-            }
+        OutlinedButton(onClick = onAttachNewTaskPhoto, enabled = state.taskHeading.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+            Text("Add Image")
         }
     }
 }
@@ -1896,6 +2409,54 @@ private fun PaddockPicker(
 }
 
 @Composable
+private fun PaddockFilterPicker(
+    paddocks: List<PaddockSummary>,
+    selectedPaddockId: String,
+    onPaddockSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = paddocks.firstOrNull { it.id == selectedPaddockId }
+    Picker("Paddock filter", selected?.name ?: "All paddocks", paddocks.isNotEmpty(), expanded, { expanded = it }) {
+        DropdownMenuItem(text = { Text("All paddocks") }, onClick = { expanded = false; onPaddockSelected("") })
+        paddocks.forEach { paddock ->
+            DropdownMenuItem(text = { Text(paddock.name) }, onClick = { expanded = false; onPaddockSelected(paddock.id) })
+        }
+    }
+}
+
+@Composable
+private fun MobFilterPicker(
+    mobs: List<MobSummary>,
+    selectedMobId: String,
+    onMobSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = mobs.firstOrNull { it.id == selectedMobId }
+    Picker("Mob filter", selected?.name ?: "All mobs", mobs.isNotEmpty(), expanded, { expanded = it }) {
+        DropdownMenuItem(text = { Text("All mobs") }, onClick = { expanded = false; onMobSelected("") })
+        mobs.forEach { mob ->
+            DropdownMenuItem(text = { Text(mob.name) }, onClick = { expanded = false; onMobSelected(mob.id) })
+        }
+    }
+}
+
+@Composable
+private fun WaterAssetFilterPicker(
+    assets: List<WaterAssetSummary>,
+    selectedWaterAssetId: String,
+    onWaterAssetSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = assets.firstOrNull { it.id == selectedWaterAssetId }
+    Picker("Water filter", selected?.name ?: "All water assets", assets.isNotEmpty(), expanded, { expanded = it }) {
+        DropdownMenuItem(text = { Text("All water assets") }, onClick = { expanded = false; onWaterAssetSelected("") })
+        assets.forEach { asset ->
+            DropdownMenuItem(text = { Text(asset.name) }, onClick = { expanded = false; onWaterAssetSelected(asset.id) })
+        }
+    }
+}
+
+@Composable
 private fun AnimalGroupPicker(
     animalGroupTypes: List<AnimalGroupTypeSummary>,
     selectedAnimalGroupTypeId: String,
@@ -1923,6 +2484,32 @@ private fun OptionPicker(
         options.forEach { option ->
             DropdownMenuItem(text = { Text(option.label) }, onClick = { expanded = false; onSelected(option.value) })
         }
+    }
+}
+
+@Composable
+private fun SimpleValuePicker(
+    label: String,
+    selectedValue: String,
+    values: List<String>,
+    allLabel: String,
+    onSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Picker(label, selectedValue.ifBlank { allLabel }, values.isNotEmpty(), expanded, { expanded = it }) {
+        DropdownMenuItem(text = { Text(allLabel) }, onClick = { expanded = false; onSelected("") })
+        values.forEach { value ->
+            DropdownMenuItem(text = { Text(value.replace("_", " ").replaceFirstChar(Char::titlecase)) }, onClick = { expanded = false; onSelected(value) })
+        }
+    }
+}
+
+@Composable
+private fun FilterChoice(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    if (selected) {
+        Button(onClick = onClick, modifier = modifier) { Text(label) }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = modifier) { Text(label) }
     }
 }
 
@@ -2279,8 +2866,15 @@ private fun queueTaskCreate(state: FieldUiState, repo: MobileRepository): FieldU
 
 private fun queueTaskStatus(state: FieldUiState, repo: MobileRepository, task: TaskSummary, status: String): FieldUiState {
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before updating a task.")
-    repo.queueTaskStatus(farm.id, task.id, status, "Mobile shortcut")
-    return state.copy(statusMessage = "Queued ${task.displayKey} status update.")
+    val note = state.taskComment.trim()
+    if (status == "closed" && note.isBlank()) {
+        return state.copy(statusMessage = "Task note is required before closing ${task.displayKey}.")
+    }
+    repo.queueTaskStatus(farm.id, task.id, status, note.ifBlank { "Mobile shortcut" })
+    return state.copy(
+        taskComment = if (status == "closed") "" else state.taskComment,
+        statusMessage = "Queued ${task.displayKey} status update.",
+    )
 }
 
 private fun queueTaskComment(state: FieldUiState, repo: MobileRepository, task: TaskSummary): FieldUiState {

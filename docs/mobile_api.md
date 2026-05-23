@@ -295,7 +295,7 @@ Supported command types:
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
 - `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.
 - `task.create`: `heading`, `description`, optional `space_id`, optional `due_date`, optional entity link ids.
-- `task.status.update`: `task_id`, `status`, optional `note`, optional `changed_at`.
+- `task.status.update`: `task_id`, `status`, optional `note`, optional `changed_at`; `note` is required when `status` is `closed`.
 - `task.comment.create`: `task_id`, `body`.
 - `paddock.update`: `paddock_id`, optional `status`, optional `notes`, optional `tags`.
 - `water_asset_status.update`: `water_asset_id`, and at least one of `active`, `status`, `water_level`.

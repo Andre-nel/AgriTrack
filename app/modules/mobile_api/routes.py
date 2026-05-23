@@ -391,11 +391,26 @@ def _mobile_calendar_items(*, farm_id: str, range_start: date, range_end: date) 
                 {
                     "kind": item["kind"],
                     "date": day.isoformat(),
+                    "source_id": item.get("source_id"),
+                    "task_id": item.get("task_id"),
+                    "activity_id": item.get("activity_id"),
                     "title": item["title"],
+                    "description": item.get("description"),
                     "subtitle": item.get("subtitle"),
                     "badge_text": item.get("badge_text"),
                     "farm_name": item.get("farm_name"),
                     "duration_text": item.get("duration_text"),
+                    "stage": item.get("stage"),
+                    "stage_label": item.get("stage_label"),
+                    "assignee_name": item.get("assignee_name"),
+                    "tags": item.get("tags") or [],
+                    "priority": item.get("priority"),
+                    "priority_label": item.get("priority_label"),
+                    "entity_links": item.get("entity_links") or [],
+                    "occurrence_date": item.get("occurrence_date"),
+                    "original_date": item.get("original_date"),
+                    "is_moved": item.get("is_moved"),
+                    "recurrence_text": item.get("recurrence_text"),
                 }
             )
     return sorted(items, key=lambda item: (item["date"], item["kind"], item["title"].lower()))
@@ -409,7 +424,13 @@ def _active_grazing_by_paddock(active_grazing: list[GrazingSession]) -> dict[str
             paddock_id = str(allocation.paddock_id)
             row = by_paddock.setdefault(
                 paddock_id,
-                {"paddock_id": paddock_id, "mobs": [], "species_heads": {}, "total_head": 0.0},
+                {
+                    "paddock_id": paddock_id,
+                    "mobs": [],
+                    "species_heads": {},
+                    "group_heads": {},
+                    "total_head": 0.0,
+                },
             )
             fraction = float(allocation.allocation_fraction)
             row["mobs"].append(
@@ -424,11 +445,36 @@ def _active_grazing_by_paddock(active_grazing: list[GrazingSession]) -> dict[str
                 species = balance.animal_group_type.species
                 head = float(balance.head_count) * fraction
                 row["species_heads"][species] = row["species_heads"].get(species, 0.0) + head
+                group_id = str(balance.animal_group_type_id)
+                group_row = row["group_heads"].setdefault(
+                    group_id,
+                    {
+                        "animal_group_type_id": group_id,
+                        "animal_group_type": _serialize_animal_group_type(balance.animal_group_type),
+                        "head": 0.0,
+                    },
+                )
+                group_row["head"] += head
                 row["total_head"] += head
     for row in by_paddock.values():
         row["species_heads"] = [
             {"species": species, "head": round(head, 2)}
             for species, head in sorted(row["species_heads"].items())
+        ]
+        row["group_heads"] = [
+            {
+                **group_row,
+                "head": round(group_row["head"], 2),
+            }
+            for group_row in sorted(
+                row["group_heads"].values(),
+                key=lambda item: (
+                    item["animal_group_type"]["species"],
+                    item["animal_group_type"]["breed"],
+                    item["animal_group_type"]["sex"],
+                    item["animal_group_type"]["age_class"],
+                ),
+            )
         ]
         row["total_head"] = round(row["total_head"], 2)
         row["mobs"].sort(key=lambda item: item["mob_name"].lower())

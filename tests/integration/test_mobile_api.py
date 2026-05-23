@@ -21,6 +21,7 @@ from app.models import (
     TaskComment,
     TaskEntityLink,
     TaskSpace,
+    TaskStatusTransition,
     User,
     UserFarmRole,
     WaterAsset,
@@ -216,7 +217,7 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
         db.session.flush()
         TaskService.add_entity_links(task=task, paddock_ids=[paddock.id], mob_ids=[mob.id])
         db.session.add(
-            CalendarActivity(
+            activity := CalendarActivity(
                 farm_id=farm.id,
                 title="Weekly water run",
                 description="Check tanks and troughs.",
@@ -252,6 +253,8 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
             )
         )
         farm_id = str(farm.id)
+        task_id = str(task.id)
+        activity_id = str(activity.id)
         db.session.commit()
 
     token = _login(client)
@@ -263,13 +266,32 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert [paddock["name"] for paddock in payload["paddocks"]] == ["North Camp"]
     assert payload["mobs"][0]["balances"][0]["head_count"] == 12
     assert payload["active_grazing"][0]["allocations"][0]["allocation_fraction"] == 1.0
+    assert payload["active_grazing_by_paddock"][0]["group_heads"][0]["animal_group_type"]["species"] == "Cattle"
+    assert payload["active_grazing_by_paddock"][0]["group_heads"][0]["head"] == 12.0
     assert payload["rainfall"][0]["mm"] == 14.0
     assert payload["mob_events"][0]["tags"] == ["health", "field note"]
     assert {asset["name"] for asset in payload["water_assets"]} == {"Header Tank", "North Trough"}
     assert payload["water_connections"][0]["flow_type"] == "gravity"
     assert payload["tasks"][0]["heading"] == "Check north trough"
+    assert payload["tasks"][0]["tags"] == ["water", "field"]
+    assert payload["tasks"][0]["assignee_name"] == "Field Team"
+    assert payload["tasks"][0]["priority_label"] == "High"
     assert {link["entity_type"] for link in payload["tasks"][0]["entity_links"]} == {"paddock", "mob"}
     assert payload["calendar_items"][0]["title"] in {"Check north trough", "Weekly water run"}
+    task_item = next(item for item in payload["calendar_items"] if item["kind"] == "task")
+    assert task_item["source_id"] == task_id
+    assert task_item["task_id"] == task_id
+    assert task_item["description"] == "Confirm water level and float valve."
+    assert task_item["stage"] == "todo"
+    assert task_item["stage_label"] == "TO DO"
+    assert task_item["assignee_name"] == "Field Team"
+    assert task_item["tags"] == ["water", "field"]
+    assert {link["entity_type"] for link in task_item["entity_links"]} == {"paddock", "mob"}
+    activity_item = next(item for item in payload["calendar_items"] if item["kind"] == "activity")
+    assert activity_item["source_id"] == activity_id
+    assert activity_item["activity_id"] == activity_id
+    assert activity_item["description"] == "Check tanks and troughs."
+    assert activity_item["stage_label"] == "Activity"
     assert "decision_feed" in payload
     assert "map_features" in payload
 
@@ -545,6 +567,83 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert db.session.get(Task, task_id).status == "in_progress"
         assert TaskComment.query.filter_by(task_id=task_id).count() == 1
         assert MobileSyncCommand.query.filter_by(status="applied").count() == 10
+
+
+def test_mobile_task_close_requires_note(client, app):
+    with app.app_context():
+        farm = Farm(name="Close Note Mobile Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        space = TaskSpace(
+            farm_id=farm.id,
+            key="CLOSE",
+            name="Close Note Tasks",
+            description="Mobile close note tasks",
+        )
+        db.session.add(space)
+        db.session.flush()
+        task = TaskService.create_task(
+            space=space,
+            heading="Close with note",
+            description="Must capture the close reason.",
+            raw_tags="",
+            reporter_name="Mobile User",
+            assignee_name=None,
+            status="todo",
+            priority="high",
+            original_estimate_days=None,
+            due_date=None,
+        )
+        farm_id = str(farm.id)
+        task_id = str(task.id)
+        db.session.commit()
+
+    token = _login(client)
+    missing_note = client.post(
+        "/api/mobile/v1/sync/commands",
+        headers=_auth(token),
+        json={
+            "commands": [
+                {
+                    "client_command_id": "close-without-note",
+                    "type": "task.status.update",
+                    "farm_id": farm_id,
+                    "payload": {"task_id": task_id, "status": "closed"},
+                }
+            ]
+        },
+    )
+
+    assert missing_note.status_code == 200
+    missing_result = missing_note.get_json()["results"][0]
+    assert missing_result["status"] == "failed"
+    assert missing_result["error"]["message"] == "Closing a task requires a note"
+
+    with app.app_context():
+        assert db.session.get(Task, task_id).status == "todo"
+
+    with_note = client.post(
+        "/api/mobile/v1/sync/commands",
+        headers=_auth(token),
+        json={
+            "commands": [
+                {
+                    "client_command_id": "close-with-note",
+                    "type": "task.status.update",
+                    "farm_id": farm_id,
+                    "payload": {"task_id": task_id, "status": "closed", "note": "Water point repaired."},
+                }
+            ]
+        },
+    )
+
+    assert with_note.status_code == 200
+    assert with_note.get_json()["results"][0]["status"] == "applied"
+    with app.app_context():
+        assert db.session.get(Task, task_id).status == "closed"
+        transition = TaskStatusTransition.query.filter_by(task_id=task_id, to_status="closed").one()
+        assert transition.note == "Water point repaired."
 
 
 def test_mobile_sync_commands_report_partial_failures_and_missing_records(client, app):

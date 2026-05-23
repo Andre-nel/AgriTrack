@@ -404,6 +404,9 @@ class TaskService:
         normalized_changed_by = cls.require_text(changed_by_name, "Changed by", cls.MAX_NAME_LENGTH)
         normalized_note = cls.optional_text(note)
 
+        if not initial and normalized_status == "closed" and not normalized_note:
+            raise ValueError("Closing a task requires a note")
+
         if not initial and task.status == normalized_status:
             raise ValueError("Task is already in that status")
 

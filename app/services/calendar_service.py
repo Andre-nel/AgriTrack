@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models import CalendarActivity, CalendarActivityException, Task, TaskSpace
-from app.services.task_service import TASK_STATUS_LABELS
+from app.services.task_service import TASK_PRIORITY_LABELS, TASK_STATUS_LABELS, TaskService
 
 CALENDAR_REPEAT_UNITS = ("days", "weeks", "months", "years")
 CALENDAR_EXCEPTION_ACTIONS = ("skip", "move")
@@ -611,13 +611,47 @@ class CalendarService:
                 {
                     "kind": "task",
                     "date": task.due_date,
+                    "source_id": str(task.id),
+                    "task_id": str(task.id),
+                    "activity_id": None,
                     "title": task.heading,
+                    "description": task.description,
                     "subtitle": f"{task.display_key} | {farm_name}",
                     "farm_name": farm_name,
                     "detail_url": url_for("tasks.task_detail", task_id=task.id),
                     "create_task_url": None,
                     "duration_text": None,
                     "badge_text": TASK_STATUS_LABELS.get(task.status, "Task"),
+                    "stage": task.status,
+                    "stage_label": TASK_STATUS_LABELS.get(task.status, task.status),
+                    "assignee_name": task.assignee_name,
+                    "tags": TaskService.tags_from_csv(task.tags_csv),
+                    "priority": task.priority,
+                    "priority_label": TASK_PRIORITY_LABELS.get(task.priority, task.priority),
+                    "entity_links": [
+                        {
+                            "id": str(link.id),
+                            "task_id": str(link.task_id),
+                            "entity_type": (
+                                "paddock"
+                                if link.paddock_id
+                                else "water_asset"
+                                if link.water_asset_id
+                                else "mob"
+                            ),
+                            "entity_id": str(link.paddock_id or link.water_asset_id or link.mob_id),
+                            "entity_name": (
+                                link.paddock.name
+                                if link.paddock
+                                else link.water_asset.name
+                                if link.water_asset
+                                else link.mob.name
+                                if link.mob
+                                else None
+                            ),
+                        }
+                        for link in task.entity_links
+                    ],
                     "css_class": "calendar-item-task",
                 }
             )
@@ -665,13 +699,28 @@ class CalendarService:
                         {
                             "kind": "activity",
                             "date": row["date"],
+                            "source_id": str(activity.id),
+                            "task_id": None,
+                            "activity_id": str(activity.id),
                             "title": activity.title,
+                            "description": activity.description,
                             "subtitle": f"{duration_text} | {cls.recurrence_summary(activity)}",
                             "duration_text": duration_text,
                             "farm_name": farm_name,
                             "detail_url": detail_url,
                             "create_task_url": create_task_url,
                             "badge_text": "Recurring" if cls.is_recurring(activity) else "Activity",
+                            "stage": "recurring" if cls.is_recurring(activity) else "activity",
+                            "stage_label": "Recurring" if cls.is_recurring(activity) else "Activity",
+                            "assignee_name": None,
+                            "tags": [],
+                            "priority": None,
+                            "priority_label": None,
+                            "entity_links": [],
+                            "occurrence_date": row["date"].isoformat(),
+                            "original_date": row["original_date"].isoformat(),
+                            "is_moved": row["is_moved"],
+                            "recurrence_text": cls.recurrence_summary(activity),
                             "css_class": "calendar-item-activity",
                         }
                     )
