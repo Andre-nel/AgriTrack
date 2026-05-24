@@ -122,6 +122,15 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
         setSetting("last_farm_id", "")
     }
 
+    fun loadBaseUrl(): String? = getSetting("base_url")?.takeIf { it.isNotBlank() }
+
+    fun saveBaseUrl(baseUrl: String) {
+        val normalized = normalizeBaseUrl(baseUrl)
+        if (normalized.isNotBlank()) {
+            setSetting("base_url", normalized)
+        }
+    }
+
     fun saveAvailableFarms(farms: List<FarmSummary>) {
         val array = JSONArray()
         farms.forEach { farm -> array.put(farm.toJson()) }
@@ -490,6 +499,14 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
+    }
+
+    private fun normalizeBaseUrl(value: String): String {
+        var normalized = value.trim()
+        while (normalized.endsWith("/")) {
+            normalized = normalized.dropLast(1)
+        }
+        return normalized
     }
 
     private companion object {

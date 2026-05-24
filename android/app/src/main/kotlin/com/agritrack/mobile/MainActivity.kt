@@ -116,6 +116,8 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+private const val DEFAULT_BASE_URL = "http://10.0.2.2:5000"
+
 class MainActivity : ComponentActivity() {
     private val background: ExecutorService = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -132,6 +134,7 @@ class MainActivity : ComponentActivity() {
         fieldStore = LocalFieldStore(this)
         registerConnectivitySync()
 
+        val cachedBaseUrl = fieldStore.loadBaseUrl() ?: DEFAULT_BASE_URL
         val hasStoredToken = runCatching { tokenStore.load() != null }.getOrElse {
             tokenStore.clear()
             false
@@ -151,6 +154,7 @@ class MainActivity : ComponentActivity() {
             availableFarms = cachedFarms,
             activeFarm = cachedActiveFarm,
         ).copy(
+            baseUrl = cachedBaseUrl,
             isAuthenticated = hasStoredToken,
             statusMessage = if (hasStoredToken) "Ready" else "Log in to continue.",
         )
@@ -393,9 +397,14 @@ class MainActivity : ComponentActivity() {
                     onLogin = {
                         val email = uiState.email
                         val password = uiState.password
+                        val loginBaseUrl = uiState.baseUrl
                         runTask(
                             statusMessage = "Logging in...",
-                            work = { repo -> repo.loginAndLoad(email, password, "Android Field Phone") },
+                            work = { repo ->
+                                repo.loginAndLoad(email, password, "Android Field Phone").also {
+                                    fieldStore.saveBaseUrl(loginBaseUrl)
+                                }
+                            },
                             reduce = ::loginLoaded,
                         )
                     },
@@ -594,7 +603,7 @@ class MainActivity : ComponentActivity() {
 
 private data class FieldUiState(
     val currentScreen: AppScreen = AppScreen.Home,
-    val baseUrl: String = "http://10.0.2.2:5000",
+    val baseUrl: String = DEFAULT_BASE_URL,
     val email: String = "",
     val password: String = "",
     val isAuthenticated: Boolean = false,
