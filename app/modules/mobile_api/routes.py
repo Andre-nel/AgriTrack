@@ -176,8 +176,8 @@ def _coerce_non_negative_decimal(value, field_name: str) -> Decimal:
     return parsed
 
 
-def _serialize_farm(farm: Farm) -> dict:
-    return {
+def _serialize_farm(farm: Farm, role: str | None = None) -> dict:
+    payload = {
         "id": str(farm.id),
         "name": farm.name,
         "timezone": farm.timezone,
@@ -185,6 +185,21 @@ def _serialize_farm(farm: Farm) -> dict:
         "default_stocking_rate_ha_per_lsu": float(farm.default_stocking_rate_ha_per_lsu),
         "updated_at": _iso_datetime(farm.updated_at),
     }
+    if role:
+        payload["role"] = role
+    return payload
+
+
+def _accessible_farm_summaries(user: User) -> list[dict]:
+    roles = [
+        role
+        for role in user.farm_roles
+        if role.farm is not None and role.farm.active
+    ]
+    return [
+        _serialize_farm(role.farm, role=role.role)
+        for role in sorted(roles, key=lambda item: item.farm.name.lower())
+    ]
 
 
 def _serialize_paddock(paddock: Paddock) -> dict:
@@ -628,11 +643,7 @@ def login():
             "token_type": "Bearer",
             "expires_at": _iso_datetime(token_record.expires_at),
             "user": _serialize_user(user),
-            "farms": [
-                _serialize_farm(role.farm)
-                for role in user.farm_roles
-                if role.farm is not None and role.farm.active
-            ],
+            "farms": _accessible_farm_summaries(user),
         }
     )
 
@@ -651,11 +662,7 @@ def ping():
             "status": "ok",
             "server_time": _iso_datetime(_utcnow()),
             "user": _serialize_user(g.mobile_user),
-            "farms": [
-                _serialize_farm(role.farm)
-                for role in g.mobile_user.farm_roles
-                if role.farm is not None and role.farm.active
-            ],
+            "farms": _accessible_farm_summaries(g.mobile_user),
         }
     )
 
@@ -667,11 +674,7 @@ def bootstrap():
         {
             "server_time": _iso_datetime(_utcnow()),
             "user": _serialize_user(user),
-            "farms": [
-                _serialize_farm(role.farm)
-                for role in user.farm_roles
-                if role.farm is not None and role.farm.active
-            ],
+            "farms": _accessible_farm_summaries(user),
             "animal_group_types": [
                 _serialize_animal_group_type(group_type)
                 for group_type in AnimalGroupType.query.order_by(

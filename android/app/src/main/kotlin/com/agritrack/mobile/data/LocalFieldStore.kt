@@ -70,7 +70,7 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
         onCreate(db)
     }
 
-    fun saveSnapshot(snapshot: FarmSnapshot) {
+    fun saveSnapshot(snapshot: FarmSnapshot, makeActive: Boolean = true) {
         val now = System.currentTimeMillis()
         writableDatabase.beginTransaction()
         try {
@@ -96,7 +96,9 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
             saveArray(snapshot.farm.id, "calendar_item", json.optJSONArray("calendar_items"), "date", now)
             saveArray(snapshot.farm.id, "decision", json.optJSONArray("decision_feed"), "title", now)
             saveArray(snapshot.farm.id, "map_feature", json.optJSONArray("map_features"), "properties.name", now)
-            setSetting("last_farm_id", snapshot.farm.id)
+            if (makeActive) {
+                setActiveFarmId(snapshot.farm.id)
+            }
             writableDatabase.setTransactionSuccessful()
         } finally {
             writableDatabase.endTransaction()
@@ -104,8 +106,38 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
     }
 
     fun loadLastSnapshot(): FarmSnapshot? {
-        val farmId = getSetting("last_farm_id") ?: return null
+        val farmId = loadLastFarmId() ?: return null
         return loadSnapshot(farmId)
+    }
+
+    fun loadLastFarmId(): String? = getSetting("last_farm_id")?.takeIf { it.isNotBlank() }
+
+    fun setActiveFarmId(farmId: String) {
+        if (farmId.isNotBlank()) {
+            setSetting("last_farm_id", farmId)
+        }
+    }
+
+    fun clearActiveFarmId() {
+        setSetting("last_farm_id", "")
+    }
+
+    fun saveAvailableFarms(farms: List<FarmSummary>) {
+        val array = JSONArray()
+        farms.forEach { farm -> array.put(farm.toJson()) }
+        setSetting("available_farms", array.toString())
+    }
+
+    fun loadAvailableFarms(): List<FarmSummary> {
+        val raw = getSetting("available_farms") ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    add(FarmSummary.fromJson(array.getJSONObject(index)))
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     fun loadSnapshot(farmId: String): FarmSnapshot? =

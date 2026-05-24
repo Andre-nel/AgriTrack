@@ -218,7 +218,23 @@ class MobileModelsTest {
     fun bootstrapParserKeepsFormOptions() {
         val bootstrap = BootstrapResult.fromJson(
             JSONObject()
-                .put("farms", JSONArray())
+                .put(
+                    "farms",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "farm-1")
+                                .put("name", "North Block")
+                                .put("timezone", "Africa/Johannesburg")
+                                .put("role", "manager")
+                        )
+                        .put(
+                            JSONObject()
+                                .put("id", "farm-2")
+                                .put("name", "South Block")
+                                .put("timezone", "UTC")
+                        )
+                )
                 .put("animal_group_types", JSONArray())
                 .put(
                     "sync",
@@ -247,6 +263,11 @@ class MobileModelsTest {
         )
 
         assertEquals("task.create", bootstrap.supportedCommandTypes.first())
+        assertEquals(2, bootstrap.farms.size)
+        assertEquals("manager", bootstrap.farms.first().role)
+        assertEquals("North Block - Manager", bootstrap.farms.first().displayLabel)
+        assertEquals(null, bootstrap.farms.last().role)
+        assertEquals("South Block", bootstrap.farms.last().displayLabel)
         assertEquals("todo", bootstrap.formOptions.taskStatuses.first().value)
         assertEquals("operational", bootstrap.formOptions.waterStatusOptionsByType["tank"]?.first()?.value)
         assertEquals(true, "tank" in bootstrap.formOptions.waterLevelAssetTypes)

@@ -88,9 +88,24 @@ Response:
     "email": "field@example.com",
     "name": "Field User",
     "active": true,
-    "farm_roles": []
+    "farm_roles": [
+      {
+        "farm_id": "farm-id",
+        "farm_name": "Demo Farm",
+        "role": "manager",
+        "active": true
+      }
+    ]
   },
-  "farms": []
+  "farms": [
+    {
+      "id": "farm-id",
+      "name": "Demo Farm",
+      "timezone": "Africa/Johannesburg",
+      "active": true,
+      "role": "manager"
+    }
+  ]
 }
 ```
 
@@ -131,13 +146,25 @@ Response:
 Use this after login to discover farm access, animal group types, supported sync
 commands, and server time.
 
+Each item in `farms` includes the user's role on that farm as a label for the
+mobile farm switcher. Mobile roles are informational in this API version: any
+active farm assignment continues to grant the same mobile actions.
+
 Important response fields:
 
 ```json
 {
   "server_time": "2026-05-18T10:00:00+00:00",
   "user": {},
-  "farms": [],
+  "farms": [
+    {
+      "id": "farm-id",
+      "name": "Demo Farm",
+      "timezone": "Africa/Johannesburg",
+      "active": true,
+      "role": "manager"
+    }
+  ],
   "animal_group_types": [],
   "sync": {
     "supported_command_types": [
@@ -194,9 +221,10 @@ Response groups:
 }
 ```
 
-The snapshot is the Android read model. It represents current working state:
-open tasks, upcoming calendar items, current grazing allocation, current water
-state, recent rainfall, and decision hints. It is not a historical browser.
+The snapshot is the Android read model for one selected farm. It represents
+current working state: open tasks, upcoming calendar items, current grazing
+allocation, current water state, recent rainfall, and decision hints. It is not
+a historical browser.
 
 ### Mobile Map Data
 
@@ -336,10 +364,14 @@ Common codes:
 
 1. Store the bearer token in encrypted storage.
 2. Fetch `/bootstrap`.
-3. Let the user pick a farm.
-4. Fetch `/farms/<farm_id>/snapshot` and cache it locally.
+3. Cache the accessible farm list and show a farm switcher using each
+   `name`/`role` pair.
+4. Fetch `/farms/<farm_id>/snapshot` for every accessible farm and cache each
+   snapshot locally for offline switching. If a farm snapshot fails but
+   bootstrap succeeds, keep the login and show cached snapshots that did load.
 5. Save field actions to a local offline queue with `client_command_id`.
 6. Replay queued actions with `/sync/commands` when connectivity returns and
    on the foreground sync interval, default 5 minutes.
 7. Mark commands as applied or failed based on the server result.
-8. Refresh the current farm snapshot after applied commands.
+8. Refresh cached snapshots for every farm that had applied commands; update
+   the visible dashboard immediately when the selected farm was refreshed.

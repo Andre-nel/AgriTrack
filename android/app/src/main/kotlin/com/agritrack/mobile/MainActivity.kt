@@ -74,8 +74,8 @@ import com.agritrack.mobile.data.CalendarItemSummary
 import com.agritrack.mobile.data.DecisionItemSummary
 import com.agritrack.mobile.data.FarmSnapshot
 import com.agritrack.mobile.data.FarmSummary
+import com.agritrack.mobile.data.FarmLoadResult
 import com.agritrack.mobile.data.LocalFieldStore
-import com.agritrack.mobile.data.LoginLoadResult
 import com.agritrack.mobile.data.LogoutResult
 import com.agritrack.mobile.data.MapFeatureSummary
 import com.agritrack.mobile.data.MobileFormOptions
@@ -136,12 +136,20 @@ class MainActivity : ComponentActivity() {
             tokenStore.clear()
             false
         }
+        val cachedFarms = if (hasStoredToken) fieldStore.loadAvailableFarms() else emptyList()
         val cachedSnapshot = if (hasStoredToken) fieldStore.loadLastSnapshot() else null
+        val cachedActiveFarm = cachedSnapshot?.let { snapshot ->
+            farmWithRole(snapshot.farm, cachedFarms)
+        } ?: fieldStore.loadLastFarmId()?.let { farmId ->
+            cachedFarms.firstOrNull { it.id == farmId }
+        }
         val initialState = FieldUiState.fromSnapshot(
             snapshot = cachedSnapshot,
             pendingCount = fieldStore.pendingCount(),
             failedCommands = fieldStore.failedCommands(),
             syncIntervalMinutes = fieldStore.getSyncIntervalMinutes(),
+            availableFarms = cachedFarms,
+            activeFarm = cachedActiveFarm,
         ).copy(
             isAuthenticated = hasStoredToken,
             statusMessage = if (hasStoredToken) "Ready" else "Log in to continue.",
@@ -365,6 +373,13 @@ class MainActivity : ComponentActivity() {
                     onPasswordChange = { uiState = uiState.copy(password = it) },
                     onOpenScreen = { uiState = uiState.copy(currentScreen = it) },
                     onBackHome = { uiState = uiState.copy(currentScreen = AppScreen.Home) },
+                    onFarmSelected = { farmId ->
+                        runTask(
+                            statusMessage = "Loading selected farm...",
+                            work = { repo -> repo.selectFarm(farmId) },
+                            reduce = ::farmSelected,
+                        )
+                    },
                     onSyncIntervalChange = { uiState = uiState.copy(syncIntervalText = it) },
                     onSaveSyncInterval = {
                         val interval = uiState.syncIntervalText.toIntOrNull()?.coerceAtLeast(1) ?: 5
@@ -393,9 +408,9 @@ class MainActivity : ComponentActivity() {
                     },
                     onRefresh = {
                         runTask(
-                            statusMessage = "Refreshing current farm snapshot...",
-                            work = { repo -> repo.refreshSnapshot(uiState.selectedFarm?.id) },
-                            reduce = ::refreshed,
+                            statusMessage = "Refreshing accessible farm snapshots...",
+                            work = { repo -> repo.refreshAllSnapshots() },
+                            reduce = ::farmsRefreshed,
                         )
                     },
                     onRainfallDateChange = { uiState = uiState.copy(rainfallDate = it) },
@@ -586,6 +601,7 @@ private data class FieldUiState(
     val isBusy: Boolean = false,
     val connectionState: BackendConnectionState = BackendConnectionState.Unknown,
     val statusMessage: String = "Ready",
+    val availableFarms: List<FarmSummary> = emptyList(),
     val selectedFarm: FarmSummary? = null,
     val snapshot: FarmSnapshot? = null,
     val pendingCount: Int = 0,
@@ -630,13 +646,17 @@ private data class FieldUiState(
             pendingCount: Int,
             failedCommands: List<OutboxFailure>,
             syncIntervalMinutes: Int,
+            availableFarms: List<FarmSummary> = emptyList(),
+            activeFarm: FarmSummary? = null,
         ): FieldUiState {
             val firstMob = snapshot?.mobs?.firstOrNull()
             val firstPaddock = snapshot?.paddocks?.firstOrNull()
             val firstWater = snapshot?.waterAssets?.firstOrNull()
             val firstBalance = firstMob?.balances?.firstOrNull()
+            val selectedFarm = activeFarm ?: snapshot?.let { farmWithRole(it.farm, availableFarms) }
             return FieldUiState(
-                selectedFarm = snapshot?.farm,
+                availableFarms = availableFarms,
+                selectedFarm = selectedFarm,
                 snapshot = snapshot,
                 pendingCount = pendingCount,
                 failedCommands = failedCommands,
@@ -745,6 +765,7 @@ private fun AgriTrackApp(
     onPasswordChange: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onBackHome: () -> Unit,
+    onFarmSelected: (String) -> Unit,
     onSyncIntervalChange: (String) -> Unit,
     onSaveSyncInterval: () -> Unit,
     onLogin: () -> Unit,
@@ -817,6 +838,7 @@ private fun AgriTrackApp(
                     onPasswordChange,
                     onLogin,
                     onOpenScreen,
+                    onFarmSelected,
                     onRefresh,
                     onSync,
                 )
@@ -1036,13 +1058,14 @@ private fun HomeScreen(
     onPasswordChange: (String) -> Unit,
     onLogin: () -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
+    onFarmSelected: (String) -> Unit,
     onRefresh: () -> Unit,
     onSync: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         LoginScreen(state, onBaseUrlChange, onEmailChange, onPasswordChange, onLogin)
         if (state.isAuthenticated) {
-            FarmSummaryPanel(state, onRefresh, onOpenScreen)
+            FarmSummaryPanel(state, onRefresh, onOpenScreen, onFarmSelected)
             DecisionFeedPanel(state.snapshot?.decisionFeed.orEmpty(), onOpenScreen)
             DashboardMenu(state, onOpenScreen)
             SyncMiniPanel(state, onOpenScreen, onSync)
@@ -1060,7 +1083,7 @@ private fun LoginScreen(
 ) {
     SectionCard("Login") {
         if (state.isAuthenticated) {
-            Text(state.selectedFarm?.name ?: "Signed in", fontWeight = FontWeight.SemiBold)
+            Text(state.selectedFarm?.displayLabel ?: "Signed in", fontWeight = FontWeight.SemiBold)
             Text(state.baseUrl, style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
         } else {
             OutlinedTextField(state.baseUrl, onBaseUrlChange, label = { Text("Base URL") }, modifier = Modifier.fillMaxWidth())
@@ -1093,14 +1116,23 @@ private fun LoginScreen(
 }
 
 @Composable
-private fun FarmSummaryPanel(state: FieldUiState, onRefresh: () -> Unit, onOpenScreen: (AppScreen) -> Unit) {
+private fun FarmSummaryPanel(
+    state: FieldUiState,
+    onRefresh: () -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onFarmSelected: (String) -> Unit,
+) {
     SectionCard("Current Farm") {
+        FarmSwitcher(state, onFarmSelected)
         val snapshot = state.snapshot
         if (snapshot == null) {
             Text("No farm loaded", color = Color(0xFF516052))
             return@SectionCard
         }
-        Text(snapshot.farm.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(state.selectedFarm?.name ?: snapshot.farm.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        state.selectedFarm?.roleLabel?.let { role ->
+            Text(role, style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+        }
         Text(snapshot.farm.timezone, style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
         MetricActionRows(
             listOf(
@@ -1115,7 +1147,40 @@ private fun FarmSummaryPanel(state: FieldUiState, onRefresh: () -> Unit, onOpenS
             Text("New Task")
         }
         Button(onClick = onRefresh, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
-            Text("Refresh Snapshot")
+            Text("Refresh Farms")
+        }
+    }
+}
+
+@Composable
+private fun FarmSwitcher(state: FieldUiState, onFarmSelected: (String) -> Unit) {
+    if (state.availableFarms.size <= 1) {
+        return
+    }
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            enabled = !state.isBusy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Farm", style = MaterialTheme.typography.labelMedium, color = Color(0xFF516052))
+                Text(state.selectedFarm?.displayLabel ?: "Choose farm", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            state.availableFarms.forEach { farm ->
+                DropdownMenuItem(
+                    text = { Text(farm.displayLabel) },
+                    onClick = {
+                        expanded = false
+                        if (farm.id != state.selectedFarm?.id) {
+                            onFarmSelected(farm.id)
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -1123,7 +1188,7 @@ private fun FarmSummaryPanel(state: FieldUiState, onRefresh: () -> Unit, onOpenS
 @Composable
 private fun DashboardMenu(state: FieldUiState, onOpenScreen: (AppScreen) -> Unit) {
     SectionCard("Dashboard") {
-        DashboardButton("All Farms Map", "View cached farm and water map features", state.snapshot != null) {
+        DashboardButton("Farm Map", "View cached farm and water map features", state.snapshot != null) {
             onOpenScreen(AppScreen.FarmMap)
         }
         DashboardButton("Calendar", "Tasks and activities for the coming days", state.snapshot != null) {
@@ -2901,23 +2966,44 @@ private fun SectionDivider() {
     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
 }
 
-private fun loginLoaded(state: FieldUiState, result: LoginLoadResult): FieldUiState {
+private fun farmWithRole(farm: FarmSummary, availableFarms: List<FarmSummary>): FarmSummary =
+    availableFarms.firstOrNull { it.id == farm.id } ?: farm
+
+private fun farmLoadMessage(prefix: String, result: FarmLoadResult): String =
+    if (result.availableFarms.isEmpty()) {
+        "$prefix. No farm access is available."
+    } else if (result.failedFarmCount > 0) {
+        "$prefix. ${result.failedFarmCount} farm snapshot(s) could not be loaded."
+    } else {
+        "$prefix. Cached ${result.prefetchedCount}/${result.availableFarms.size} farm snapshot(s)."
+    }
+
+private fun loginLoaded(state: FieldUiState, result: FarmLoadResult): FieldUiState {
     val snapshot = result.snapshot
         ?: return state.copy(
             currentScreen = AppScreen.Home,
             isAuthenticated = true,
-            selectedFarm = null,
+            availableFarms = result.availableFarms,
+            selectedFarm = result.activeFarm,
             snapshot = null,
             selectedMobId = "",
             pendingCount = 0,
             password = "",
-            statusMessage = "Login worked, but this user has no farm access yet.",
+            animalGroupTypes = result.bootstrap.animalGroupTypes,
+            formOptions = result.bootstrap.formOptions,
+            statusMessage = if (result.availableFarms.isEmpty()) {
+                "Login worked, but this user has no farm access yet."
+            } else {
+                "Login worked, but ${result.failedFarmCount} farm snapshot(s) could not be loaded."
+            },
         )
     return FieldUiState.fromSnapshot(
         snapshot = snapshot,
         pendingCount = state.pendingCount,
         failedCommands = state.failedCommands,
         syncIntervalMinutes = state.syncIntervalMinutes,
+        availableFarms = result.availableFarms,
+        activeFarm = result.activeFarm,
     ).copy(
         baseUrl = state.baseUrl,
         email = state.email,
@@ -2925,7 +3011,7 @@ private fun loginLoaded(state: FieldUiState, result: LoginLoadResult): FieldUiSt
         isAuthenticated = true,
         animalGroupTypes = mergeAnimalGroupTypes(result.bootstrap.animalGroupTypes, animalGroupTypesFromSnapshot(snapshot)),
         formOptions = result.bootstrap.formOptions,
-        statusMessage = "Loaded ${snapshot.farm.name}",
+        statusMessage = farmLoadMessage("Loaded ${result.activeFarm?.name ?: snapshot.farm.name}", result),
     )
 }
 
@@ -2946,18 +3032,46 @@ private fun loggedOut(state: FieldUiState, result: LogoutResult): FieldUiState {
     )
 }
 
-private fun refreshed(state: FieldUiState, snapshot: FarmSnapshot): FieldUiState =
+private fun farmsRefreshed(state: FieldUiState, result: FarmLoadResult): FieldUiState {
+    val snapshot = result.snapshot
+        ?: return state.copy(
+            availableFarms = result.availableFarms,
+            selectedFarm = result.activeFarm,
+            snapshot = null,
+            statusMessage = farmLoadMessage("Refreshed farm access", result),
+        )
+    return FieldUiState.fromSnapshot(
+        snapshot = snapshot,
+        pendingCount = state.pendingCount,
+        failedCommands = state.failedCommands,
+        syncIntervalMinutes = state.syncIntervalMinutes,
+        availableFarms = result.availableFarms,
+        activeFarm = result.activeFarm,
+    ).copy(
+        baseUrl = state.baseUrl,
+        email = state.email,
+        isAuthenticated = state.isAuthenticated,
+        animalGroupTypes = mergeAnimalGroupTypes(result.bootstrap.animalGroupTypes, animalGroupTypesFromSnapshot(snapshot)),
+        formOptions = result.bootstrap.formOptions,
+        statusMessage = farmLoadMessage("Refreshed ${result.activeFarm?.name ?: snapshot.farm.name}", result),
+    )
+}
+
+private fun farmSelected(state: FieldUiState, snapshot: FarmSnapshot): FieldUiState =
     FieldUiState.fromSnapshot(
         snapshot = snapshot,
         pendingCount = state.pendingCount,
         failedCommands = state.failedCommands,
         syncIntervalMinutes = state.syncIntervalMinutes,
+        availableFarms = state.availableFarms,
+        activeFarm = farmWithRole(snapshot.farm, state.availableFarms),
     ).copy(
         baseUrl = state.baseUrl,
         email = state.email,
         isAuthenticated = state.isAuthenticated,
+        animalGroupTypes = mergeAnimalGroupTypes(state.animalGroupTypes, animalGroupTypesFromSnapshot(snapshot)),
         formOptions = state.formOptions,
-        statusMessage = "Refreshed ${snapshot.farm.name}",
+        statusMessage = "Loaded ${farmWithRole(snapshot.farm, state.availableFarms).name}",
     )
 
 private fun synced(state: FieldUiState, summary: SyncSummary): FieldUiState {
@@ -2967,12 +3081,19 @@ private fun synced(state: FieldUiState, summary: SyncSummary): FieldUiState {
             pendingCount = summary.remainingQueueCount,
             failedCommands = state.failedCommands,
             syncIntervalMinutes = state.syncIntervalMinutes,
+            availableFarms = state.availableFarms,
+            activeFarm = farmWithRole(it.farm, state.availableFarms),
         )
     } ?: state.copy(pendingCount = summary.remainingQueueCount)
     return base.copy(
         baseUrl = state.baseUrl,
         email = state.email,
         isAuthenticated = state.isAuthenticated,
+        selectedFarm = summary.refreshedSnapshot?.let { farmWithRole(it.farm, state.availableFarms) } ?: state.selectedFarm,
+        availableFarms = state.availableFarms,
+        animalGroupTypes = summary.refreshedSnapshot?.let {
+            mergeAnimalGroupTypes(state.animalGroupTypes, animalGroupTypesFromSnapshot(it))
+        } ?: state.animalGroupTypes,
         formOptions = state.formOptions,
         lastSync = summary,
         statusMessage = "Sync applied ${summary.appliedCount}, failed ${summary.failedCount}. Pending: ${summary.remainingQueueCount}",

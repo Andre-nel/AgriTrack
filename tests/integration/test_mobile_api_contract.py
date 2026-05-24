@@ -43,6 +43,9 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
     assert response.status_code == 200
     command_types = response.get_json()["sync"]["supported_command_types"]
     form_options = response.get_json()["form_options"]
+    farm = response.get_json()["farms"][0]
+    assert farm["role"] == "manager"
+    assert '"role": "manager"' in docs
     assert command_types == [
         "rainfall.create",
         "mob_event.create",

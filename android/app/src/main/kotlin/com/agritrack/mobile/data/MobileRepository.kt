@@ -1,5 +1,7 @@
 package com.agritrack.mobile.data
 
+import org.json.JSONArray
+
 class MobileRepository(
     private val apiClient: MobileApiClient,
     private val tokenStore: SecureTokenStore,
@@ -7,27 +9,22 @@ class MobileRepository(
 ) {
     fun loadCachedSnapshot(): FarmSnapshot? = fieldStore.loadLastSnapshot()
 
+    fun loadCachedFarms(): List<FarmSummary> = fieldStore.loadAvailableFarms()
+
     fun ping(): Boolean {
         val token = tokenStore.load() ?: return false
         apiClient.ping(token)
         return true
     }
 
-    fun loginAndLoad(email: String, password: String, deviceName: String): LoginLoadResult {
+    fun loginAndLoad(email: String, password: String, deviceName: String): FarmLoadResult {
+        val preferredFarmId = fieldStore.loadLastFarmId()
         val login = apiClient.login(email.trim(), password, deviceName)
         val token = login.getString("token")
         tokenStore.save(token)
 
         try {
-            val bootstrap = BootstrapResult.fromJson(apiClient.bootstrap(token))
-            val firstFarm = bootstrap.farms.firstOrNull()
-            val snapshot = if (firstFarm == null) {
-                null
-            } else {
-                refreshSnapshot(firstFarm.id, token)
-            }
-
-            return LoginLoadResult(bootstrap = bootstrap, snapshot = snapshot)
+            return loadFarmAccess(token, preferredFarmId)
         } catch (exc: Exception) {
             tokenStore.clear()
             throw exc
@@ -51,7 +48,26 @@ class MobileRepository(
 
     fun refreshSnapshot(farmId: String? = null): FarmSnapshot {
         val token = tokenStore.load() ?: error("No stored token. Log in first.")
-        return refreshSnapshot(farmId ?: fieldStore.loadLastSnapshot()?.farm?.id.orEmpty(), token)
+        return refreshSnapshot(farmId ?: fieldStore.loadLastFarmId().orEmpty(), token, makeActive = true)
+    }
+
+    fun refreshAllSnapshots(): FarmLoadResult {
+        val token = tokenStore.load() ?: error("No stored token. Log in first.")
+        return loadFarmAccess(token, fieldStore.loadLastFarmId())
+    }
+
+    fun selectFarm(farmId: String): FarmSnapshot {
+        val normalizedFarmId = farmId.trim()
+        if (normalizedFarmId.isBlank()) {
+            error("Choose a farm first.")
+        }
+        val cached = fieldStore.loadSnapshot(normalizedFarmId)
+        val snapshot = cached ?: run {
+            val token = tokenStore.load() ?: error("No stored token. Log in first.")
+            refreshSnapshot(normalizedFarmId, token, makeActive = false)
+        }
+        fieldStore.setActiveFarmId(normalizedFarmId)
+        return snapshot
     }
 
     fun queueRainfall(farmId: String, recordedOn: String, mm: Double, note: String) {
@@ -182,17 +198,28 @@ class MobileRepository(
     fun syncQueuedCommands(refreshAfterSync: Boolean = true): SyncSummary {
         val token = tokenStore.load() ?: error("No stored token. Log in first.")
         val pending = fieldStore.pendingJson()
+        val activeFarmId = fieldStore.loadLastFarmId()
+        val pendingFarmIdsByCommandId = commandFarmIds(pending)
         if (pending.length() == 0) {
-            uploadPendingTaskPhotos(token)
-            val snapshot = if (refreshAfterSync) {
-                runCatching { refreshLastSnapshot(token) }.getOrNull()
+            val photoFarmIds = uploadPendingTaskPhotos(token)
+            val farmIdsToRefresh = if (!refreshAfterSync) {
+                emptySet()
+            } else if (photoFarmIds.isNotEmpty()) {
+                photoFarmIds
             } else {
+                activeFarmId?.let { setOf(it) }.orEmpty()
+            }
+            val refreshedSnapshots = refreshFarmIds(farmIdsToRefresh, token, activeFarmId)
+            val refreshedSnapshot = if (activeFarmId == null) {
                 null
+            } else {
+                refreshedSnapshots.firstOrNull { it.farm.id == activeFarmId }
             }
             return SyncSummary(
                 results = emptyList(),
                 remainingQueueCount = fieldStore.pendingCount(),
-                refreshedSnapshot = snapshot,
+                refreshedSnapshot = refreshedSnapshot,
+                refreshedSnapshots = refreshedSnapshots,
             )
         }
         val response = apiClient.syncCommands(token, pending)
@@ -204,16 +231,24 @@ class MobileRepository(
                 add(SyncResult.fromJson(resultsJson.getJSONObject(index)))
             }
         }
-        uploadPendingTaskPhotos(token)
-        val refreshed = if (refreshAfterSync && results.any { it.status == "applied" }) {
-            runCatching { refreshLastSnapshot(token) }.getOrNull()
+        val photoFarmIds = uploadPendingTaskPhotos(token)
+        val appliedFarmIds = results
+            .filter { it.status == "applied" }
+            .mapNotNull { pendingFarmIdsByCommandId[it.clientCommandId] }
+            .toSet()
+        val refreshedSnapshots = if (refreshAfterSync) {
+            refreshFarmIds(appliedFarmIds + photoFarmIds, token, activeFarmId)
         } else {
-            null
+            emptyList()
+        }
+        val refreshed = activeFarmId?.let { active ->
+            refreshedSnapshots.firstOrNull { it.farm.id == active }
         }
         return SyncSummary(
             results = results,
             remainingQueueCount = fieldStore.pendingCount(),
             refreshedSnapshot = refreshed,
+            refreshedSnapshots = refreshedSnapshots,
         )
     }
 
@@ -227,29 +262,88 @@ class MobileRepository(
         fieldStore.setSyncIntervalMinutes(value)
     }
 
-    private fun refreshSnapshot(farmId: String, token: String): FarmSnapshot {
+    private fun loadFarmAccess(token: String, preferredFarmId: String?): FarmLoadResult {
+        val bootstrap = BootstrapResult.fromJson(apiClient.bootstrap(token))
+        val farms = bootstrap.farms
+        fieldStore.saveAvailableFarms(farms)
+
+        val snapshotsByFarm = linkedMapOf<String, FarmSnapshot>()
+        var failedFarmCount = 0
+        farms.forEach { farm ->
+            val snapshot = runCatching {
+                refreshSnapshot(farm.id, token, makeActive = false)
+            }.getOrElse {
+                failedFarmCount += 1
+                fieldStore.loadSnapshot(farm.id)
+            }
+            if (snapshot != null) {
+                snapshotsByFarm[farm.id] = snapshot
+            }
+        }
+
+        val activeFarm = farms.firstOrNull { it.id == preferredFarmId } ?: farms.firstOrNull()
+        val activeSnapshot = activeFarm?.let { farm ->
+            snapshotsByFarm[farm.id] ?: fieldStore.loadSnapshot(farm.id)
+        }
+        if (activeFarm == null) {
+            fieldStore.clearActiveFarmId()
+        } else {
+            fieldStore.setActiveFarmId(activeFarm.id)
+        }
+
+        return FarmLoadResult(
+            bootstrap = bootstrap,
+            availableFarms = farms,
+            activeFarm = activeFarm,
+            snapshot = activeSnapshot,
+            prefetchedCount = snapshotsByFarm.size,
+            failedFarmCount = failedFarmCount,
+        )
+    }
+
+    private fun refreshSnapshot(farmId: String, token: String, makeActive: Boolean): FarmSnapshot {
         if (farmId.isBlank()) {
             error("No farm is available to refresh.")
         }
         val snapshot = FarmSnapshot.fromJson(apiClient.farmSnapshot(token, farmId))
-        fieldStore.saveSnapshot(snapshot)
+        fieldStore.saveSnapshot(snapshot, makeActive = makeActive)
         return snapshot
     }
 
-    private fun refreshLastSnapshot(token: String): FarmSnapshot {
-        val farmId = fieldStore.loadLastSnapshot()?.farm?.id ?: error("No cached farm to refresh.")
-        return refreshSnapshot(farmId, token)
+    private fun refreshFarmIds(farmIds: Set<String>, token: String, activeFarmId: String?): List<FarmSnapshot> {
+        return farmIds
+            .filter { it.isNotBlank() }
+            .distinct()
+            .mapNotNull { farmId ->
+                runCatching {
+                    refreshSnapshot(farmId, token, makeActive = farmId == activeFarmId)
+                }.getOrNull()
+            }
     }
 
-    private fun uploadPendingTaskPhotos(token: String) {
+    private fun commandFarmIds(commands: JSONArray): Map<String, String> = buildMap {
+        for (index in 0 until commands.length()) {
+            val command = commands.optJSONObject(index) ?: continue
+            val commandId = command.optString("client_command_id")
+            val farmId = command.optString("farm_id")
+            if (commandId.isNotBlank() && farmId.isNotBlank()) {
+                put(commandId, farmId)
+            }
+        }
+    }
+
+    private fun uploadPendingTaskPhotos(token: String): Set<String> {
+        val uploadedFarmIds = mutableSetOf<String>()
         fieldStore.pendingTaskPhotos().forEach { photo ->
             val error = runCatching { apiClient.uploadTaskAttachment(token, photo) }.exceptionOrNull()
             if (error == null) {
                 fieldStore.markTaskPhotoUploaded(photo.clientAttachmentId)
+                uploadedFarmIds.add(photo.farmId)
             } else {
                 fieldStore.markTaskPhotoFailed(photo.clientAttachmentId, error.message ?: "Photo upload failed")
             }
         }
+        return uploadedFarmIds
     }
 }
 

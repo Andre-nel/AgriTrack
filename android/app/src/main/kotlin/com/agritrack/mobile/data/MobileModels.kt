@@ -7,7 +7,33 @@ data class FarmSummary(
     val id: String,
     val name: String,
     val timezone: String,
-)
+    val role: String? = null,
+) {
+    val roleLabel: String?
+        get() = role?.takeIf { it.isNotBlank() }?.replace("_", " ")?.replaceFirstChar(Char::titlecase)
+
+    val displayLabel: String
+        get() = roleLabel?.let { "$name - $it" } ?: name
+
+    fun toJson(): JSONObject {
+        val json = JSONObject()
+            .put("id", id)
+            .put("name", name)
+            .put("timezone", timezone)
+        role?.takeIf { it.isNotBlank() }?.let { json.put("role", it) }
+        return json
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): FarmSummary =
+            FarmSummary(
+                id = json.getString("id"),
+                name = json.optString("name", "Farm"),
+                timezone = json.optString("timezone", "UTC"),
+                role = json.optNullableString("role"),
+            )
+    }
+}
 
 data class PaddockSummary(
     val id: String,
@@ -236,6 +262,7 @@ data class FarmSnapshot(
                     id = farmJson.getString("id"),
                     name = farmJson.optString("name", "Farm"),
                     timezone = farmJson.optString("timezone", "UTC"),
+                    role = farmJson.optNullableString("role"),
                 ),
                 paddockCount = paddocks.size,
                 mobCount = mobs.size,
@@ -571,13 +598,7 @@ data class BootstrapResult(
             val farms = buildList {
                 for (index in 0 until farmsJson.length()) {
                     val farm = farmsJson.getJSONObject(index)
-                    add(
-                        FarmSummary(
-                            id = farm.getString("id"),
-                            name = farm.optString("name", "Farm"),
-                            timezone = farm.optString("timezone", "UTC"),
-                        )
-                    )
+                    add(FarmSummary.fromJson(farm))
                 }
             }
             val groupTypesJson = json.optJSONArray("animal_group_types") ?: JSONArray()
@@ -669,14 +690,19 @@ data class SyncSummary(
     val results: List<SyncResult>,
     val remainingQueueCount: Int,
     val refreshedSnapshot: FarmSnapshot? = null,
+    val refreshedSnapshots: List<FarmSnapshot> = emptyList(),
 ) {
     val appliedCount: Int = results.count { it.status == "applied" }
     val failedCount: Int = results.count { it.status == "failed" }
 }
 
-data class LoginLoadResult(
+data class FarmLoadResult(
     val bootstrap: BootstrapResult,
+    val availableFarms: List<FarmSummary>,
+    val activeFarm: FarmSummary?,
     val snapshot: FarmSnapshot?,
+    val prefetchedCount: Int = if (snapshot == null) 0 else 1,
+    val failedFarmCount: Int = 0,
 )
 
 private fun parseAnimalGroupType(json: JSONObject, fallbackId: String = ""): AnimalGroupTypeSummary =

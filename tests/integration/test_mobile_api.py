@@ -97,6 +97,60 @@ def test_mobile_login_bootstrap_logout_and_revocation(client, app):
     assert revoked_response.get_json()["error"]["code"] == "revoked_token"
 
 
+def test_mobile_login_bootstrap_and_ping_include_multiple_farm_roles(client, app):
+    with app.app_context():
+        alpha = Farm(name="Alpha Mobile Farm", timezone="UTC", active=True)
+        beta = Farm(name="Beta Mobile Farm", timezone="Africa/Johannesburg", active=True)
+        inactive = Farm(name="Inactive Mobile Farm", timezone="UTC", active=False)
+        db.session.add_all([alpha, beta, inactive])
+        db.session.flush()
+        user = User(email="multi@example.com", name="Multi Farm User", active=True)
+        user.set_password("correct-password")
+        db.session.add(user)
+        db.session.flush()
+        db.session.add_all(
+            [
+                UserFarmRole(user_id=user.id, farm_id=beta.id, role="manager"),
+                UserFarmRole(user_id=user.id, farm_id=alpha.id, role="observer"),
+                UserFarmRole(user_id=user.id, farm_id=inactive.id, role="manager"),
+            ]
+        )
+        db.session.commit()
+
+    login_response = client.post(
+        "/api/mobile/v1/auth/login",
+        json={
+            "email": "multi@example.com",
+            "password": "correct-password",
+            "device_name": "Pixel Field Phone",
+        },
+    )
+    assert login_response.status_code == 200
+    token = login_response.get_json()["token"]
+    expected = [
+        {"name": "Alpha Mobile Farm", "role": "observer"},
+        {"name": "Beta Mobile Farm", "role": "manager"},
+    ]
+    assert [
+        {"name": farm["name"], "role": farm["role"]}
+        for farm in login_response.get_json()["farms"]
+    ] == expected
+
+    bootstrap_response = client.get("/api/mobile/v1/bootstrap", headers=_auth(token))
+    assert bootstrap_response.status_code == 200
+    assert [
+        {"name": farm["name"], "role": farm["role"]}
+        for farm in bootstrap_response.get_json()["farms"]
+    ] == expected
+
+    ping_response = client.get("/api/mobile/v1/ping", headers=_auth(token))
+    assert ping_response.status_code == 200
+    assert [
+        {"name": farm["name"], "role": farm["role"]}
+        for farm in ping_response.get_json()["farms"]
+    ] == expected
+
+
 def test_mobile_rejects_invalid_login_missing_token_and_expired_token(client, app):
     with app.app_context():
         farm = Farm(name="Token Farm", timezone="UTC", active=True)
