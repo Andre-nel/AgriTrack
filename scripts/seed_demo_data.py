@@ -7,7 +7,6 @@ from app.models import Farm, Mob, Paddock
 def main() -> None:
     app = create_app(get_config())
     with app.app_context():
-        db.create_all()
         if Farm.query.first():
             print("Data exists; skipping.")
             return

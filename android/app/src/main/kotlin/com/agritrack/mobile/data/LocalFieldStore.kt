@@ -502,11 +502,7 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
     }
 
     private fun normalizeBaseUrl(value: String): String {
-        var normalized = value.trim()
-        while (normalized.endsWith("/")) {
-            normalized = normalized.dropLast(1)
-        }
-        return normalized
+        return MobileBaseUrl.normalize(value)
     }
 
     private companion object {

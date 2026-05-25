@@ -52,6 +52,44 @@ def test_mobile_cli_can_create_user_set_password_and_assign_farm(app):
         assert role.role == "observer"
 
 
+def test_generic_user_cli_aliases_create_user_set_password_and_assign_farm(app):
+    runner = app.test_cli_runner()
+    with app.app_context():
+        farm = Farm(name="Web Login Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.commit()
+
+    create_result = runner.invoke(
+        args=[
+            "user-create",
+            "--email",
+            "owner@example.com",
+            "--name",
+            "Farm Owner",
+            "--password",
+            "first-password",
+        ]
+    )
+    assert create_result.exit_code == 0
+    assert "Created user owner@example.com" in create_result.output
+
+    assign_result = runner.invoke(
+        args=["user-assign-farm", "owner@example.com", "Web Login Farm", "--role", "manager"]
+    )
+    assert assign_result.exit_code == 0
+    assert "as manager" in assign_result.output
+
+    password_result = runner.invoke(
+        args=["user-set-password", "owner@example.com", "--password", "second-password"]
+    )
+    assert password_result.exit_code == 0
+
+    with app.app_context():
+        user = User.query.filter_by(email="owner@example.com").first()
+        assert user is not None
+        assert user.check_password("second-password")
+
+
 def test_mobile_cli_rejects_duplicate_users_and_missing_records(app):
     runner = app.test_cli_runner()
     create_args = [

@@ -19,6 +19,13 @@
         <a href="{{ url_for('web.setup_farm') }}">Setup Farm</a>
         <a href="{{ url_for('web.import_farm_page') }}">Import Farm</a>
         <a href="{{ url_for('web.farms_page') }}">Manage Farms</a>
+        <a href="{{ url_for('ops.index') }}">Ops</a>
+        {% if g.web_user %}
+        <span class="nav-user">{{ g.web_user.name }}</span>
+        <form method="post" action="{{ url_for('auth.logout') }}" class="nav-form">
+          <button type="submit">Logout</button>
+        </form>
+        {% endif %}
       </nav>
     </header>
 

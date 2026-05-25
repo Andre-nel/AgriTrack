@@ -11,9 +11,10 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
 class MobileApiClient(baseUrl: String) {
-    private val baseUrl: String = trimTrailingSlash(baseUrl)
+    private val baseUrl: String = MobileBaseUrl.normalize(baseUrl)
 
     fun ping(token: String): JSONObject = request("GET", "/api/mobile/v1/ping", token, null)
 
@@ -63,6 +64,7 @@ class MobileApiClient(baseUrl: String) {
                 photo.capturedAt?.takeIf { it.isNotBlank() }?.let {
                     writePart(output, boundary, "captured_at", it)
                 }
+                writePart(output, boundary, "sha256", sha256(file))
                 writeFilePart(output, boundary, "file", file, photo.originalFilename, photo.contentType)
                 output.write("--$boundary--\r\n".toByteArray(StandardCharsets.UTF_8))
             }
@@ -159,11 +161,16 @@ class MobileApiClient(baseUrl: String) {
         output.write("\r\n".toByteArray(StandardCharsets.UTF_8))
     }
 
-    private fun trimTrailingSlash(value: String?): String {
-        var trimmed = value.orEmpty().trim()
-        while (trimmed.endsWith("/")) {
-            trimmed = trimmed.dropLast(1)
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var read = input.read(buffer)
+            while (read != -1) {
+                digest.update(buffer, 0, read)
+                read = input.read(buffer)
+            }
         }
-        return trimmed
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 }

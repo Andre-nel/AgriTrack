@@ -12,10 +12,12 @@ class ModuleSpec:
 
 
 MODULES: tuple[ModuleSpec, ...] = (
+    ModuleSpec("auth", "app.modules.auth", "Private web session authentication"),
     ModuleSpec("legacy_web", "app.modules.legacy_web", "Compatibility web routes awaiting domain extraction"),
     ModuleSpec("tasks", "app.modules.tasks", "Task workspace web routes"),
     ModuleSpec("calendar", "app.modules.calendar", "Calendar web routes"),
     ModuleSpec("finance", "app.modules.finance", "Finance and cash-flow web routes"),
+    ModuleSpec("ops", "app.modules.ops", "Private farm operations pages"),
     ModuleSpec("api_v1", "app.modules.api_v1", "Versioned API entrypoints"),
     ModuleSpec("mobile_api", "app.modules.mobile_api", "Android mobile API entrypoints"),
     ModuleSpec("farms", "app.modules.farms", "Farm API routes"),

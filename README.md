@@ -23,13 +23,28 @@ set FLASK_APP=manage.py
 flask run
 ```
 
-Initialize DB tables quickly for local dev:
+On Windows, the checked-in PowerShell helpers are the preferred path:
 
-```bash
-flask shell -c "from app.extensions import db; db.create_all()"
+```powershell
+.\scripts\setup-venv.ps1
+.\scripts\dev.ps1
 ```
 
-Seed demo data:
+Initialize or update the real farm database with migrations only:
+
+```powershell
+$env:FLASK_APP = "manage.py"
+.\.venv\Scripts\python -m flask db upgrade
+```
+
+Create a private farm user for web and Android login:
+
+```powershell
+.\.venv\Scripts\python -m flask user-create --email field@example.com --name "Field User" --password "<password>"
+.\.venv\Scripts\python -m flask user-assign-farm field@example.com "Demo Farm" --role manager
+```
+
+Seed demo data only for throwaway development databases:
 
 ```bash
 flask seed-demo
@@ -42,6 +57,25 @@ Run tests:
 ```bash
 pytest
 ```
+
+## Private Farm-LAN Mode
+
+For daily private farm use, keep `DATABASE_URL=sqlite:///agritrack.db`, set a
+long `SECRET_KEY`, and start the LAN server with:
+
+```powershell
+$env:SECRET_KEY = "<long-private-random-value>"
+.\scripts\lan.ps1
+```
+
+Back up the SQLite database, maps, and task photos:
+
+```powershell
+.\scripts\backup.ps1
+.\scripts\restore-check.ps1
+```
+
+See `docs/private_farm_ops.md` for the farm-LAN runbook.
 
 ## Architecture
 

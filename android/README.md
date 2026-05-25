@@ -30,14 +30,14 @@ This is a native Kotlin + Jetpack Compose client for the Flask mobile API at
 
    ```powershell
    $env:FLASK_APP = "manage.py"
-   flask db upgrade
+   .\.venv\Scripts\python -m flask db upgrade
    ```
 
-4. Create a mobile user and assign farm access:
+4. Create a user and assign farm access:
 
    ```powershell
-   flask mobile-create-user --email field@example.com --name "Field User" --password "<temporary-password>"
-   flask mobile-assign-farm field@example.com "Demo Farm" --role manager
+   .\.venv\Scripts\python -m flask user-create --email field@example.com --name "Field User" --password "<temporary-password>"
+   .\.venv\Scripts\python -m flask user-assign-farm field@example.com "Demo Farm" --role manager
    ```
 
    Assign additional farms with the same command. The Android switcher shows
@@ -47,7 +47,7 @@ This is a native Kotlin + Jetpack Compose client for the Flask mobile API at
 
    ```powershell
    $env:FLASK_APP = "manage.py"
-   flask run --host 0.0.0.0 --port 5000
+   .\.venv\Scripts\python -m flask run --host 0.0.0.0 --port 5000
    ```
 
 6. Launch the Android app in an emulator and log in with:
@@ -61,14 +61,23 @@ This is a native Kotlin + Jetpack Compose client for the Flask mobile API at
    record a stock count adjustment, then tap **Sync Now**.
 8. Confirm the pending count drops after applied results return.
 
-On a physical device on the same Wi-Fi network, replace the base URL with
-   your PC LAN address, for example:
+On a physical device on the same Wi-Fi network, start the private LAN server
+from the repo root:
+
+   ```powershell
+   $env:SECRET_KEY = "<long-private-random-value>"
+   .\scripts\lan.ps1
+   ```
+
+Then replace the base URL with your PC LAN address, for example:
 
    ```text
    http://192.168.1.25:5000
    ```
 
-Production devices should use HTTPS only.
+For farm-LAN testing, `http://` is supported. Remote/private-cloud devices
+should use HTTPS only. The app now rejects base URLs that include `/api` paths,
+query strings, fragments, or unsupported schemes.
 
 ## Project Shape
 

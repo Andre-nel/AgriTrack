@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgriTrack Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="auth-page">
+    <main class="auth-card">
+      <p class="muted">Private farm workspace</p>
+      <h1>AgriTrack</h1>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <ul class="flash-list">
+        {% for category, message in messages %}
+        <li class="flash {{ category }}">{{ message }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% endwith %}
+      <form method="post" action="{{ url_for('auth.login_post') }}" class="grid-form">
+        <input type="hidden" name="next" value="{{ next_url }}" />
+        <label>Email
+          <input type="email" name="email" value="{{ email }}" autocomplete="username" required autofocus />
+        </label>
+        <label>Password
+          <input type="password" name="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit" class="btn">Log In</button>
+      </form>
+    </main>
+  </body>
+</html>

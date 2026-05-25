@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Operations - AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Operations</h1>
+  <p>Private farm-LAN status for the local database, backups, maps, and task attachments.</p>
+</section>
+
+<section class="cards ops-grid">
+  <article class="card">
+    <h2>Database</h2>
+    <p class="muted">{{ database_path or "Non-SQLite database configured" }}</p>
+  </article>
+  <article class="card">
+    <h2>Backups</h2>
+    <p><strong>{{ backup_count }}</strong> backup file{{ "" if backup_count == 1 else "s" }}</p>
+    <p class="muted">{{ backup_dir }}</p>
+    {% if latest_backup %}
+    <p>Latest: {{ latest_backup.name }}</p>
+    <p class="muted">{{ latest_backup_mtime }}</p>
+    {% else %}
+    <p class="badge warn">No backup found yet</p>
+    {% endif %}
+  </article>
+  <article class="card">
+    <h2>Assets</h2>
+    <p>Maps: <strong>{{ "ready" if maps_dir.exists() else "not created yet" }}</strong></p>
+    <p>Task photos: <strong>{{ "ready" if attachments_dir.exists() else "not created yet" }}</strong></p>
+  </article>
+</section>
+{% endblock %}

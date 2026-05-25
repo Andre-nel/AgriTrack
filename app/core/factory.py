@@ -2,6 +2,7 @@ from flask import Flask
 
 from app.cli import init_cli
 from app.config import Config, get_config
+from app.core.auth import register_session_auth
 from app.core.errors import register_error_handlers
 from app.core.health import register_healthcheck
 from app.core.modules import register_modules
@@ -19,6 +20,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
 
     register_modules(app)
     register_healthcheck(app)
+    register_session_auth(app)
     register_error_handlers(app)
 
     return app

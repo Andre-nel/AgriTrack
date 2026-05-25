@@ -10,7 +10,7 @@ database.
 
    ```powershell
    $env:FLASK_APP = "manage.py"
-   flask db upgrade
+   .\.venv\Scripts\python -m flask db upgrade
    ```
 
 2. Configure production secrets and storage:
@@ -21,11 +21,18 @@ database.
    $env:DATABASE_URL = "postgresql+psycopg://..."
    ```
 
+   For private farm-LAN use, keep SQLite and set:
+
+   ```powershell
+   $env:DATABASE_URL = "sqlite:///agritrack.db"
+   $env:BACKUP_DIR = "backups"
+   ```
+
 3. Create a mobile user and assign farm access:
 
    ```powershell
-   flask mobile-create-user --email field@example.com --name "Field User" --password "<temporary-password>"
-   flask mobile-assign-farm field@example.com "Demo Farm" --role manager
+   .\.venv\Scripts\python -m flask user-create --email field@example.com --name "Field User" --password "<temporary-password>"
+   .\.venv\Scripts\python -m flask user-assign-farm field@example.com "Demo Farm" --role manager
    ```
 
 4. Serve the Flask app behind HTTPS before using real phones in the field.
@@ -33,10 +40,10 @@ database.
 5. Operational token commands:
 
    ```powershell
-   flask mobile-set-password field@example.com --password "<new-password>"
-   flask mobile-revoke-tokens field@example.com
-   flask mobile-prune-expired-tokens --dry-run
-   flask mobile-prune-expired-tokens
+   .\.venv\Scripts\python -m flask user-set-password field@example.com --password "<new-password>"
+   .\.venv\Scripts\python -m flask mobile-revoke-tokens field@example.com
+   .\.venv\Scripts\python -m flask mobile-prune-expired-tokens --dry-run
+   .\.venv\Scripts\python -m flask mobile-prune-expired-tokens
    ```
 
 ## Device Testing
@@ -51,7 +58,7 @@ Local development example:
 
 ```powershell
 $env:FLASK_APP = "manage.py"
-flask run --host 0.0.0.0 --port 5000
+.\.venv\Scripts\python -m flask run --host 0.0.0.0 --port 5000
 ```
 
 ## Auth

@@ -10,7 +10,6 @@ from app.services.reporting_service import ReportingService
 def main() -> None:
     app = create_app(get_config())
     with app.app_context():
-        db.create_all()
         snapshot_date = date.today()
         farms = Farm.query.all()
 

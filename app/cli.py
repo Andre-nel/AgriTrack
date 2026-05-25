@@ -31,6 +31,38 @@ def _require_farm(identifier: str) -> Farm:
     return farm
 
 
+def _create_user(*, email: str, name: str, password: str, inactive: bool) -> User:
+    normalized_email = _normalize_email(email)
+    if User.query.filter_by(email=normalized_email).first() is not None:
+        raise click.ClickException(f"User already exists: {normalized_email}")
+
+    user = User(email=normalized_email, name=" ".join(name.strip().split()), active=not inactive)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    return user
+
+
+def _assign_farm_role(*, email: str, farm: str, role: str) -> tuple[str, User, Farm, str]:
+    user = _require_user(email)
+    farm_record = _require_farm(farm)
+    normalized_role = " ".join((role or "manager").strip().lower().split()) or "manager"
+    role_record = UserFarmRole.query.filter_by(user_id=user.id, farm_id=farm_record.id).first()
+    if role_record is None:
+        role_record = UserFarmRole(
+            user_id=user.id,
+            farm_id=farm_record.id,
+            role=normalized_role,
+        )
+        db.session.add(role_record)
+        action = "Assigned"
+    else:
+        role_record.role = normalized_role
+        action = "Updated"
+    db.session.commit()
+    return action, user, farm_record, normalized_role
+
+
 def init_cli(app: Flask) -> None:
     @app.cli.command("seed-demo")
     def seed_demo() -> None:
@@ -69,15 +101,18 @@ def init_cli(app: Flask) -> None:
     @click.option("--inactive", is_flag=True, help="Create the user as inactive.")
     def mobile_create_user(email: str, name: str, password: str, inactive: bool) -> None:
         """Create a passworded user for mobile API access."""
-        normalized_email = _normalize_email(email)
-        if User.query.filter_by(email=normalized_email).first() is not None:
-            raise click.ClickException(f"User already exists: {normalized_email}")
-
-        user = User(email=normalized_email, name=" ".join(name.strip().split()), active=not inactive)
-        user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
+        user = _create_user(email=email, name=name, password=password, inactive=inactive)
         click.echo(f"Created mobile user {user.email} ({user.id})")
+
+    @app.cli.command("user-create")
+    @click.option("--email", required=True, help="Email address used for web and mobile login.")
+    @click.option("--name", required=True, help="Display name for the user.")
+    @click.option("--password", required=True, help="Initial login password.")
+    @click.option("--inactive", is_flag=True, help="Create the user as inactive.")
+    def user_create(email: str, name: str, password: str, inactive: bool) -> None:
+        """Create a passworded AgriTrack user."""
+        user = _create_user(email=email, name=name, password=password, inactive=inactive)
+        click.echo(f"Created user {user.email} ({user.id})")
 
     @app.cli.command("mobile-set-password")
     @click.argument("email")
@@ -89,28 +124,40 @@ def init_cli(app: Flask) -> None:
         db.session.commit()
         click.echo(f"Password updated for {user.email}")
 
+    @app.cli.command("user-set-password")
+    @click.argument("email")
+    @click.option("--password", required=True, help="New login password.")
+    def user_set_password(email: str, password: str) -> None:
+        """Set or reset an AgriTrack user's password."""
+        user = _require_user(email)
+        user.set_password(password)
+        db.session.commit()
+        click.echo(f"Password updated for {user.email}")
+
     @app.cli.command("mobile-assign-farm")
     @click.argument("email")
     @click.argument("farm")
     @click.option("--role", default="manager", show_default=True, help="Role to grant on the farm.")
     def mobile_assign_farm(email: str, farm: str, role: str) -> None:
         """Grant or update a mobile user's farm role."""
-        user = _require_user(email)
-        farm_record = _require_farm(farm)
-        normalized_role = " ".join((role or "manager").strip().lower().split()) or "manager"
-        role_record = UserFarmRole.query.filter_by(user_id=user.id, farm_id=farm_record.id).first()
-        if role_record is None:
-            role_record = UserFarmRole(
-                user_id=user.id,
-                farm_id=farm_record.id,
-                role=normalized_role,
-            )
-            db.session.add(role_record)
-            action = "Assigned"
-        else:
-            role_record.role = normalized_role
-            action = "Updated"
-        db.session.commit()
+        action, user, farm_record, normalized_role = _assign_farm_role(
+            email=email,
+            farm=farm,
+            role=role,
+        )
+        click.echo(f"{action} {user.email} to {farm_record.name} as {normalized_role}")
+
+    @app.cli.command("user-assign-farm")
+    @click.argument("email")
+    @click.argument("farm")
+    @click.option("--role", default="manager", show_default=True, help="Role to grant on the farm.")
+    def user_assign_farm(email: str, farm: str, role: str) -> None:
+        """Grant or update an AgriTrack user's farm role."""
+        action, user, farm_record, normalized_role = _assign_farm_role(
+            email=email,
+            farm=farm,
+            role=role,
+        )
         click.echo(f"{action} {user.email} to {farm_record.name} as {normalized_role}")
 
     @app.cli.command("mobile-revoke-tokens")
