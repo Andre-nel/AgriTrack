@@ -3,7 +3,8 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import Paddock
+from app.models import Paddock, PaddockEvent
+from app.services.paddock_event_service import PaddockEventService
 from app.services.paddock_service import PaddockService
 from app.services.reporting_service import ReportingService
 
@@ -116,6 +117,55 @@ def get_paddock(paddock_id):
             ),
         }
     )
+
+
+@bp.post("/<paddock_id>/events")
+def create_paddock_event(paddock_id):
+    paddock = Paddock.query.get_or_404(paddock_id)
+    payload = request.get_json() or {}
+    raw_tags = payload.get("tags")
+    if isinstance(raw_tags, list):
+        raw_tags = ",".join(str(value) for value in raw_tags)
+
+    try:
+        event = PaddockEventService.create_event(
+            paddock_id=paddock.id,
+            farm_id=paddock.farm_id,
+            description=payload.get("description"),
+            raw_tags=raw_tags,
+        )
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"event_id": str(event.id)}), 201
+
+
+@bp.get("/<paddock_id>/events")
+def list_paddock_events(paddock_id):
+    paddock = Paddock.query.get_or_404(paddock_id)
+    tag_filter = " ".join((request.args.get("tag") or "").strip().lower().split())
+    rows = (
+        PaddockEvent.query.filter_by(paddock_id=paddock.id)
+        .order_by(PaddockEvent.event_at.desc(), PaddockEvent.created_at.desc())
+        .all()
+    )
+    events = []
+    for row in rows:
+        tags = PaddockEventService.tags_from_csv(row.tags_csv)
+        if tag_filter and tag_filter not in tags:
+            continue
+        events.append(
+            {
+                "id": str(row.id),
+                "event_at": row.event_at.isoformat() if row.event_at else None,
+                "tags": tags,
+                "description": row.description,
+            }
+        )
+
+    return jsonify({"paddock_id": str(paddock.id), "tag_filter": tag_filter, "events": events})
 
 
 @bp.patch("/<paddock_id>")

@@ -48,7 +48,9 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
     assert '"role": "manager"' in docs
     assert command_types == [
         "rainfall.create",
+        "mob.create",
         "mob_event.create",
+        "paddock_event.create",
         "stock_count.record",
         "mob.move",
         "mob.transfer",

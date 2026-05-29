@@ -78,8 +78,12 @@ class MobileRepository(
         fieldStore.enqueue(MobileCommand.mobNote(farmId, mobId, description, tags))
     }
 
-    fun queueMobMove(farmId: String, mobId: String, paddockId: String, note: String) {
-        fieldStore.enqueue(MobileCommand.mobMove(farmId, mobId, paddockId))
+    fun queueMobCreate(farmId: String, name: String, originNote: String) {
+        fieldStore.enqueue(MobileCommand.mobCreate(farmId, name, originNote))
+    }
+
+    fun queueMobMove(farmId: String, mobId: String, allocations: List<Pair<String, Double>>, note: String) {
+        fieldStore.enqueue(MobileCommand.mobMoveAllocations(farmId, mobId, allocations))
         if (note.isNotBlank()) {
             fieldStore.enqueue(
                 MobileCommand.mobNote(
@@ -90,6 +94,10 @@ class MobileRepository(
                 )
             )
         }
+    }
+
+    fun queuePaddockNote(farmId: String, paddockId: String, description: String, tags: List<String>) {
+        fieldStore.enqueue(MobileCommand.paddockNote(farmId, paddockId, description, tags))
     }
 
     fun queueStockCount(

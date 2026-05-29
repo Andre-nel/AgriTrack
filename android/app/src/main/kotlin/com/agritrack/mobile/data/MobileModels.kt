@@ -41,6 +41,8 @@ data class PaddockSummary(
     val status: String,
     val notes: String?,
     val tags: List<String>,
+    val areaHa: Double? = null,
+    val grazeableAreaHa: Double? = null,
 ) {
     val tagLabel: String
         get() = tags.joinToString(", ")
@@ -58,6 +60,36 @@ data class AnimalGroupTypeSummary(
             .filter { it.isNotBlank() }
             .joinToString(" ")
             .ifBlank { "Animal group" }
+
+    val lsuPerHead: Double
+        get() {
+            val speciesKey = species.trim().lowercase()
+            val sexKey = sex.trim().lowercase()
+            val ageKey = ageClass.trim().lowercase()
+            val base = when (speciesKey) {
+                "cattle" -> 1.0
+                "sheep" -> 1.0 / 6.0
+                "goat" -> 1.0 / 8.0
+                else -> 1.0
+            }
+            val juvenileLabels = when (speciesKey) {
+                "cattle" -> setOf("calf")
+                "sheep" -> setOf("lamb")
+                "goat" -> setOf("kid")
+                else -> emptySet()
+            }
+            val ageMultiplier = when {
+                ageKey in juvenileLabels -> 0.3
+                ageKey == "young" -> 0.8
+                else -> 1.0
+            }
+            val sexMultiplier = when {
+                sexKey in setOf("ram", "bul", "bull") && ageKey in setOf("adult", "old") -> 1.75
+                sexKey in setOf("ram", "bul", "bull") && ageKey == "young" -> 1.2
+                else -> 1.0
+            }
+            return base * ageMultiplier * sexMultiplier
+        }
 }
 
 data class MobBalanceSummary(
@@ -75,6 +107,11 @@ data class MobSummary(
 ) {
     val totalHead: Int
         get() = balances.sumOf { it.headCount }
+
+    val totalLsu: Double
+        get() = balances.sumOf { balance ->
+            balance.headCount * balance.animalGroupType.lsuPerHead
+        }
 }
 
 data class GrazingAllocationSummary(
@@ -101,6 +138,7 @@ data class PaddockMobSummary(
     val mobId: String,
     val mobName: String,
     val allocationPct: Double,
+    val startAt: String? = null,
 )
 
 data class SpeciesHeadSummary(
@@ -133,6 +171,22 @@ data class RainfallSummary(
     val recordedOn: String,
     val mm: Double,
     val note: String?,
+)
+
+data class MobEventSummary(
+    val id: String,
+    val mobId: String,
+    val eventAt: String?,
+    val tags: List<String>,
+    val description: String,
+)
+
+data class PaddockEventSummary(
+    val id: String,
+    val paddockId: String,
+    val eventAt: String?,
+    val tags: List<String>,
+    val description: String,
 )
 
 data class TaskEntityLinkSummary(
@@ -201,6 +255,8 @@ data class DecisionItemSummary(
     val detail: String,
     val entityType: String?,
     val entityId: String?,
+    val taskId: String? = null,
+    val activityId: String? = null,
 )
 
 data class MapFeatureSummary(
@@ -228,6 +284,7 @@ data class FarmSnapshot(
     val waterAssetCount: Int,
     val rainfallCount: Int,
     val mobEventCount: Int,
+    val paddockEventCount: Int,
     val taskCount: Int,
     val calendarItemCount: Int,
     val decisionCount: Int,
@@ -237,6 +294,8 @@ data class FarmSnapshot(
     val grazingByPaddock: List<PaddockGrazingSummary>,
     val waterAssets: List<WaterAssetSummary>,
     val rainfall: List<RainfallSummary>,
+    val mobEvents: List<MobEventSummary>,
+    val paddockEvents: List<PaddockEventSummary>,
     val tasks: List<TaskSummary>,
     val calendarItems: List<CalendarItemSummary>,
     val decisionFeed: List<DecisionItemSummary>,
@@ -253,6 +312,8 @@ data class FarmSnapshot(
             val grazingByPaddock = parseGrazingByPaddock(json.optJSONArray("active_grazing_by_paddock") ?: JSONArray())
             val waterAssets = parseWaterAssets(json.optJSONArray("water_assets") ?: JSONArray())
             val rainfall = parseRainfall(json.optJSONArray("rainfall") ?: JSONArray())
+            val mobEvents = parseMobEvents(json.optJSONArray("mob_events") ?: JSONArray())
+            val paddockEvents = parsePaddockEvents(json.optJSONArray("paddock_events") ?: JSONArray())
             val tasks = parseTasks(json.optJSONArray("tasks") ?: JSONArray())
             val calendarItems = parseCalendarItems(json.optJSONArray("calendar_items") ?: JSONArray())
             val decisions = parseDecisionFeed(json.optJSONArray("decision_feed") ?: JSONArray())
@@ -268,7 +329,8 @@ data class FarmSnapshot(
                 mobCount = mobs.size,
                 waterAssetCount = waterAssets.size,
                 rainfallCount = rainfall.size,
-                mobEventCount = json.optJSONArray("mob_events")?.length() ?: 0,
+                mobEventCount = mobEvents.size,
+                paddockEventCount = paddockEvents.size,
                 taskCount = tasks.size,
                 calendarItemCount = calendarItems.size,
                 decisionCount = decisions.size,
@@ -278,6 +340,8 @@ data class FarmSnapshot(
                 grazingByPaddock = grazingByPaddock,
                 waterAssets = waterAssets,
                 rainfall = rainfall,
+                mobEvents = mobEvents,
+                paddockEvents = paddockEvents,
                 tasks = tasks,
                 calendarItems = calendarItems,
                 decisionFeed = decisions,
@@ -297,6 +361,8 @@ data class FarmSnapshot(
                         status = paddock.optString("status", "active"),
                         notes = paddock.optNullableString("notes"),
                         tags = paddock.optJSONArray("tags").strings(),
+                        areaHa = paddock.optNullableDouble("area_ha"),
+                        grazeableAreaHa = paddock.optNullableDouble("grazeable_area_ha"),
                     )
                 )
             }
@@ -376,6 +442,7 @@ data class FarmSnapshot(
                                         mobId = mob.optString("mob_id"),
                                         mobName = mob.optString("mob_name", "Mob"),
                                         allocationPct = mob.optDouble("allocation_pct", 100.0),
+                                        startAt = mob.optNullableString("start_at"),
                                     )
                                 )
                             }
@@ -440,6 +507,36 @@ data class FarmSnapshot(
                         recordedOn = rain.optString("recorded_on"),
                         mm = rain.optDouble("mm", 0.0),
                         note = rain.optNullableString("note"),
+                    )
+                )
+            }
+        }
+
+        private fun parseMobEvents(json: JSONArray): List<MobEventSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val event = json.getJSONObject(index)
+                add(
+                    MobEventSummary(
+                        id = event.optString("id"),
+                        mobId = event.optString("mob_id"),
+                        eventAt = event.optNullableString("event_at"),
+                        tags = event.optJSONArray("tags").strings(),
+                        description = event.optString("description"),
+                    )
+                )
+            }
+        }
+
+        private fun parsePaddockEvents(json: JSONArray): List<PaddockEventSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val event = json.getJSONObject(index)
+                add(
+                    PaddockEventSummary(
+                        id = event.optString("id"),
+                        paddockId = event.optString("paddock_id"),
+                        eventAt = event.optNullableString("event_at"),
+                        tags = event.optJSONArray("tags").strings(),
+                        description = event.optString("description"),
                     )
                 )
             }
@@ -540,6 +637,8 @@ data class FarmSnapshot(
                         detail = item.optString("detail"),
                         entityType = item.optNullableString("entity_type"),
                         entityId = item.optNullableString("entity_id"),
+                        taskId = item.optNullableString("task_id"),
+                        activityId = item.optNullableString("activity_id"),
                     )
                 )
             }
@@ -572,6 +671,7 @@ data class FarmSnapshot(
                                         mobId = mob.optString("mob_id"),
                                         mobName = mob.optString("mob_name", "Mob"),
                                         allocationPct = mob.optDouble("allocation_pct", 100.0),
+                                        startAt = mob.optNullableString("start_at"),
                                     )
                                 )
                             }

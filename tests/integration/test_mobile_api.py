@@ -1,6 +1,6 @@
 import hashlib
 from io import BytesIO
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.extensions import db
 from app.models import (
@@ -15,6 +15,7 @@ from app.models import (
     Mob,
     MobEvent,
     Paddock,
+    PaddockEvent,
     RainfallRecord,
     Task,
     TaskAttachment,
@@ -25,6 +26,7 @@ from app.models import (
     User,
     UserFarmRole,
     WaterAsset,
+    WaterAssetServedPaddock,
     WaterConnection,
 )
 from app.services.task_service import TaskService
@@ -222,10 +224,11 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
         db.session.add(
             AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=12)
         )
+        grazing_started_at = datetime.now(timezone.utc) - timedelta(days=3)
         session = GrazingSession(
             farm_id=farm.id,
             mob_id=mob.id,
-            start_at=datetime.now(timezone.utc),
+            start_at=grazing_started_at,
             end_at=None,
         )
         db.session.add(session)
@@ -246,6 +249,14 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
                 mob_id=mob.id,
                 tags_csv="health,field note",
                 description="Checked in the field",
+            )
+        )
+        db.session.add(
+            PaddockEvent(
+                farm_id=farm.id,
+                paddock_id=paddock.id,
+                tags_csv="pasture,field note",
+                description="Pasture recovering after rain",
             )
         )
         space = TaskSpace(
@@ -322,8 +333,11 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert payload["active_grazing"][0]["allocations"][0]["allocation_fraction"] == 1.0
     assert payload["active_grazing_by_paddock"][0]["group_heads"][0]["animal_group_type"]["species"] == "Cattle"
     assert payload["active_grazing_by_paddock"][0]["group_heads"][0]["head"] == 12.0
+    assert payload["active_grazing_by_paddock"][0]["mobs"][0]["start_at"].startswith(grazing_started_at.date().isoformat())
     assert payload["rainfall"][0]["mm"] == 14.0
     assert payload["mob_events"][0]["tags"] == ["health", "field note"]
+    assert payload["paddock_events"][0]["tags"] == ["pasture", "field note"]
+    assert payload["paddock_events"][0]["description"] == "Pasture recovering after rain"
     assert {asset["name"] for asset in payload["water_assets"]} == {"Header Tank", "North Trough"}
     assert payload["water_connections"][0]["flow_type"] == "gravity"
     assert payload["tasks"][0]["heading"] == "Check north trough"
@@ -348,6 +362,191 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert activity_item["stage_label"] == "Activity"
     assert "decision_feed" in payload
     assert "map_features" in payload
+
+
+def test_mobile_decision_feed_ignores_weir_water_level(client, app):
+    with app.app_context():
+        farm = Farm(name="Weir Decision Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)
+        db.session.add(paddock)
+        db.session.flush()
+        db.session.add(
+            RainfallRecord(farm_id=farm.id, recorded_on=date.today(), mm=4)
+        )
+        weir = WaterAsset(
+            farm_id=farm.id,
+            name="Crossing Weir",
+            asset_type="weir",
+            active=True,
+            status="operational",
+            water_level="empty",
+        )
+        db.session.add(weir)
+        db.session.flush()
+        db.session.add(WaterAssetServedPaddock(water_asset_id=weir.id, paddock_id=paddock.id))
+        farm_id = str(farm.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+
+    assert response.status_code == 200
+    assert response.get_json()["decision_feed"] == []
+
+
+def test_mobile_decision_feed_allows_rainfall_records_under_sixty_days(client, app):
+    with app.app_context():
+        farm = Farm(name="Recent Rain Decision Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        db.session.add(
+            RainfallRecord(farm_id=farm.id, recorded_on=date.today() - timedelta(days=59), mm=2)
+        )
+        farm_id = str(farm.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+
+    assert response.status_code == 200
+    assert response.get_json()["decision_feed"] == []
+
+
+def test_mobile_decision_feed_marks_rainfall_stale_after_sixty_days(client, app):
+    with app.app_context():
+        farm = Farm(name="Stale Rain Decision Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        db.session.add(
+            RainfallRecord(farm_id=farm.id, recorded_on=date.today() - timedelta(days=60), mm=2)
+        )
+        farm_id = str(farm.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+
+    assert response.status_code == 200
+    assert response.get_json()["decision_feed"] == [
+        {
+            "severity": "medium",
+            "category": "rainfall",
+            "title": "Rainfall record is stale",
+            "detail": f"Last rain was recorded on {(date.today() - timedelta(days=60)).isoformat()}.",
+            "entity_type": "farm",
+            "entity_id": farm_id,
+        }
+    ]
+
+
+def test_mobile_decision_feed_flags_mobs_grazing_for_ten_days(client, app):
+    with app.app_context():
+        farm = Farm(name="Long Grazing Decision Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        paddock = Paddock(farm_id=farm.id, name="Long Camp", area_ha=10, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="South Mob", status="active")
+        group = AnimalGroupType(species="Cattle", breed="Bonsmara", sex="cow", age_class="adult")
+        db.session.add_all([paddock, mob, group])
+        db.session.flush()
+        db.session.add(
+            AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=18)
+        )
+        db.session.add(
+            RainfallRecord(farm_id=farm.id, recorded_on=date.today(), mm=3)
+        )
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime.combine(
+                date.today() - timedelta(days=10),
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            ),
+            end_at=None,
+        )
+        db.session.add(session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=session.id,
+                paddock_id=paddock.id,
+                allocation_fraction=1,
+            )
+        )
+        farm_id = str(farm.id)
+        mob_id = str(mob.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+
+    assert response.status_code == 200
+    assert response.get_json()["decision_feed"] == [
+        {
+            "severity": "high",
+            "category": "grazing",
+            "title": "Move South Mob off Long Camp",
+            "detail": (
+                "South Mob has been grazing Long Camp for 10 days continuously "
+                "(limit 10 days, 100% allocation). Move the mob off this paddock."
+            ),
+            "entity_type": "mob",
+            "entity_id": mob_id,
+        }
+    ]
+
+
+def test_mobile_decision_feed_allows_mobs_grazing_under_ten_days(client, app):
+    with app.app_context():
+        farm = Farm(name="Current Grazing Decision Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        paddock = Paddock(farm_id=farm.id, name="Fresh Camp", area_ha=10, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="North Mob", status="active")
+        group = AnimalGroupType(species="Sheep", breed="Dorper", sex="ewe", age_class="adult")
+        db.session.add_all([paddock, mob, group])
+        db.session.flush()
+        db.session.add(
+            AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=40)
+        )
+        db.session.add(
+            RainfallRecord(farm_id=farm.id, recorded_on=date.today(), mm=3)
+        )
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime.combine(
+                date.today() - timedelta(days=9),
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            ),
+            end_at=None,
+        )
+        db.session.add(session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=session.id,
+                paddock_id=paddock.id,
+                allocation_fraction=1,
+            )
+        )
+        farm_id = str(farm.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+
+    assert response.status_code == 200
+    assert response.get_json()["decision_feed"] == []
 
 
 def test_mobile_task_attachment_upload_is_idempotent_and_visible_in_snapshot(client, app):
@@ -497,6 +696,12 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             "payload": {"recorded_on": "2026-05-18", "mm": 8.5, "note": "Front moved in"},
         },
         {
+            "client_command_id": "mob-create-1",
+            "type": "mob.create",
+            "farm_id": farm_id,
+            "payload": {"name": "Mobile Created Mob", "origin_note": "Created in the mobile app"},
+        },
+        {
             "client_command_id": "event-1",
             "type": "mob_event.create",
             "farm_id": farm_id,
@@ -504,6 +709,16 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
                 "mob_id": mob_id,
                 "tags": ["condition", "field"],
                 "description": "Mob looks settled",
+            },
+        },
+        {
+            "client_command_id": "paddock-event-1",
+            "type": "paddock_event.create",
+            "farm_id": farm_id,
+            "payload": {
+                "paddock_id": source_id,
+                "tags": ["pasture", "field"],
+                "description": "Pasture cover noted from mobile",
             },
         },
         {
@@ -524,7 +739,8 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             "payload": {
                 "mob_id": mob_id,
                 "allocations": [
-                    {"paddock_id": destination_id, "allocation_fraction": 1},
+                    {"paddock_id": destination_id, "allocation_fraction": 0.5},
+                    {"paddock_id": source_id, "allocation_fraction": 0.5},
                 ],
             },
         },
@@ -587,7 +803,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
     )
     assert response.status_code == 200
     payload = response.get_json()
-    assert [result["status"] for result in payload["results"]] == ["applied"] * 10
+    assert [result["status"] for result in payload["results"]] == ["applied"] * 12
     assert all(result["duplicate"] is False for result in payload["results"])
 
     duplicate = client.post(
@@ -602,7 +818,10 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
 
     with app.app_context():
         assert RainfallRecord.query.filter_by(farm_id=farm_id).count() == 1
+        created_mob = Mob.query.filter_by(farm_id=farm_id, name="Mobile Created Mob").one()
+        assert created_mob.origin_note == "Created in the mobile app"
         assert MobEvent.query.filter_by(farm_id=farm_id).count() == 1
+        assert PaddockEvent.query.filter_by(farm_id=farm_id).count() == 1
         balance = AnimalGroupBalance.query.filter_by(
             mob_id=mob_id,
             animal_group_type_id=group_id,
@@ -613,14 +832,16 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             animal_group_type_id=group_id,
         ).first()
         assert target_balance.head_count == 2
-        assert GrazingSession.query.filter_by(farm_id=farm_id, mob_id=mob_id, end_at=None).count() == 1
+        active_session = GrazingSession.query.filter_by(farm_id=farm_id, mob_id=mob_id, end_at=None).first()
+        assert active_session is not None
+        assert sorted(float(row.allocation_fraction) for row in active_session.allocations) == [0.5, 0.5]
         assert db.session.get(WaterAsset, tank_id).water_level == "full"
         assert db.session.get(Paddock, source_id).status == "resting"
         assert db.session.get(Paddock, source_id).notes == "Gate latch needs attention"
         assert Task.query.filter_by(heading="Mobile-created task").count() == 1
         assert db.session.get(Task, task_id).status == "in_progress"
         assert TaskComment.query.filter_by(task_id=task_id).count() == 1
-        assert MobileSyncCommand.query.filter_by(status="applied").count() == 10
+        assert MobileSyncCommand.query.filter_by(status="applied").count() == 12
 
 
 def test_mobile_task_close_requires_note(client, app):

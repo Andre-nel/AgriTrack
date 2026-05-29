@@ -98,6 +98,8 @@ import com.agritrack.mobile.data.filterCalendarItems
 import com.agritrack.mobile.data.filterMobs
 import com.agritrack.mobile.data.filterPaddocks
 import com.agritrack.mobile.data.filterWaterAssets
+import com.agritrack.mobile.data.grazingDurationDays
+import com.agritrack.mobile.data.mobPaddockGrazingStartAt
 import com.agritrack.mobile.data.mobGrazingPaddocks
 import com.agritrack.mobile.data.paddockGrazing
 import com.agritrack.mobile.data.paddockMapFeature
@@ -425,6 +427,8 @@ class MainActivity : ComponentActivity() {
                     onRainfallDateChange = { uiState = uiState.copy(rainfallDate = it) },
                     onRainfallMmChange = { uiState = uiState.copy(rainfallMm = it) },
                     onRainfallNoteChange = { uiState = uiState.copy(rainfallNote = it) },
+                    onMobNameChange = { uiState = uiState.copy(createMobName = it) },
+                    onMobOriginNoteChange = { uiState = uiState.copy(createMobOriginNote = it) },
                     onMobSelected = { uiState = selectMob(uiState, it) },
                     onPaddockSelected = { uiState = selectPaddock(uiState, it) },
                     onWaterAssetSelected = { uiState = selectWaterAsset(uiState, it) },
@@ -445,18 +449,11 @@ class MainActivity : ComponentActivity() {
                     onTaskDescriptionChange = { uiState = uiState.copy(taskDescription = it) },
                     onTaskDueDateChange = { uiState = uiState.copy(taskDueDate = it) },
                     onTaskCommentChange = { uiState = uiState.copy(taskComment = it) },
+                    onEntityNoteChange = { uiState = uiState.copy(entityNote = it) },
+                    onEntityNoteTagsChange = { uiState = uiState.copy(entityNoteTags = it) },
                     onTaskSelected = { uiState = uiState.copy(selectedTaskId = it, currentScreen = AppScreen.TaskDetail) },
-                    onCalendarItemSelected = { item ->
-                        if (item.kind == "task" && item.taskId != null) {
-                            uiState = uiState.copy(selectedTaskId = item.taskId, currentScreen = AppScreen.TaskDetail)
-                        } else {
-                            uiState = uiState.copy(
-                                selectedCalendarItemSourceId = item.sourceId.orEmpty(),
-                                selectedCalendarItemDate = item.date,
-                                currentScreen = AppScreen.CalendarItemDetail,
-                            )
-                        }
-                    },
+                    onCalendarItemSelected = { item -> uiState = selectCalendarItem(uiState, item) },
+                    onDecisionSelected = { item -> uiState = selectDecision(uiState, item) },
                     onAttachNewTaskPhoto = { pendingImageChoice = ImageChoiceTarget(newTask = true) },
                     onAttachTaskPhoto = { task -> pendingImageChoice = ImageChoiceTarget(task = task) },
                     onStartTaskForEntity = { entityType, entityId, heading ->
@@ -470,10 +467,13 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     onQueueRainfall = { queueAndMaybeSync(queueRainfall(uiState, repository())) },
-                    onQueueMobMove = { queueAndMaybeSync(queueMobMove(uiState, repository())) },
+                    onQueueMobCreate = { queueAndMaybeSync(queueMobCreate(uiState, repository())) },
+                    onQueueMobMove = { allocations -> queueAndMaybeSync(queueMobMove(uiState, repository(), allocations)) },
                     onQueueStockCount = { queueAndMaybeSync(queueStockCount(uiState, repository())) },
                     onQueueMobTransfer = { queueAndMaybeSync(queueMobTransfer(uiState, repository())) },
                     onQueuePaddockUpdate = { queueAndMaybeSync(queuePaddockUpdate(uiState, repository())) },
+                    onQueueMobNote = { queueAndMaybeSync(queueMobNote(uiState, repository())) },
+                    onQueuePaddockNote = { queueAndMaybeSync(queuePaddockNote(uiState, repository())) },
                     onQueueWaterUpdate = { queueAndMaybeSync(queueWaterUpdate(uiState, repository())) },
                     onQueueTaskCreate = { queueAndMaybeSync(queueTaskCreate(uiState, repository())) },
                     onQueueTaskStatus = { task, status ->
@@ -623,6 +623,8 @@ private data class FieldUiState(
     val rainfallDate: String = LocalDate.now().toString(),
     val rainfallMm: String = "",
     val rainfallNote: String = "",
+    val createMobName: String = "",
+    val createMobOriginNote: String = "",
     val selectedMobId: String = "",
     val selectedPaddockId: String = "",
     val selectedWaterAssetId: String = "",
@@ -645,6 +647,8 @@ private data class FieldUiState(
     val taskDescription: String = "",
     val taskDueDate: String = LocalDate.now().toString(),
     val taskComment: String = "",
+    val entityNote: String = "",
+    val entityNoteTags: String = "",
     val selectedTaskId: String = "",
     val selectedCalendarItemSourceId: String = "",
     val selectedCalendarItemDate: String = "",
@@ -723,6 +727,11 @@ private data class MapSelection(
     val mob: PaddockMobSummary? = null,
 )
 
+private data class MoveAllocationDraft(
+    val paddockId: String = "",
+    val allocationPct: String = "",
+)
+
 private enum class AppScreen {
     Home,
     Farm,
@@ -734,6 +743,7 @@ private enum class AppScreen {
     CalendarItemDetail,
     Decisions,
     Mobs,
+    MobCreate,
     MobDetail,
     Paddocks,
     PaddockDetail,
@@ -783,6 +793,8 @@ private fun AgriTrackApp(
     onRainfallDateChange: (String) -> Unit,
     onRainfallMmChange: (String) -> Unit,
     onRainfallNoteChange: (String) -> Unit,
+    onMobNameChange: (String) -> Unit,
+    onMobOriginNoteChange: (String) -> Unit,
     onMobSelected: (String) -> Unit,
     onPaddockSelected: (String) -> Unit,
     onWaterAssetSelected: (String) -> Unit,
@@ -803,16 +815,22 @@ private fun AgriTrackApp(
     onTaskDescriptionChange: (String) -> Unit,
     onTaskDueDateChange: (String) -> Unit,
     onTaskCommentChange: (String) -> Unit,
+    onEntityNoteChange: (String) -> Unit,
+    onEntityNoteTagsChange: (String) -> Unit,
     onTaskSelected: (String) -> Unit,
     onCalendarItemSelected: (CalendarItemSummary) -> Unit,
+    onDecisionSelected: (DecisionItemSummary) -> Unit,
     onAttachNewTaskPhoto: () -> Unit,
     onAttachTaskPhoto: (TaskSummary) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
     onQueueRainfall: () -> Unit,
-    onQueueMobMove: () -> Unit,
+    onQueueMobCreate: () -> Unit,
+    onQueueMobMove: (List<MoveAllocationDraft>) -> Unit,
     onQueueStockCount: () -> Unit,
     onQueueMobTransfer: () -> Unit,
     onQueuePaddockUpdate: () -> Unit,
+    onQueueMobNote: () -> Unit,
+    onQueuePaddockNote: () -> Unit,
     onQueueWaterUpdate: () -> Unit,
     onQueueTaskCreate: () -> Unit,
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
@@ -898,12 +916,19 @@ private fun AgriTrackApp(
                     onAttachTaskPhoto,
                 )
                 AppScreen.CalendarItemDetail -> CalendarItemDetailScreen(state, onBackHome)
-                AppScreen.Decisions -> DecisionsScreen(state, onBackHome, onOpenScreen)
+                AppScreen.Decisions -> DecisionsScreen(state, onBackHome, onDecisionSelected)
                 AppScreen.Mobs -> MobsScreen(
                     state,
                     onBackHome,
                     onMobSelected,
                     onOpenScreen,
+                )
+                AppScreen.MobCreate -> MobCreateScreen(
+                    state,
+                    { onOpenScreen(AppScreen.Mobs) },
+                    onMobNameChange,
+                    onMobOriginNoteChange,
+                    onQueueMobCreate,
                 )
                 AppScreen.MobDetail -> MobDetailScreen(
                     state,
@@ -912,6 +937,9 @@ private fun AgriTrackApp(
                     onPaddockSelected,
                     onOpenScreen,
                     onStartTaskForEntity,
+                    onEntityNoteChange,
+                    onEntityNoteTagsChange,
+                    onQueueMobNote,
                 )
                 AppScreen.Paddocks -> PaddocksScreen(
                     state,
@@ -926,6 +954,9 @@ private fun AgriTrackApp(
                     onMobSelected,
                     onOpenScreen,
                     onStartTaskForEntity,
+                    onEntityNoteChange,
+                    onEntityNoteTagsChange,
+                    onQueuePaddockNote,
                 )
                 AppScreen.WaterAssets -> WaterAssetsScreen(
                     state,
@@ -1203,7 +1234,7 @@ private fun DashboardMenu(state: FieldUiState, onOpenScreen: (AppScreen) -> Unit
         DashboardButton("Calendar", "Tasks and activities for the coming days", state.snapshot != null) {
             onOpenScreen(AppScreen.Calendar)
         }
-        DashboardButton("Mobs", "Counts, moves, transfers, and linked tasks", state.snapshot?.mobs?.isNotEmpty() == true) {
+        DashboardButton("Mobs", "Create mobs, counts, moves, transfers, and linked tasks", state.snapshot != null) {
             onOpenScreen(AppScreen.Mobs)
         }
         DashboardButton("Paddocks", "Expected stock, water links, status, notes, and tags", state.snapshot?.paddocks?.isNotEmpty() == true) {
@@ -1437,6 +1468,19 @@ private fun mapFeatureDetail(feature: MapFeatureSummary): String =
 
 private fun formatHeadCount(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else "%.2f".format(value)
+
+private fun formatHectares(value: Double): String = "${formatHeadCount(value)} ha"
+
+private fun grazingDurationLabel(startAt: String?): String =
+    grazingDurationDays(startAt)?.let { "${formatDurationDays(it)} grazing" } ?: "grazing duration unknown"
+
+private fun formatDurationDays(days: Double): String {
+    val wholeDays = "%.0f".format(days)
+    val decimalDays = "%.1f".format(days)
+    val text = if (abs(days % 1.0) < 0.05) wholeDays else decimalDays
+    val suffix = if (text == "1" || text == "1.0") "day" else "days"
+    return "$text $suffix"
+}
 
 private data class MapDrawFeature(
     val source: MapFeatureSummary,
@@ -1823,8 +1867,10 @@ private fun CalendarItemCard(
 @Composable
 private fun CalendarItemDetailScreen(state: FieldUiState, onBackHome: () -> Unit) {
     FormScaffold("Calendar Detail", onBackHome) {
+        val selectedSourceId = state.selectedCalendarItemSourceId
         val item = state.snapshot?.calendarItems?.firstOrNull {
-            it.sourceId == state.selectedCalendarItemSourceId && it.date == state.selectedCalendarItemDate
+            it.date == state.selectedCalendarItemDate &&
+                (it.sourceId == selectedSourceId || it.activityId == selectedSourceId || it.taskId == selectedSourceId)
         } ?: state.snapshot?.calendarItems?.firstOrNull() ?: return@FormScaffold
         EntityCard(item.title, "${item.date} | ${item.stageLabel ?: item.badgeText ?: item.kind}")
         item.description?.takeIf { it.isNotBlank() }?.let {
@@ -1965,7 +2011,7 @@ private fun TaskCard(
 private fun DecisionsScreen(
     state: FieldUiState,
     onBackHome: () -> Unit,
-    onOpenScreen: (AppScreen) -> Unit,
+    onDecisionSelected: (DecisionItemSummary) -> Unit,
 ) {
     FormScaffold("Decisions", onBackHome) {
         val decisions = state.snapshot?.decisionFeed.orEmpty()
@@ -1977,20 +2023,15 @@ private fun DecisionsScreen(
                 color = if (item.severity == "high") Color(0xFFF8EAE4) else Color(0xFFFFF6DF),
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onDecisionSelected(item) },
             ) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(item.title, fontWeight = FontWeight.SemiBold)
                     Text(item.detail, color = Color(0xFF516052))
-                    val target = when (item.entityType) {
-                        "paddock" -> AppScreen.Paddocks
-                        "mob" -> AppScreen.Mobs
-                        "water_asset" -> AppScreen.WaterAssets
-                        "task" -> AppScreen.Calendar
-                        else -> AppScreen.Calendar
-                    }
-                    OutlinedButton(onClick = { onOpenScreen(target) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Open")
+                    OutlinedButton(onClick = { onDecisionSelected(item) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(decisionOpenLabel(item))
                     }
                 }
             }
@@ -2155,6 +2196,9 @@ private fun MobsScreen(
         val snapshot = state.snapshot ?: return@FormScaffold
         var filters by remember(snapshot.farm.id) { mutableStateOf(MobFilterState()) }
         val filteredMobs = filterMobs(snapshot.mobs, filters)
+        Button(onClick = { onOpenScreen(AppScreen.MobCreate) }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+            Text("New Mob")
+        }
         MobFilters(snapshot.mobs, filters) { filters = it }
         if (filteredMobs.isEmpty()) {
             EntityCard("No mobs", "No mobs match the current filters.")
@@ -2172,6 +2216,39 @@ private fun MobsScreen(
 }
 
 @Composable
+private fun MobCreateScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onMobNameChange: (String) -> Unit,
+    onMobOriginNoteChange: (String) -> Unit,
+    onQueueMobCreate: () -> Unit,
+) {
+    FormScaffold("New Mob", onBackToList) {
+        Text(state.selectedFarm?.name ?: state.snapshot?.farm?.name ?: "Farm", color = Color(0xFF516052))
+        OutlinedTextField(
+            state.createMobName,
+            onMobNameChange,
+            label = { Text("Mob name") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            state.createMobOriginNote,
+            onMobOriginNoteChange,
+            label = { Text("Origin note") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = onQueueMobCreate,
+            enabled = state.snapshot != null && state.createMobName.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Queue Mob")
+        }
+    }
+}
+
+@Composable
 private fun MobDetailScreen(
     state: FieldUiState,
     onBackToList: () -> Unit,
@@ -2179,15 +2256,19 @@ private fun MobDetailScreen(
     onPaddockSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
+    onEntityNoteChange: (String) -> Unit,
+    onEntityNoteTagsChange: (String) -> Unit,
+    onQueueMobNote: () -> Unit,
 ) {
     FormScaffold("Mob Detail", onBackToList) {
         val snapshot = state.snapshot ?: return@FormScaffold
         val mob = selectedMob(state) ?: return@FormScaffold
-        EntityCard(mob.name, "${mob.status} | ${mob.totalHead} head")
+        EntityCard(mob.name, "${mob.status} | ${mob.totalHead} head | ${formatHeadCount(mob.totalLsu)} LSU")
         MetricRows(
             listOf(
                 "Status" to mob.status,
                 "Total head" to mob.totalHead.toString(),
+                "Total LSU" to formatHeadCount(mob.totalLsu),
             )
         )
         SectionCard("Balances") {
@@ -2213,13 +2294,47 @@ private fun MobDetailScreen(
                 ) {
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(paddock.paddockName, fontWeight = FontWeight.SemiBold)
-                        Text("${formatHeadCount(paddock.allocationPct)}% allocation", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "${formatHeadCount(paddock.allocationPct)}% allocation | ${grazingDurationLabel(paddock.startAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
         }
         SectionCard("Linked Tasks") {
             RelatedTasks(snapshot.tasks, "mob", mob.id)
+        }
+        SectionCard("Comments / Log Notes") {
+            OutlinedTextField(
+                state.entityNote,
+                onEntityNoteChange,
+                label = { Text("Note") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                state.entityNoteTags,
+                onEntityNoteTagsChange,
+                label = { Text("Tags") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = onQueueMobNote,
+                enabled = state.entityNote.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Queue Note")
+            }
+            val notes = snapshot.mobEvents.filter { it.mobId == mob.id }.take(4)
+            if (notes.isEmpty()) {
+                Text("No notes recorded", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+            notes.forEach { note ->
+                EntityCard(
+                    title = note.eventAt ?: "Mob note",
+                    detail = "${note.tags.joinToString(", ").ifBlank { "field note" }} | ${note.description}",
+                )
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
@@ -2289,6 +2404,9 @@ private fun PaddockDetailScreen(
     onMobSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
+    onEntityNoteChange: (String) -> Unit,
+    onEntityNoteTagsChange: (String) -> Unit,
+    onQueuePaddockNote: () -> Unit,
 ) {
     FormScaffold("Paddock Detail", onBackToList) {
         val snapshot = state.snapshot ?: return@FormScaffold
@@ -2305,6 +2423,7 @@ private fun PaddockDetailScreen(
             MetricRows(
                 listOf(
                     "Pressure" to (feature?.grazingPressureRatio?.let { "${"%.0f".format(it * 100.0)}%" } ?: "unknown"),
+                    "Hectares" to (paddock.areaHa?.let(::formatHectares) ?: "-"),
                     "Current LSU" to (feature?.currentLsu?.let(::formatHeadCount) ?: "-"),
                     "Ha/current LSU" to (feature?.hectaresPerCurrentLsu?.let { "%.2f".format(it) } ?: "-"),
                 )
@@ -2338,6 +2457,7 @@ private fun PaddockDetailScreen(
                 Text("No active mob allocation links", color = Color(0xFF516052))
             }
             grazingMobs.forEach { mob ->
+                val startAt = mob.startAt ?: mobPaddockGrazingStartAt(snapshot, mob.mobId, paddock.id)
                 OutlinedButton(
                     onClick = {
                         onMobSelected(mob.mobId)
@@ -2347,13 +2467,47 @@ private fun PaddockDetailScreen(
                 ) {
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(mob.mobName, fontWeight = FontWeight.SemiBold)
-                        Text("${formatHeadCount(mob.allocationPct)}% allocation", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "${formatHeadCount(mob.allocationPct)}% allocation | ${grazingDurationLabel(startAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
         }
         SectionCard("Linked Tasks") {
             RelatedTasks(snapshot.tasks, "paddock", paddock.id)
+        }
+        SectionCard("Comments / Log Notes") {
+            OutlinedTextField(
+                state.entityNote,
+                onEntityNoteChange,
+                label = { Text("Note") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                state.entityNoteTags,
+                onEntityNoteTagsChange,
+                label = { Text("Tags") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = onQueuePaddockNote,
+                enabled = state.entityNote.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Queue Note")
+            }
+            val notes = snapshot.paddockEvents.filter { it.paddockId == paddock.id }.take(4)
+            if (notes.isEmpty()) {
+                Text("No notes recorded", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+            notes.forEach { note ->
+                EntityCard(
+                    title = note.eventAt ?: "Paddock note",
+                    detail = "${note.tags.joinToString(", ").ifBlank { "field note" }} | ${note.description}",
+                )
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
@@ -2488,13 +2642,65 @@ private fun MoveMobScreen(
     onMobSelected: (String) -> Unit,
     onPaddockSelected: (String) -> Unit,
     onMoveNoteChange: (String) -> Unit,
-    onQueueMobMove: () -> Unit,
+    onQueueMobMove: (List<MoveAllocationDraft>) -> Unit,
 ) {
     FormScaffold("Move Mob", onBackHome) {
+        val snapshot = state.snapshot
+        val paddocks = snapshot?.paddocks.orEmpty()
+        var allocations by remember(state.selectedMobId, snapshot?.farm?.id) {
+            mutableStateOf(initialMoveAllocations(snapshot, state.selectedMobId, state.selectedPaddockId))
+        }
+        val totalPct = allocations.sumOf { it.allocationPct.toDoubleOrNull() ?: 0.0 }
         MobPicker(state.snapshot?.mobs.orEmpty(), state.selectedMobId, onMobSelected)
-        PaddockPicker(state.snapshot?.paddocks.orEmpty(), state.selectedPaddockId, onPaddockSelected)
+        SectionCard("Paddock Allocations") {
+            allocations.forEachIndexed { index, allocation ->
+                SectionDivider()
+                PaddockPicker(paddocks, allocation.paddockId, { paddockId ->
+                    onPaddockSelected(paddockId)
+                    allocations = allocations.toMutableList().also { rows ->
+                        rows[index] = rows[index].copy(paddockId = paddockId)
+                    }
+                })
+                OutlinedTextField(
+                    allocation.allocationPct,
+                    { value ->
+                        allocations = allocations.toMutableList().also { rows ->
+                            rows[index] = rows[index].copy(allocationPct = value)
+                        }
+                    },
+                    label = { Text("Allocation %") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedButton(
+                    onClick = {
+                        if (allocations.size > 1) {
+                            allocations = allocations.toMutableList().also { it.removeAt(index) }
+                        }
+                    },
+                    enabled = allocations.size > 1,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Remove Allocation")
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = {
+                        val used = allocations.map { it.paddockId }.toSet()
+                        val nextPaddock = paddocks.firstOrNull { it.id !in used }?.id.orEmpty()
+                        allocations = allocations + MoveAllocationDraft(nextPaddock, "")
+                    },
+                    enabled = paddocks.isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Add Allocation")
+                }
+                Text("Total ${"%.2f".format(totalPct)}%", modifier = Modifier.weight(1f))
+            }
+        }
         OutlinedTextField(state.moveNote, onMoveNoteChange, label = { Text("Move note") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = onQueueMobMove, enabled = state.snapshot != null, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { onQueueMobMove(allocations) }, enabled = state.snapshot != null, modifier = Modifier.fillMaxWidth()) {
             Text("Queue Move")
         }
     }
@@ -3118,6 +3324,8 @@ private fun selectMob(state: FieldUiState, mobId: String): FieldUiState {
         selectedAnimalGroupTypeId = balance?.animalGroupTypeId
             ?: state.selectedAnimalGroupTypeId.ifBlank { state.animalGroupTypes.firstOrNull()?.id.orEmpty() },
         stockQuantity = balance?.headCount?.toString() ?: state.stockQuantity,
+        entityNote = "",
+        entityNoteTags = "",
     )
 }
 
@@ -3128,6 +3336,8 @@ private fun selectPaddock(state: FieldUiState, paddockId: String): FieldUiState 
         paddockStatus = paddock?.status.orEmpty(),
         paddockNotes = paddock?.notes.orEmpty(),
         paddockTags = paddock?.tagLabel.orEmpty(),
+        entityNote = "",
+        entityNoteTags = "",
     )
 }
 
@@ -3146,6 +3356,149 @@ private fun selectAnimalGroup(state: FieldUiState, groupTypeId: String): FieldUi
     return state.copy(selectedAnimalGroupTypeId = groupTypeId, stockQuantity = currentBalance?.headCount?.toString() ?: state.stockQuantity)
 }
 
+private fun selectCalendarItem(state: FieldUiState, item: CalendarItemSummary): FieldUiState =
+    if (item.kind == "task" && item.taskId != null) {
+        state.copy(selectedTaskId = item.taskId, currentScreen = AppScreen.TaskDetail)
+    } else {
+        state.copy(
+            selectedCalendarItemSourceId = item.sourceId ?: item.activityId ?: item.taskId ?: "",
+            selectedCalendarItemDate = item.date,
+            currentScreen = AppScreen.CalendarItemDetail,
+        )
+    }
+
+private fun selectDecision(state: FieldUiState, item: DecisionItemSummary): FieldUiState {
+    val snapshot = state.snapshot ?: return state.copy(statusMessage = "Load a farm snapshot before opening a decision.")
+    val entityId = item.entityId.orEmpty()
+    val targetType = item.entityType ?: when {
+        !item.taskId.isNullOrBlank() -> "task"
+        !item.activityId.isNullOrBlank() -> "activity"
+        else -> null
+    }
+    return when (targetType) {
+        "task" -> {
+            val taskId = item.taskId ?: entityId
+            val task = snapshot.tasks.firstOrNull { it.id == taskId }
+            if (task != null) {
+                state.copy(selectedTaskId = task.id, currentScreen = AppScreen.TaskDetail)
+            } else {
+                val calendarItem = snapshot.calendarItems.firstOrNull { it.taskId == taskId || it.sourceId == taskId }
+                calendarItem?.let { selectCalendarItem(state, it) }
+                    ?: state.copy(currentScreen = AppScreen.Tasks, statusMessage = "Task is not in the cached snapshot.")
+            }
+        }
+        "activity", "calendar_activity" -> {
+            val activityId = item.activityId ?: entityId
+            val calendarItem = snapshot.calendarItems.firstOrNull {
+                it.activityId == activityId || (it.kind == "activity" && it.sourceId == activityId)
+            }
+            calendarItem?.let { selectCalendarItem(state, it) }
+                ?: state.copy(currentScreen = AppScreen.Calendar, statusMessage = "Activity is not in the cached calendar.")
+        }
+        "paddock" -> {
+            if (snapshot.paddocks.any { it.id == entityId }) {
+                selectPaddock(state, entityId).copy(currentScreen = AppScreen.PaddockDetail)
+            } else {
+                state.copy(currentScreen = AppScreen.Paddocks, statusMessage = "Paddock is not in the cached snapshot.")
+            }
+        }
+        "mob" -> {
+            if (snapshot.mobs.any { it.id == entityId }) {
+                selectMob(state, entityId).copy(currentScreen = AppScreen.MobDetail)
+            } else {
+                state.copy(currentScreen = AppScreen.Mobs, statusMessage = "Mob is not in the cached snapshot.")
+            }
+        }
+        "water_asset" -> {
+            if (snapshot.waterAssets.any { it.id == entityId }) {
+                selectWaterAsset(state, entityId).copy(currentScreen = AppScreen.WaterAssetDetail)
+            } else {
+                state.copy(currentScreen = AppScreen.WaterAssets, statusMessage = "Water asset is not in the cached snapshot.")
+            }
+        }
+        "farm" -> state.copy(currentScreen = AppScreen.Farm)
+        else -> state.copy(currentScreen = AppScreen.Decisions, statusMessage = "This decision is not linked to an offline detail yet.")
+    }
+}
+
+private fun decisionOpenLabel(item: DecisionItemSummary): String =
+    when (item.entityType ?: when {
+        !item.taskId.isNullOrBlank() -> "task"
+        !item.activityId.isNullOrBlank() -> "activity"
+        else -> null
+    }) {
+        "task" -> "Open Task"
+        "activity", "calendar_activity" -> "Open Activity"
+        "paddock" -> "Open Paddock"
+        "mob" -> "Open Mob"
+        "water_asset" -> "Open Water Asset"
+        "farm" -> "Open Farm"
+        else -> "Open"
+    }
+
+private fun initialMoveAllocations(
+    snapshot: FarmSnapshot?,
+    mobId: String,
+    fallbackPaddockId: String,
+): List<MoveAllocationDraft> {
+    val selectedMobId = mobId.ifBlank { snapshot?.mobs?.firstOrNull()?.id.orEmpty() }
+    val current = snapshot?.let { mobGrazingPaddocks(it, selectedMobId) }.orEmpty()
+    if (current.isNotEmpty()) {
+        return current.map { paddock ->
+            MoveAllocationDraft(
+                paddockId = paddock.paddockId,
+                allocationPct = formatHeadCount(paddock.allocationPct),
+            )
+        }
+    }
+    val paddockId = fallbackPaddockId.ifBlank { snapshot?.paddocks?.firstOrNull()?.id.orEmpty() }
+    return listOf(MoveAllocationDraft(paddockId = paddockId, allocationPct = "100"))
+}
+
+private fun normalizeMoveAllocations(drafts: List<MoveAllocationDraft>): Result<List<Pair<String, Double>>> {
+    val allocations = mutableListOf<Pair<String, Double>>()
+    val seenPaddocks = mutableSetOf<String>()
+    var totalPct = 0.0
+    drafts.forEach { draft ->
+        val paddockId = draft.paddockId.trim()
+        val pctText = draft.allocationPct.trim()
+        if (paddockId.isBlank() && pctText.isBlank()) {
+            return@forEach
+        }
+        if (paddockId.isBlank()) {
+            return Result.failure(IllegalArgumentException("Each allocation needs a paddock."))
+        }
+        if (!seenPaddocks.add(paddockId)) {
+            return Result.failure(IllegalArgumentException("Each paddock can only be listed once."))
+        }
+        val pct = pctText.toDoubleOrNull()
+            ?: return Result.failure(IllegalArgumentException("Allocation percentages must be numbers."))
+        if (pct <= 0.0) {
+            return Result.failure(IllegalArgumentException("Allocation percentages must be greater than zero."))
+        }
+        if (pct > 100.0) {
+            return Result.failure(IllegalArgumentException("Allocation percentages cannot exceed 100."))
+        }
+        totalPct += pct
+        allocations.add(paddockId to (pct / 100.0))
+    }
+    if (allocations.isEmpty()) {
+        return Result.failure(IllegalArgumentException("Add at least one paddock allocation."))
+    }
+    if (abs(totalPct - 100.0) > 0.01) {
+        return Result.failure(IllegalArgumentException("Allocation percentages must add up to 100."))
+    }
+    return Result.success(allocations)
+}
+
+private fun parseNoteTags(raw: String): List<String> {
+    val tags = raw.split(",", ";", "\n")
+        .map { it.trim().lowercase() }
+        .filter { it.isNotBlank() }
+        .distinct()
+    return tags.ifEmpty { listOf("field note") }
+}
+
 private fun queueRainfall(state: FieldUiState, repo: MobileRepository): FieldUiState {
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing rainfall.")
     val recordedOn = runCatching { LocalDate.parse(state.rainfallDate).toString() }
@@ -3156,12 +3509,31 @@ private fun queueRainfall(state: FieldUiState, repo: MobileRepository): FieldUiS
     return state.copy(currentScreen = AppScreen.Home, rainfallMm = "", rainfallNote = "", statusMessage = "Queued rainfall.")
 }
 
-private fun queueMobMove(state: FieldUiState, repo: MobileRepository): FieldUiState {
+private fun queueMobCreate(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before creating a mob.")
+    val name = state.createMobName.trim()
+    if (name.isBlank()) return state.copy(statusMessage = "Mob name is required.")
+    if (name.length > 120) return state.copy(statusMessage = "Mob name must be 120 characters or fewer.")
+    repo.queueMobCreate(farm.id, name, state.createMobOriginNote)
+    return state.copy(
+        currentScreen = AppScreen.Mobs,
+        createMobName = "",
+        createMobOriginNote = "",
+        statusMessage = "Queued mob creation.",
+    )
+}
+
+private fun queueMobMove(
+    state: FieldUiState,
+    repo: MobileRepository,
+    allocationDrafts: List<MoveAllocationDraft>,
+): FieldUiState {
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a mob move.")
     val mobId = state.selectedMobId.ifBlank { state.snapshot?.mobs?.firstOrNull()?.id.orEmpty() }
-    val paddockId = state.selectedPaddockId.ifBlank { state.snapshot?.paddocks?.firstOrNull()?.id.orEmpty() }
-    if (mobId.isBlank() || paddockId.isBlank()) return state.copy(statusMessage = "Choose a mob and destination paddock.")
-    repo.queueMobMove(farm.id, mobId, paddockId, state.moveNote)
+    if (mobId.isBlank()) return state.copy(statusMessage = "Choose a mob.")
+    val allocations = normalizeMoveAllocations(allocationDrafts)
+        .getOrElse { return state.copy(statusMessage = it.message ?: "Check paddock allocations.") }
+    repo.queueMobMove(farm.id, mobId, allocations, state.moveNote)
     return state.copy(currentScreen = AppScreen.Home, moveNote = "", statusMessage = "Queued mob move.")
 }
 
@@ -3199,6 +3571,23 @@ private fun queuePaddockUpdate(state: FieldUiState, repo: MobileRepository): Fie
     if (state.selectedPaddockId.isBlank()) return state.copy(statusMessage = "Choose a paddock.")
     repo.queuePaddockUpdate(farm.id, state.selectedPaddockId, state.paddockStatus, state.paddockNotes, state.paddockTags)
     return state.copy(currentScreen = AppScreen.Home, statusMessage = "Queued paddock update.")
+}
+
+private fun queueMobNote(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before adding a note.")
+    val mobId = state.selectedMobId.ifBlank { state.snapshot?.mobs?.firstOrNull()?.id.orEmpty() }
+    if (mobId.isBlank()) return state.copy(statusMessage = "Choose a mob.")
+    if (state.entityNote.isBlank()) return state.copy(statusMessage = "Note is required.")
+    repo.queueMobNote(farm.id, mobId, state.entityNote, parseNoteTags(state.entityNoteTags))
+    return state.copy(entityNote = "", entityNoteTags = "", statusMessage = "Queued mob note.")
+}
+
+private fun queuePaddockNote(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before adding a note.")
+    if (state.selectedPaddockId.isBlank()) return state.copy(statusMessage = "Choose a paddock.")
+    if (state.entityNote.isBlank()) return state.copy(statusMessage = "Note is required.")
+    repo.queuePaddockNote(farm.id, state.selectedPaddockId, state.entityNote, parseNoteTags(state.entityNoteTags))
+    return state.copy(entityNote = "", entityNoteTags = "", statusMessage = "Queued paddock note.")
 }
 
 private fun queueWaterUpdate(state: FieldUiState, repo: MobileRepository): FieldUiState {

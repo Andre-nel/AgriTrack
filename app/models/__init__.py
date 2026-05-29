@@ -9,6 +9,7 @@ from app.models.mob import Mob
 from app.models.mob_event import MobEvent
 from app.models.movement import MobLineage, MovementEvent, MovementEventMob
 from app.models.paddock import Paddock
+from app.models.paddock_event import PaddockEvent
 from app.models.rainfall import RainfallRecord
 from app.models.snapshot import DailyStockSnapshot
 from app.models.stock_ledger import StockLedgerEntry
@@ -46,6 +47,7 @@ __all__ = [
     "MovementEvent",
     "MovementEventMob",
     "Paddock",
+    "PaddockEvent",
     "RainfallRecord",
     "StockLedgerEntry",
     "Task",

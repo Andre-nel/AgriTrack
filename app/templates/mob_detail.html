@@ -158,24 +158,23 @@
 </section>
 
 <section class="card">
-  <h2>Mob Events</h2>
+  <h2>Mob Comments / Log Notes</h2>
   <form method="post" action="{{ url_for('web.mob_event_create_form', mob_id=mob.id) }}" class="grid-form">
     <label>Tags / Keywords (comma separated)
       <input
         name="event_tags"
         placeholder="e.g. vaccination, drench, hoof-trim"
-        required
       />
     </label>
-    <label>Event Description
+    <label>Note
       <textarea
         name="event_description"
         rows="4"
-        placeholder="Describe what was done, why, and any follow-up notes."
+        placeholder="Describe what was done, what you observed, and any follow-up notes."
         required
       ></textarea>
     </label>
-    <button type="submit" class="btn">Record Event</button>
+    <button type="submit" class="btn">Record Note</button>
   </form>
 
   <form method="get" action="{{ url_for('web.mob_detail', mob_id=mob.id) }}" class="grid-form">
@@ -194,7 +193,7 @@
   </form>
 
   <table>
-    <thead><tr><th>Recorded At</th><th>Tags</th><th>Description</th></tr></thead>
+    <thead><tr><th>Recorded At</th><th>Tags</th><th>Note</th></tr></thead>
     <tbody>
       {% for row in mob_events %}
       <tr>

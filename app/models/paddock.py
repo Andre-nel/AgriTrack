@@ -16,6 +16,7 @@ class Paddock(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
 
     farm = db.relationship("Farm", back_populates="paddocks")
     grazing_allocations = db.relationship("GrazingAllocation", back_populates="paddock")
+    events = db.relationship("PaddockEvent", back_populates="paddock", cascade="all, delete-orphan")
     water_assets = db.relationship("WaterAsset", back_populates="location_paddock")
     task_entity_links = db.relationship("TaskEntityLink", back_populates="paddock")
     served_water_links = db.relationship(

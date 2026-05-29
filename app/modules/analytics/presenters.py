@@ -11,6 +11,8 @@ from app.models import (
     MobEvent,
     MovementEvent,
     MovementEventMob,
+    Paddock,
+    PaddockEvent,
     RainfallRecord,
     StockLedgerEntry,
 )
@@ -223,6 +225,41 @@ def build_analytics_journal_entries(
                 "source_label": "Mob Event",
                 "farm_name": farm_name,
                 "mob_name": mob_name,
+                "tags": tags,
+                "description": event.description,
+            }
+        )
+
+    paddock_event_query = (
+        db.session.query(
+            PaddockEvent,
+            Farm.name.label("farm_name"),
+            Paddock.name.label("paddock_name"),
+        )
+        .join(Farm, PaddockEvent.farm_id == Farm.id)
+        .join(Paddock, PaddockEvent.paddock_id == Paddock.id)
+        .filter(PaddockEvent.event_at >= start_dt, PaddockEvent.event_at < end_dt)
+    )
+    if farm_id:
+        paddock_event_query = paddock_event_query.filter(PaddockEvent.farm_id == farm_id)
+
+    for event, farm_name, paddock_name in paddock_event_query.all():
+        tags = MobEventService.tags_from_csv(event.tags_csv)
+        if not tags:
+            tags = normalize_journal_tags(
+                [
+                    "paddock note",
+                    f"farm {farm_name}",
+                    f"paddock {paddock_name}",
+                ]
+            )
+        entries.append(
+            {
+                "id": f"paddock_event:{event.id}",
+                "event_at": _normalize_journal_datetime(event.event_at),
+                "source_label": "Paddock Note",
+                "farm_name": farm_name,
+                "mob_name": paddock_name,
                 "tags": tags,
                 "description": event.description,
             }

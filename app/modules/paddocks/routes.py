@@ -5,11 +5,12 @@ from flask import current_app, flash, redirect, render_template, request, url_fo
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock
+from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, PaddockEvent
 from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
 from app.services.paddock_service import PaddockService
+from app.services.paddock_event_service import PaddockEventService
 from app.services.reporting_service import ReportingService
 from app.services.water_network_service import WaterNetworkService
 
@@ -125,6 +126,27 @@ def register_legacy_routes(bp) -> None:
         paddock.stocking_rate_ha_per_lsu_override = override_value
         db.session.commit()
         flash("Paddock carrying capacity override updated", "success")
+        return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
+
+    @bp.post("/paddocks/<paddock_id>/events")
+    def paddock_event_create_form(paddock_id):
+        paddock = Paddock.query.get_or_404(paddock_id)
+        raw_tags = request.form.get("event_tags")
+        description = request.form.get("event_description")
+
+        try:
+            PaddockEventService.create_event(
+                paddock_id=paddock.id,
+                farm_id=paddock.farm_id,
+                description=description,
+                raw_tags=raw_tags,
+            )
+            db.session.commit()
+            flash("Paddock note recorded", "success")
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+
         return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
 
     @bp.post("/paddocks/<paddock_id>/rename")
@@ -282,6 +304,18 @@ def register_legacy_routes(bp) -> None:
             )
         local_water_assets = WaterNetworkService.local_assets_for_paddock(str(paddock.id))
         serving_water_assets = WaterNetworkService.service_assets_serving_paddock(str(paddock.id))
+        paddock_events = [
+            {
+                "event_at": row.event_at,
+                "tags": PaddockEventService.tags_from_csv(row.tags_csv),
+                "description": row.description,
+            }
+            for row in (
+                PaddockEvent.query.filter_by(paddock_id=paddock.id)
+                .order_by(PaddockEvent.event_at.desc(), PaddockEvent.created_at.desc())
+                .all()
+            )
+        ]
 
         return render_template(
             "paddock_detail.html",
@@ -310,6 +344,7 @@ def register_legacy_routes(bp) -> None:
             bulk_move_mob_rows=bulk_move_mob_rows,
             local_water_assets=local_water_assets,
             serving_water_assets=serving_water_assets,
+            paddock_events=paddock_events,
             water_asset_type_labels=WaterNetworkService.ASSET_TYPE_LABELS,
             linked_task_rows=linked_task_rows_for_entity(
                 paddock_id=str(paddock.id),

@@ -93,6 +93,23 @@ class OfflineCommandQueueTest {
     }
 
     @Test
+    fun mobCreateCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.mobCreate(
+            farmId = "farm-1",
+            name = "New Heifers",
+            originNote = "Bought at local sale",
+        )
+
+        val json = command.toJson()
+        val payload = json.getJSONObject("payload")
+
+        assertEquals("mob.create", json.getString("type"))
+        assertEquals("farm-1", json.getString("farm_id"))
+        assertEquals("New Heifers", payload.getString("name"))
+        assertEquals("Bought at local sale", payload.getString("origin_note"))
+    }
+
+    @Test
     fun mobMoveCommandShapesSupportedSyncPayload() {
         val command = MobileCommand.mobMove(
             farmId = "farm-1",
@@ -107,6 +124,38 @@ class OfflineCommandQueueTest {
         assertEquals("mob-1", json.getJSONObject("payload").getString("mob_id"))
         assertEquals("paddock-1", allocation.getString("paddock_id"))
         assertEquals(1.0, allocation.getDouble("allocation_fraction"), 0.0)
+    }
+
+    @Test
+    fun mobMoveCommandSupportsMultipleAllocations() {
+        val command = MobileCommand.mobMoveAllocations(
+            farmId = "farm-1",
+            mobId = "mob-1",
+            allocations = listOf("paddock-1" to 0.6, "paddock-2" to 0.4),
+        )
+
+        val allocations = command.toJson().getJSONObject("payload").getJSONArray("allocations")
+
+        assertEquals(2, allocations.length())
+        assertEquals("paddock-1", allocations.getJSONObject(0).getString("paddock_id"))
+        assertEquals(0.4, allocations.getJSONObject(1).getDouble("allocation_fraction"), 0.0)
+    }
+
+    @Test
+    fun paddockNoteCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.paddockNote(
+            farmId = "farm-1",
+            paddockId = "paddock-1",
+            description = "Pasture cover recovering",
+            tags = listOf("pasture", "field"),
+        )
+
+        val json = command.toJson()
+
+        assertEquals("paddock_event.create", json.getString("type"))
+        assertEquals("farm-1", json.getString("farm_id"))
+        assertEquals("paddock-1", json.getJSONObject("payload").getString("paddock_id"))
+        assertEquals("pasture", json.getJSONObject("payload").getJSONArray("tags").getString(0))
     }
 
     @Test

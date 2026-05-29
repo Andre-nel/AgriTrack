@@ -176,7 +176,9 @@ Important response fields:
   "sync": {
     "supported_command_types": [
       "rainfall.create",
+      "mob.create",
       "mob_event.create",
+      "paddock_event.create",
       "stock_count.record",
       "mob.move",
       "mob.transfer",
@@ -214,8 +216,10 @@ Response groups:
   "paddocks": [],
   "mobs": [],
   "active_grazing": [],
+  "active_grazing_by_paddock": [],
   "rainfall": [],
   "mob_events": [],
+  "paddock_events": [],
   "water_assets": [],
   "water_connections": [],
   "task_spaces": [],
@@ -232,6 +236,11 @@ The snapshot is the Android read model for one selected farm. It represents
 current working state: open tasks, upcoming calendar items, current grazing
 allocation, current water state, recent rainfall, and decision hints. It is not
 a historical browser.
+
+`active_grazing_by_paddock` groups current grazing allocations for paddock
+detail views. Each mob row includes `mob_id`, `mob_name`, `allocation_pct`, and
+`start_at`; Android uses `start_at` to show how many days the mob has been
+grazing that paddock.
 
 ### Mobile Map Data
 
@@ -325,7 +334,9 @@ Result shape:
 Supported command types:
 
 - `rainfall.create`: `recorded_on`, `mm`, optional `note`, optional `source`.
-- `mob_event.create`: `mob_id`, `description`, `tags`, optional `event_at`.
+- `mob.create`: `name`, optional `origin_note`.
+- `mob_event.create`: `mob_id`, `description`, optional `tags`, optional `event_at`.
+- `paddock_event.create`: `paddock_id`, `description`, optional `tags`, optional `event_at`.
 - `stock_count.record`: `mob_id`, `animal_group_type_id`, `quantity`, optional `note`.
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
 - `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.

@@ -63,26 +63,75 @@ data class MobileCommand(
             )
         }
 
+        fun mobCreate(
+            farmId: String,
+            name: String,
+            originNote: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("name", name.trim())
+            if (originNote.isNotBlank()) {
+                payload.put("origin_note", originNote.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "mob.create",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
         fun mobMove(
             farmId: String,
             mobId: String,
             paddockId: String,
             allocationFraction: Double = 1.0,
+        ): MobileCommand = mobMoveAllocations(
+            farmId = farmId,
+            mobId = mobId,
+            allocations = listOf(paddockId to allocationFraction),
+        )
+
+        fun mobMoveAllocations(
+            farmId: String,
+            mobId: String,
+            allocations: List<Pair<String, Double>>,
         ): MobileCommand {
             val payload = JSONObject()
                 .put("mob_id", mobId)
                 .put(
                     "allocations",
-                    JSONArray()
-                        .put(
-                            JSONObject()
-                                .put("paddock_id", paddockId)
-                                .put("allocation_fraction", allocationFraction)
-                        )
+                    JSONArray().apply {
+                        allocations.forEach { (paddockId, allocationFraction) ->
+                            put(
+                                JSONObject()
+                                    .put("paddock_id", paddockId)
+                                    .put("allocation_fraction", allocationFraction)
+                            )
+                        }
+                    }
                 )
             return MobileCommand(
                 clientCommandId = UUID.randomUUID().toString(),
                 type = "mob.move",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun paddockNote(
+            farmId: String,
+            paddockId: String,
+            description: String,
+            tags: List<String>,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("paddock_id", paddockId)
+                .put("description", description.trim())
+                .put("tags", JSONArray(tags))
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "paddock_event.create",
                 farmId = farmId,
                 payload = payload,
             )

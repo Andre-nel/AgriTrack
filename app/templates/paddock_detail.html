@@ -65,6 +65,42 @@
 </section>
 
 <section class="card">
+  <h2>Paddock Comments / Log Notes</h2>
+  <form method="post" action="{{ url_for('web.paddock_event_create_form', paddock_id=paddock.id) }}" class="grid-form">
+    <label>Tags / Keywords (comma separated)
+      <input
+        name="event_tags"
+        placeholder="e.g. gate, pasture, water"
+      />
+    </label>
+    <label>Note
+      <textarea
+        name="event_description"
+        rows="4"
+        placeholder="Record field observations, follow-ups, or paddock condition notes."
+        required
+      ></textarea>
+    </label>
+    <button type="submit" class="btn">Record Note</button>
+  </form>
+
+  <table>
+    <thead><tr><th>Recorded At</th><th>Tags</th><th>Note</th></tr></thead>
+    <tbody>
+      {% for row in paddock_events %}
+      <tr>
+        <td>{{ row.event_at }}</td>
+        <td>{{ row.tags | join(", ") }}</td>
+        <td>{{ row.description }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3">No paddock notes recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
   <h2>Stocking Rate, Grazing Capacity & Density</h2>
   <form method="post" action="{{ url_for('web.update_paddock_stocking_rate_form', paddock_id=paddock.id) }}" class="grid-form">
     <label>Paddock Carrying Capacity Override (ha/LSU)

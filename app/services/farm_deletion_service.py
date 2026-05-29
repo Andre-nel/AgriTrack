@@ -20,6 +20,7 @@ from app.models import (
     MovementEvent,
     MovementEventMob,
     Paddock,
+    PaddockEvent,
     RainfallRecord,
     StockLedgerEntry,
     Task,
@@ -193,6 +194,11 @@ class FarmDeletionService:
             MobEvent,
             MobEvent.farm_id == farm_id,
             cls._in_if_any(MobEvent.mob_id, mob_ids),
+        )
+        cls._delete_where(
+            PaddockEvent,
+            PaddockEvent.farm_id == farm_id,
+            cls._in_if_any(PaddockEvent.paddock_id, paddock_ids),
         )
         cls._delete_where(DailyStockSnapshot, DailyStockSnapshot.farm_id == farm_id)
         cls._delete_where(DailyStockSnapshot, cls._in_if_any(DailyStockSnapshot.paddock_id, paddock_ids))

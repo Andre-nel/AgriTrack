@@ -21,6 +21,7 @@ from app.models import (
     Mob,
     MobEvent,
     Paddock,
+    PaddockEvent,
     RainfallRecord,
     Task,
     TaskAttachment,
@@ -36,6 +37,7 @@ from app.modules.farms.map_routes import _build_farm_map_feature_collection
 from app.services.calendar_service import CalendarService
 from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
+from app.services.paddock_event_service import PaddockEventService
 from app.services.stock_service import StockService
 from app.services.task_service import (
     TASK_PRIORITIES,
@@ -50,6 +52,8 @@ bp = Blueprint("mobile_api", __name__)
 
 TOKEN_TTL_DAYS = 90
 MAX_COMMANDS_PER_REQUEST = 100
+STALE_RAINFALL_DAYS = 60
+MAX_CONTINUOUS_GRAZING_DAYS = 10
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
 ATTACHMENT_ROOT = "task_attachments"
 ALLOWED_ATTACHMENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
@@ -304,6 +308,18 @@ def _serialize_mob_event(event: MobEvent) -> dict:
     }
 
 
+def _serialize_paddock_event(event: PaddockEvent) -> dict:
+    return {
+        "id": str(event.id),
+        "farm_id": str(event.farm_id),
+        "paddock_id": str(event.paddock_id),
+        "event_at": _iso_datetime(event.event_at),
+        "tags": PaddockEventService.tags_from_csv(event.tags_csv),
+        "description": event.description,
+        "updated_at": _iso_datetime(event.updated_at),
+    }
+
+
 def _serialize_task_space(space: TaskSpace) -> dict:
     return {
         "id": str(space.id),
@@ -452,6 +468,7 @@ def _active_grazing_by_paddock(active_grazing: list[GrazingSession]) -> dict[str
                 {
                     "mob_id": str(mob.id),
                     "mob_name": mob.name,
+                    "start_at": _iso_datetime(session.start_at),
                     "allocation_fraction": fraction,
                     "allocation_pct": round(fraction * 100.0, 2),
                 }
@@ -501,6 +518,7 @@ def _decision_feed(
     farm: Farm,
     tasks: list[Task],
     rainfall: list[RainfallRecord],
+    active_grazing: list[GrazingSession],
     water_assets: list[WaterAsset],
     network_state: dict,
 ) -> list[dict]:
@@ -535,15 +553,47 @@ def _decision_feed(
     for asset in water_assets:
         level = (asset.water_level or "").strip().lower()
         status = (asset.status or "").strip().lower()
-        if level in {"empty", "low"} or status in {"dry", "blocked", "broken", "offline"}:
+        level_requires_attention = asset.asset_type != "weir" and level in {"empty", "low"}
+        status_requires_attention = status in {"dry", "blocked", "broken", "offline"}
+        if level_requires_attention or status_requires_attention:
             items.append(
                 {
-                    "severity": "high" if level == "empty" else "medium",
+                    "severity": "high" if level_requires_attention and level == "empty" else "medium",
                     "category": "water",
                     "title": f"Check {asset.name}",
                     "detail": f"{asset.asset_type} status {asset.status or 'unknown'}, level {asset.water_level or 'unknown'}",
                     "entity_type": "water_asset",
                     "entity_id": str(asset.id),
+                }
+            )
+
+    for session in sorted(active_grazing, key=lambda item: item.start_at):
+        mob = session.mob
+        if mob is None or mob.status != "active":
+            continue
+        grazing_days = (today - session.start_at.date()).days
+        if grazing_days < MAX_CONTINUOUS_GRAZING_DAYS:
+            continue
+        for allocation in sorted(
+            session.allocations,
+            key=lambda item: (item.paddock.name if item.paddock else "").lower(),
+        ):
+            paddock = allocation.paddock
+            if paddock is None:
+                continue
+            allocation_pct = round(float(allocation.allocation_fraction) * 100.0, 2)
+            items.append(
+                {
+                    "severity": "high",
+                    "category": "grazing",
+                    "title": f"Move {mob.name} off {paddock.name}",
+                    "detail": (
+                        f"{mob.name} has been grazing {paddock.name} for {grazing_days} days "
+                        f"continuously (limit {MAX_CONTINUOUS_GRAZING_DAYS} days, "
+                        f"{allocation_pct:g}% allocation). Move the mob off this paddock."
+                    ),
+                    "entity_type": "mob",
+                    "entity_id": str(mob.id),
                 }
             )
 
@@ -559,7 +609,7 @@ def _decision_feed(
                 "entity_id": str(farm.id),
             }
         )
-    elif (today - latest_rain).days >= 14:
+    elif (today - latest_rain).days >= STALE_RAINFALL_DAYS:
         items.append(
             {
                 "severity": "medium",
@@ -687,7 +737,9 @@ def bootstrap():
             "sync": {
                 "supported_command_types": [
                     "rainfall.create",
+                    "mob.create",
                     "mob_event.create",
+                    "paddock_event.create",
                     "stock_count.record",
                     "mob.move",
                     "mob.transfer",
@@ -748,6 +800,12 @@ def farm_snapshot(farm_id):
         .limit(200)
         .all()
     )
+    paddock_events = (
+        PaddockEvent.query.filter_by(farm_id=farm.id)
+        .order_by(PaddockEvent.event_at.desc(), PaddockEvent.created_at.desc())
+        .limit(200)
+        .all()
+    )
     water_assets = (
         WaterAsset.query.filter_by(farm_id=farm.id)
         .order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
@@ -797,6 +855,7 @@ def farm_snapshot(farm_id):
             "active_grazing_by_paddock": list(active_by_paddock.values()),
             "rainfall": [_serialize_rainfall(record) for record in rainfall],
             "mob_events": [_serialize_mob_event(event) for event in mob_events],
+            "paddock_events": [_serialize_paddock_event(event) for event in paddock_events],
             "water_assets": [
                 WaterNetworkService.serialize_asset(asset, network_state=network_state)
                 for asset in water_assets
@@ -819,6 +878,7 @@ def farm_snapshot(farm_id):
                 farm=farm,
                 tasks=tasks,
                 rainfall=rainfall,
+                active_grazing=active_grazing,
                 water_assets=water_assets,
                 network_state=network_state,
             ),
@@ -1158,7 +1218,9 @@ def _dispatch_command(command_type: str, farm: Farm, payload) -> dict:
         raise ValueError("payload must be a JSON object")
     handlers = {
         "rainfall.create": _handle_rainfall_create,
+        "mob.create": _handle_mob_create,
         "mob_event.create": _handle_mob_event_create,
+        "paddock_event.create": _handle_paddock_event_create,
         "stock_count.record": _handle_stock_count_record,
         "mob.move": _handle_mob_move,
         "mob.transfer": _handle_mob_transfer,
@@ -1189,6 +1251,24 @@ def _handle_rainfall_create(farm: Farm, payload: dict) -> dict:
     return {"rainfall_id": str(rainfall.id)}
 
 
+def _handle_mob_create(farm: Farm, payload: dict) -> dict:
+    mob = Mob(
+        farm_id=farm.id,
+        name=TaskService.require_text(payload.get("name"), "Mob name", TaskService.MAX_NAME_LENGTH),
+        status="active",
+        origin_note=TaskService.optional_text(
+            payload.get("origin_note") or payload.get("note"),
+            TaskService.MAX_DESCRIPTION_LENGTH,
+        ),
+    )
+    db.session.add(mob)
+    try:
+        db.session.flush()
+    except IntegrityError as exc:
+        raise MobileApiError("invalid_command", "Active mob name already exists on this farm") from exc
+    return {"mob": _serialize_mob(mob)}
+
+
 def _get_active_mob_for_farm(farm: Farm, mob_id: str) -> Mob:
     mob = Mob.query.filter_by(id=mob_id, farm_id=farm.id, status="active").first()
     if mob is None:
@@ -1203,6 +1283,25 @@ def _handle_mob_event_create(farm: Farm, payload: dict) -> dict:
         raw_tags = ",".join(str(value) for value in raw_tags)
     event = MobEventService.create_event(
         mob_id=mob.id,
+        farm_id=farm.id,
+        description=payload.get("description"),
+        raw_tags=raw_tags,
+        event_at=_parse_iso_datetime(payload.get("event_at"), "event_at"),
+    )
+    db.session.flush()
+    return {"event_id": str(event.id)}
+
+
+def _handle_paddock_event_create(farm: Farm, payload: dict) -> dict:
+    paddock_id = str(payload.get("paddock_id") or "").strip()
+    paddock = Paddock.query.filter_by(id=paddock_id, farm_id=farm.id).first()
+    if paddock is None:
+        raise MobileApiError("not_found", "Paddock not found for this farm", 404)
+    raw_tags = payload.get("tags")
+    if isinstance(raw_tags, list):
+        raw_tags = ",".join(str(value) for value in raw_tags)
+    event = PaddockEventService.create_event(
+        paddock_id=paddock.id,
         farm_id=farm.id,
         description=payload.get("description"),
         raw_tags=raw_tags,

@@ -7,6 +7,7 @@ from app.models import MobEvent
 
 class MobEventService:
     TAG_SPLIT_PATTERN = re.compile(r"[,;\n]+")
+    DEFAULT_TAG = "field note"
     MAX_TAGS = 20
     MAX_TAG_LENGTH = 40
     MAX_DESCRIPTION_LENGTH = 5000
@@ -63,7 +64,7 @@ class MobEventService:
                 f"Description must be {cls.MAX_DESCRIPTION_LENGTH} characters or fewer"
             )
 
-        tags = cls.parse_tags(raw_tags)
+        tags = cls.parse_tags(raw_tags or cls.DEFAULT_TAG)
         event = MobEvent(
             mob_id=mob_id,
             farm_id=farm_id,

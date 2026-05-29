@@ -1,5 +1,9 @@
 package com.agritrack.mobile.data
 
+import java.time.Duration
+import java.time.Instant
+import java.time.OffsetDateTime
+
 data class PaddockStockLine(
     val label: String,
     val head: Double,
@@ -15,6 +19,7 @@ data class MobGrazingPaddock(
     val paddockId: String,
     val paddockName: String,
     val allocationPct: Double,
+    val startAt: String?,
 )
 
 fun paddockGrazing(snapshot: FarmSnapshot, paddockId: String): PaddockGrazingSummary? =
@@ -64,6 +69,7 @@ fun mobGrazingPaddocks(snapshot: FarmSnapshot, mobId: String): List<MobGrazingPa
                 paddockId = grazing.paddockId,
                 paddockName = paddocksById[grazing.paddockId]?.name ?: grazing.paddockId,
                 allocationPct = mob.allocationPct,
+                startAt = mob.startAt ?: mobPaddockGrazingStartAt(snapshot, mobId, grazing.paddockId),
             )
         }
     }
@@ -77,9 +83,42 @@ fun mobGrazingPaddocks(snapshot: FarmSnapshot, mobId: String): List<MobGrazingPa
                     paddockId = allocation.paddockId,
                     paddockName = paddocksById[allocation.paddockId]?.name ?: allocation.paddockId,
                     allocationPct = allocation.allocationFraction * 100.0,
+                    startAt = grazing.startAt,
                 )
             }
         }
+}
+
+fun mobPaddockGrazingStartAt(snapshot: FarmSnapshot, mobId: String, paddockId: String): String? {
+    var earliestText: String? = null
+    var earliestInstant: Instant? = null
+    snapshot.activeGrazing
+        .filter { grazing ->
+            grazing.mobId == mobId && grazing.allocations.any { allocation -> allocation.paddockId == paddockId }
+        }
+        .forEach { grazing ->
+            val startAt = grazing.startAt ?: return@forEach
+            val instant = parseGrazingInstant(startAt)
+            if (instant == null) {
+                if (earliestText == null) earliestText = startAt
+            } else if (earliestInstant?.let { instant < it } != false) {
+                earliestInstant = instant
+                earliestText = startAt
+            }
+        }
+    return earliestText
+}
+
+fun grazingDurationDays(startAt: String?, now: Instant = Instant.now()): Double? {
+    val start = parseGrazingInstant(startAt) ?: return null
+    val seconds = Duration.between(start, now).seconds.coerceAtLeast(0L)
+    return seconds / 86400.0
+}
+
+private fun parseGrazingInstant(value: String?): Instant? {
+    if (value.isNullOrBlank()) return null
+    return runCatching { OffsetDateTime.parse(value).toInstant() }
+        .getOrElse { runCatching { Instant.parse(value) }.getOrNull() }
 }
 
 fun servedPaddockNames(snapshot: FarmSnapshot, asset: WaterAssetSummary): List<String> {

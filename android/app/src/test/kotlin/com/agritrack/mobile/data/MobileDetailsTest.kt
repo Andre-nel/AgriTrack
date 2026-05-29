@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.Instant
 
 class MobileDetailsTest {
     @Test
@@ -68,6 +69,17 @@ class MobileDetailsTest {
         assertEquals(listOf("paddock-1"), paddocks.map { it.paddockId })
         assertEquals(listOf("North Camp"), paddocks.map { it.paddockName })
         assertEquals(listOf(65.0), paddocks.map { it.allocationPct })
+        assertEquals(listOf("2026-05-24T12:00:00+00:00"), paddocks.map { it.startAt })
+    }
+
+    @Test
+    fun grazingDurationDaysUsesIsoStartAt() {
+        val days = grazingDurationDays(
+            "2026-05-24T12:00:00+00:00",
+            Instant.parse("2026-05-27T00:00:00Z"),
+        )
+
+        assertEquals(2.5, days ?: 0.0, 0.001)
     }
 
     private fun detailSnapshot(): FarmSnapshot =
@@ -85,6 +97,24 @@ class MobileDetailsTest {
                     JSONArray()
                         .put(JSONObject().put("id", "paddock-1").put("name", "North Camp").put("status", "active"))
                         .put(JSONObject().put("id", "paddock-2").put("name", "South Camp").put("status", "resting")),
+                )
+                .put(
+                    "active_grazing",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "grazing-1")
+                                .put("mob_id", "mob-1")
+                                .put("start_at", "2026-05-24T12:00:00+00:00")
+                                .put(
+                                    "allocations",
+                                    JSONArray().put(
+                                        JSONObject()
+                                            .put("paddock_id", "paddock-1")
+                                            .put("allocation_fraction", 0.65),
+                                    ),
+                                ),
+                        ),
                 )
                 .put(
                     "active_grazing_by_paddock",

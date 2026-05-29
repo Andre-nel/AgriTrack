@@ -24,6 +24,8 @@ class MobileModelsTest {
                             JSONObject()
                                 .put("id", "paddock-1")
                                 .put("name", "North Camp")
+                                .put("area_ha", 12.5)
+                                .put("grazeable_area_ha", 10.0)
                         )
                 )
                 .put(
@@ -64,6 +66,17 @@ class MobileModelsTest {
                                 .put("paddock_id", "paddock-1")
                                 .put("total_head", 37.0)
                                 .put(
+                                    "mobs",
+                                    JSONArray()
+                                        .put(
+                                            JSONObject()
+                                                .put("mob_id", "mob-1")
+                                                .put("mob_name", "Main Mob")
+                                                .put("allocation_pct", 100.0)
+                                                .put("start_at", "2026-05-24T12:00:00+00:00")
+                                        )
+                                )
+                                .put(
                                     "group_heads",
                                     JSONArray()
                                         .put(
@@ -84,7 +97,26 @@ class MobileModelsTest {
                         )
                 )
                 .put("rainfall", JSONArray().put(JSONObject().put("id", "rain-1")))
-                .put("mob_events", JSONArray().put(JSONObject().put("id", "event-1")))
+                .put(
+                    "mob_events",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "event-1")
+                                .put("mob_id", "mob-1")
+                                .put("description", "Mob looks settled")
+                        )
+                )
+                .put(
+                    "paddock_events",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "paddock-event-1")
+                                .put("paddock_id", "paddock-1")
+                                .put("description", "Pasture recovering")
+                        )
+                )
                 .put(
                     "tasks",
                     JSONArray()
@@ -191,12 +223,20 @@ class MobileModelsTest {
         assertEquals(1, snapshot.paddockCount)
         assertEquals(1, snapshot.mobCount)
         assertEquals(1, snapshot.waterAssetCount)
+        assertEquals(1, snapshot.mobEventCount)
+        assertEquals(1, snapshot.paddockEventCount)
         assertEquals("North Camp", snapshot.paddocks.first().name)
+        assertEquals(12.5, snapshot.paddocks.first().areaHa ?: 0.0, 0.0)
+        assertEquals(10.0, snapshot.paddocks.first().grazeableAreaHa ?: 0.0, 0.0)
         assertEquals("Main Mob", snapshot.mobs.first().name)
         assertEquals(37, snapshot.mobs.first().balances.first().headCount)
+        assertEquals(37.0, snapshot.mobs.first().totalLsu, 0.0)
         assertEquals("Cattle Bonsmara cow adult", snapshot.mobs.first().balances.first().animalGroupType.label)
         assertEquals("Cattle Bonsmara cow adult", snapshot.grazingByPaddock.first().groupHeads.first().animalGroupType.label)
         assertEquals(37.0, snapshot.grazingByPaddock.first().groupHeads.first().head, 0.0)
+        assertEquals("2026-05-24T12:00:00+00:00", snapshot.grazingByPaddock.first().mobs.first().startAt)
+        assertEquals("Mob looks settled", snapshot.mobEvents.first().description)
+        assertEquals("Pasture recovering", snapshot.paddockEvents.first().description)
         assertEquals("OPS-1", snapshot.tasks.first().displayKey)
         assertEquals(listOf("water", "field"), snapshot.tasks.first().tags)
         assertEquals("Field Team", snapshot.tasks.first().assigneeName)

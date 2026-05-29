@@ -61,7 +61,7 @@ def register_legacy_routes(bp) -> None:
                 raw_tags=tags_text,
             )
             db.session.commit()
-            flash("Mob event recorded", "success")
+            flash("Mob note recorded", "success")
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), "error")
