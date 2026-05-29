@@ -364,6 +364,116 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert "map_features" in payload
 
 
+def test_mobile_snapshot_hides_archived_mobs_and_related_mob_links(client, app):
+    with app.app_context():
+        farm = Farm(name="Archived Mobile Mob Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+
+        paddock = Paddock(
+            farm_id=farm.id,
+            name="Archive Camp",
+            area_ha=15,
+            grazeable_area_ha=12,
+        )
+        active_mob = Mob(farm_id=farm.id, name="Active Mobile Mob", status="active")
+        archived_mob = Mob(farm_id=farm.id, name="Archived Mobile Mob", status="archived")
+        group = AnimalGroupType(species="Cattle", breed="Bonsmara", sex="cow", age_class="adult")
+        db.session.add_all([paddock, active_mob, archived_mob, group])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(
+                    mob_id=active_mob.id,
+                    animal_group_type_id=group.id,
+                    head_count=6,
+                ),
+                AnimalGroupBalance(
+                    mob_id=archived_mob.id,
+                    animal_group_type_id=group.id,
+                    head_count=9,
+                ),
+            ]
+        )
+        stale_session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=archived_mob.id,
+            start_at=datetime.now(timezone.utc) - timedelta(days=14),
+            end_at=None,
+        )
+        db.session.add(stale_session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=stale_session.id,
+                paddock_id=paddock.id,
+                allocation_fraction=1,
+            )
+        )
+        db.session.add(
+            MobEvent(
+                farm_id=farm.id,
+                mob_id=archived_mob.id,
+                tags_csv="archive",
+                description="Archived mob note",
+            )
+        )
+        space = TaskSpace(
+            farm_id=farm.id,
+            key="ARCHMOB",
+            name="Archived Mob Tasks",
+            description="Regression coverage",
+        )
+        db.session.add(space)
+        db.session.flush()
+        task = TaskService.create_task(
+            space=space,
+            heading="Inspect stock",
+            description="Task should keep only active mob links on mobile.",
+            raw_tags="field",
+            reporter_name="Mobile User",
+            assignee_name="Field Team",
+            status="todo",
+            priority="low",
+            original_estimate_days=None,
+            due_date=date.today().isoformat(),
+        )
+        db.session.flush()
+        TaskService.add_entity_links(task=task, mob_ids=[active_mob.id, archived_mob.id])
+
+        farm_id = str(farm.id)
+        active_mob_id = str(active_mob.id)
+        archived_mob_id = str(archived_mob.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert [mob["name"] for mob in payload["mobs"]] == ["Active Mobile Mob"]
+    assert {mob["id"] for mob in payload["mobs"]} == {active_mob_id}
+    assert all(session["mob_id"] != archived_mob_id for session in payload["active_grazing"])
+    assert all(
+        row_mob["mob_id"] != archived_mob_id
+        for row in payload["active_grazing_by_paddock"]
+        for row_mob in row["mobs"]
+    )
+    assert all(event["mob_id"] != archived_mob_id for event in payload["mob_events"])
+
+    task_links = payload["tasks"][0]["entity_links"]
+    calendar_task = next(item for item in payload["calendar_items"] if item["kind"] == "task")
+    assert [link["entity_id"] for link in task_links if link["entity_type"] == "mob"] == [
+        active_mob_id
+    ]
+    assert [
+        link["entity_id"]
+        for link in calendar_task["entity_links"]
+        if link["entity_type"] == "mob"
+    ] == [active_mob_id]
+
+
 def test_mobile_decision_feed_ignores_weir_water_level(client, app):
     with app.app_context():
         farm = Farm(name="Weir Decision Farm", timezone="UTC", active=True)

@@ -367,8 +367,30 @@ def _serialize_task_attachment(attachment: TaskAttachment) -> dict:
     }
 
 
-def _serialize_task(task: Task) -> dict:
+def _mobile_visible_entity_links(
+    links: list[TaskEntityLink],
+    *,
+    active_mob_ids: set[str] | None = None,
+) -> list[TaskEntityLink]:
+    if active_mob_ids is None:
+        return list(links)
+    return [
+        link
+        for link in links
+        if not link.mob_id or str(link.mob_id) in active_mob_ids
+    ]
+
+
+def _serialize_task(
+    task: Task,
+    *,
+    active_mob_ids: set[str] | None = None,
+) -> dict:
     attachments = sorted(task.attachments, key=lambda item: item.created_at, reverse=True)
+    entity_links = _mobile_visible_entity_links(
+        task.entity_links,
+        active_mob_ids=active_mob_ids,
+    )
     return {
         "id": str(task.id),
         "space_id": str(task.space_id),
@@ -387,7 +409,7 @@ def _serialize_task(task: Task) -> dict:
         "started_at": _iso_datetime(task.started_at),
         "closed_at": _iso_datetime(task.closed_at),
         "updated_at": _iso_datetime(task.updated_at),
-        "entity_links": [_serialize_task_entity_link(link) for link in task.entity_links],
+        "entity_links": [_serialize_task_entity_link(link) for link in entity_links],
         "comment_count": len(task.comments),
         "attachment_count": len(attachments),
         "attachments": [_serialize_task_attachment(attachment) for attachment in attachments[:12]],
@@ -409,7 +431,27 @@ def _serialize_calendar_activity(activity: CalendarActivity) -> dict:
     }
 
 
-def _mobile_calendar_items(*, farm_id: str, range_start: date, range_end: date) -> list[dict]:
+def _mobile_visible_calendar_entity_links(
+    links: list[dict],
+    *,
+    active_mob_ids: set[str] | None = None,
+) -> list[dict]:
+    if active_mob_ids is None:
+        return list(links)
+    return [
+        link
+        for link in links
+        if link.get("entity_type") != "mob" or str(link.get("entity_id")) in active_mob_ids
+    ]
+
+
+def _mobile_calendar_items(
+    *,
+    farm_id: str,
+    range_start: date,
+    range_end: date,
+    active_mob_ids: set[str] | None = None,
+) -> list[dict]:
     calendar_data = CalendarService.build_calendar_data(
         range_start=range_start,
         range_end=range_end,
@@ -418,6 +460,10 @@ def _mobile_calendar_items(*, farm_id: str, range_start: date, range_end: date) 
     items = []
     for day, day_items in calendar_data["items_by_date"].items():
         for item in day_items:
+            entity_links = _mobile_visible_calendar_entity_links(
+                item.get("entity_links") or [],
+                active_mob_ids=active_mob_ids,
+            )
             items.append(
                 {
                     "kind": item["kind"],
@@ -437,7 +483,7 @@ def _mobile_calendar_items(*, farm_id: str, range_start: date, range_end: date) 
                     "tags": item.get("tags") or [],
                     "priority": item.get("priority"),
                     "priority_label": item.get("priority_label"),
-                    "entity_links": item.get("entity_links") or [],
+                    "entity_links": entity_links,
                     "occurrence_date": item.get("occurrence_date"),
                     "original_date": item.get("original_date"),
                     "is_moved": item.get("is_moved"),
@@ -451,6 +497,8 @@ def _active_grazing_by_paddock(active_grazing: list[GrazingSession]) -> dict[str
     by_paddock: dict[str, dict] = {}
     for session in active_grazing:
         mob = session.mob
+        if mob is None or mob.status != "active":
+            continue
         for allocation in session.allocations:
             paddock_id = str(allocation.paddock_id)
             row = by_paddock.setdefault(
@@ -782,9 +830,16 @@ def farm_snapshot(farm_id):
     today = date.today()
     calendar_range_end = today + timedelta(days=90)
     paddocks = Paddock.query.filter_by(farm_id=farm.id).order_by(Paddock.name.asc()).all()
-    mobs = Mob.query.filter_by(farm_id=farm.id).order_by(Mob.name.asc()).all()
+    mobs = Mob.query.filter_by(farm_id=farm.id, status="active").order_by(Mob.name.asc()).all()
+    active_mob_ids = {str(mob.id) for mob in mobs}
     active_grazing = (
-        GrazingSession.query.filter_by(farm_id=farm.id, end_at=None)
+        GrazingSession.query.join(Mob)
+        .filter(
+            GrazingSession.farm_id == farm.id,
+            GrazingSession.end_at.is_(None),
+            Mob.farm_id == farm.id,
+            Mob.status == "active",
+        )
         .order_by(GrazingSession.start_at.desc())
         .all()
     )
@@ -795,7 +850,12 @@ def farm_snapshot(farm_id):
         .all()
     )
     mob_events = (
-        MobEvent.query.filter_by(farm_id=farm.id)
+        MobEvent.query.join(Mob)
+        .filter(
+            MobEvent.farm_id == farm.id,
+            Mob.farm_id == farm.id,
+            Mob.status == "active",
+        )
         .order_by(MobEvent.event_at.desc(), MobEvent.created_at.desc())
         .limit(200)
         .all()
@@ -865,7 +925,7 @@ def farm_snapshot(farm_id):
                 for connection in water_connections
             ],
             "task_spaces": [_serialize_task_space(space) for space in task_spaces],
-            "tasks": [_serialize_task(task) for task in tasks],
+            "tasks": [_serialize_task(task, active_mob_ids=active_mob_ids) for task in tasks],
             "calendar_activities": [
                 _serialize_calendar_activity(activity) for activity in calendar_activities
             ],
@@ -873,6 +933,7 @@ def farm_snapshot(farm_id):
                 farm_id=str(farm.id),
                 range_start=today,
                 range_end=calendar_range_end,
+                active_mob_ids=active_mob_ids,
             ),
             "decision_feed": _decision_feed(
                 farm=farm,
