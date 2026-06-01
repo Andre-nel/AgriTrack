@@ -193,6 +193,8 @@ class MobileModelsTest {
                                 .put("category", "water")
                                 .put("title", "Water risk")
                                 .put("detail", "North trough is empty")
+                                .put("farm_id", "farm-1")
+                                .put("farm_name", "North Block")
                         )
                 )
                 .put(
@@ -252,6 +254,8 @@ class MobileModelsTest {
         assertEquals("Field Team", snapshot.calendarItems.first().assigneeName)
         assertEquals(true, snapshot.calendarItems.first().entityLinks.first().entityId == "paddock-1")
         assertEquals(1, snapshot.decisionCount)
+        assertEquals("farm-1", snapshot.decisionFeed.first().farmId)
+        assertEquals("North Block", snapshot.decisionFeed.first().farmName)
     }
 
     @Test

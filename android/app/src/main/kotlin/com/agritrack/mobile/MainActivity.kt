@@ -143,6 +143,11 @@ class MainActivity : ComponentActivity() {
         }
         val cachedFarms = if (hasStoredToken) fieldStore.loadAvailableFarms() else emptyList()
         val cachedSnapshot = if (hasStoredToken) fieldStore.loadLastSnapshot() else null
+        val cachedFarmSnapshots = if (hasStoredToken) {
+            cachedFarms.mapNotNull { farm -> fieldStore.loadSnapshot(farm.id) }
+        } else {
+            emptyList()
+        }
         val cachedActiveFarm = cachedSnapshot?.let { snapshot ->
             farmWithRole(snapshot.farm, cachedFarms)
         } ?: fieldStore.loadLastFarmId()?.let { farmId ->
@@ -155,6 +160,7 @@ class MainActivity : ComponentActivity() {
             syncIntervalMinutes = fieldStore.getSyncIntervalMinutes(),
             availableFarms = cachedFarms,
             activeFarm = cachedActiveFarm,
+            farmSnapshots = cachedFarmSnapshots,
         ).copy(
             baseUrl = cachedBaseUrl,
             isAuthenticated = hasStoredToken,
@@ -235,7 +241,7 @@ class MainActivity : ComponentActivity() {
                             } ?: state.animalGroupTypes,
                             pendingCount = fieldStore.pendingCount(),
                             statusMessage = "Queued task photo.",
-                        )
+                        ).withCachedFarmSnapshots(optimisticSnapshot?.let { listOf(it) }.orEmpty())
                     },
                 )
             }
@@ -286,7 +292,7 @@ class MainActivity : ComponentActivity() {
                         taskHeading = "",
                         taskDescription = "",
                         statusMessage = "Queued task. Attach the photo next.",
-                    )
+                    ).withCachedFarmSnapshots(optimisticSnapshot?.let { listOf(it) }.orEmpty())
                     pendingPhotoTarget = PhotoTarget(farm.id, null, commandId)
                     if (capture) {
                         cameraLauncher.launch(null)
@@ -353,7 +359,7 @@ class MainActivity : ComponentActivity() {
                     } ?: nextState.animalGroupTypes,
                     pendingCount = fieldStore.pendingCount(),
                     failedCommands = fieldStore.failedCommands(),
-                )
+                ).withCachedFarmSnapshots(optimisticSnapshot?.let { listOf(it) }.orEmpty())
                 if (isOnline()) {
                     main.post { syncNow("Connected. Syncing queued field edits...", automatic = true) }
                 }
@@ -469,7 +475,15 @@ class MainActivity : ComponentActivity() {
                     onEntityNoteTagsChange = { uiState = uiState.copy(entityNoteTags = it) },
                     onTaskSelected = { uiState = uiState.copy(selectedTaskId = it, currentScreen = AppScreen.TaskDetail) },
                     onCalendarItemSelected = { item -> uiState = selectCalendarItem(uiState, item) },
-                    onDecisionSelected = { item -> uiState = selectDecision(uiState, item) },
+                    onDecisionSelected = { item ->
+                        uiState = selectDecision(uiState, item).also { nextState ->
+                            nextState.selectedFarm?.id?.let { farmId ->
+                                if (farmId == nextState.snapshot?.farm?.id) {
+                                    fieldStore.setActiveFarmId(farmId)
+                                }
+                            }
+                        }
+                    },
                     onAttachNewTaskPhoto = { pendingImageChoice = ImageChoiceTarget(newTask = true) },
                     onAttachTaskPhoto = { task -> pendingImageChoice = ImageChoiceTarget(task = task) },
                     onStartTaskForEntity = { entityType, entityId, heading ->
@@ -629,6 +643,8 @@ private data class FieldUiState(
     val availableFarms: List<FarmSummary> = emptyList(),
     val selectedFarm: FarmSummary? = null,
     val snapshot: FarmSnapshot? = null,
+    val farmSnapshots: Map<String, FarmSnapshot> = emptyMap(),
+    val allFarmDecisionFeed: List<DecisionItemSummary> = emptyList(),
     val pendingCount: Int = 0,
     val failedCommands: List<OutboxFailure> = emptyList(),
     val lastSync: SyncSummary? = null,
@@ -677,16 +693,20 @@ private data class FieldUiState(
             syncIntervalMinutes: Int,
             availableFarms: List<FarmSummary> = emptyList(),
             activeFarm: FarmSummary? = null,
+            farmSnapshots: List<FarmSnapshot> = snapshot?.let { listOf(it) }.orEmpty(),
         ): FieldUiState {
             val firstMob = snapshot?.mobs?.firstOrNull()
             val firstPaddock = snapshot?.paddocks?.firstOrNull()
             val firstWater = snapshot?.waterAssets?.firstOrNull()
             val firstBalance = firstMob?.balances?.firstOrNull()
             val selectedFarm = activeFarm ?: snapshot?.let { farmWithRole(it.farm, availableFarms) }
+            val cachedSnapshots = mergeFarmSnapshots(emptyMap(), farmSnapshots, snapshot)
             return FieldUiState(
                 availableFarms = availableFarms,
                 selectedFarm = selectedFarm,
                 snapshot = snapshot,
+                farmSnapshots = cachedSnapshots,
+                allFarmDecisionFeed = buildAllFarmDecisionFeed(cachedSnapshots, availableFarms),
                 pendingCount = pendingCount,
                 failedCommands = failedCommands,
                 animalGroupTypes = animalGroupTypesFromSnapshot(snapshot),
@@ -1136,7 +1156,7 @@ private fun HomeScreen(
         LoginScreen(state, onBaseUrlChange, onEmailChange, onPasswordChange, onLogin)
         if (state.isAuthenticated) {
             FarmSummaryPanel(state, onRefresh, onOpenScreen, onFarmSelected)
-            DecisionFeedPanel(state.snapshot?.decisionFeed.orEmpty(), onOpenScreen)
+            DecisionFeedPanel(state.allFarmDecisionFeed, onOpenScreen)
             DashboardMenu(state, onOpenScreen)
             SyncMiniPanel(state, onOpenScreen, onSync)
         }
@@ -1210,7 +1230,7 @@ private fun FarmSummaryPanel(
                 MetricAction("Mobs", snapshot.mobCount.toString(), AppScreen.Mobs),
                 MetricAction("Water", snapshot.waterAssetCount.toString(), AppScreen.WaterAssets),
                 MetricAction("Calendar", snapshot.calendarItemCount.toString(), AppScreen.Calendar),
-                MetricAction("Decisions", snapshot.decisionCount.toString(), AppScreen.Decisions),
+                MetricAction("Decisions", state.allFarmDecisionFeed.size.toString(), AppScreen.Decisions),
             )
         ) { onOpenScreen(it) }
         Button(onClick = { onOpenScreen(AppScreen.TaskCreate) }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
@@ -1293,7 +1313,7 @@ private fun DashboardButton(title: String, detail: String, enabled: Boolean, onC
 private fun DecisionFeedPanel(items: List<DecisionItemSummary>, onOpenScreen: (AppScreen) -> Unit) {
     SectionCard("Decision Feed") {
         if (items.isEmpty()) {
-            Text("No urgent field decisions in the cached snapshot.", color = Color(0xFF516052))
+            Text("No urgent field decisions in the cached farm snapshots.", color = Color(0xFF516052))
         }
         items.take(6).forEach { item ->
             Surface(
@@ -1303,6 +1323,9 @@ private fun DecisionFeedPanel(items: List<DecisionItemSummary>, onOpenScreen: (A
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    item.farmName?.let { farmName ->
+                        Text(farmName, style = MaterialTheme.typography.labelMedium, color = Color(0xFF516052))
+                    }
                     Text(item.title, fontWeight = FontWeight.SemiBold)
                     Text(item.detail, style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
                 }
@@ -2059,9 +2082,9 @@ private fun DecisionsScreen(
     onDecisionSelected: (DecisionItemSummary) -> Unit,
 ) {
     FormScaffold("Decisions", onBackHome) {
-        val decisions = state.snapshot?.decisionFeed.orEmpty()
+        val decisions = state.allFarmDecisionFeed
         if (decisions.isEmpty()) {
-            EntityCard("No decisions", "No urgent field decisions in the cached snapshot.")
+            EntityCard("No decisions", "No urgent field decisions in the cached farm snapshots.")
         }
         decisions.forEach { item ->
             Surface(
@@ -2073,6 +2096,9 @@ private fun DecisionsScreen(
                     .clickable { onDecisionSelected(item) },
             ) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item.farmName?.let { farmName ->
+                        Text(farmName, style = MaterialTheme.typography.labelMedium, color = Color(0xFF516052))
+                    }
                     Text(item.title, fontWeight = FontWeight.SemiBold)
                     Text(item.detail, color = Color(0xFF516052))
                     OutlinedButton(onClick = { onDecisionSelected(item) }, modifier = Modifier.fillMaxWidth()) {
@@ -3318,6 +3344,96 @@ private fun SectionDivider() {
 private fun farmWithRole(farm: FarmSummary, availableFarms: List<FarmSummary>): FarmSummary =
     availableFarms.firstOrNull { it.id == farm.id } ?: farm
 
+private data class RankedDecisionItem(
+    val severityRank: Int,
+    val farmIndex: Int,
+    val decisionIndex: Int,
+    val item: DecisionItemSummary,
+)
+
+private fun mergeFarmSnapshots(
+    existing: Map<String, FarmSnapshot>,
+    snapshots: List<FarmSnapshot>,
+    activeSnapshot: FarmSnapshot?,
+): Map<String, FarmSnapshot> {
+    val merged = linkedMapOf<String, FarmSnapshot>()
+    existing.forEach { (farmId, snapshot) ->
+        if (farmId.isNotBlank()) {
+            merged[farmId] = snapshot
+        }
+    }
+    snapshots.forEach { snapshot ->
+        if (snapshot.farm.id.isNotBlank()) {
+            merged[snapshot.farm.id] = snapshot
+        }
+    }
+    activeSnapshot?.let { snapshot ->
+        if (snapshot.farm.id.isNotBlank()) {
+            merged[snapshot.farm.id] = snapshot
+        }
+    }
+    return merged
+}
+
+private fun buildAllFarmDecisionFeed(
+    farmSnapshots: Map<String, FarmSnapshot>,
+    availableFarms: List<FarmSummary>,
+): List<DecisionItemSummary> {
+    val farmOrder = availableFarms.mapIndexed { index, farm -> farm.id to index }.toMap()
+    val snapshots = farmSnapshots.values.sortedBy { snapshot -> farmOrder[snapshot.farm.id] ?: Int.MAX_VALUE }
+    return snapshots
+        .flatMapIndexed { farmIndex, snapshot ->
+            val farm = farmWithRole(snapshot.farm, availableFarms)
+            snapshot.decisionFeed.mapIndexed { decisionIndex, item ->
+                RankedDecisionItem(
+                    severityRank = decisionSeverityRank(item.severity),
+                    farmIndex = farmIndex,
+                    decisionIndex = decisionIndex,
+                    item = item.copy(
+                        farmId = item.farmId ?: farm.id,
+                        farmName = item.farmName ?: farm.name,
+                    ),
+                )
+            }
+        }
+        .sortedWith(
+            compareBy<RankedDecisionItem> { it.severityRank }
+                .thenBy { it.farmIndex }
+                .thenBy { it.decisionIndex }
+        )
+        .map { it.item }
+}
+
+private fun decisionSeverityRank(severity: String): Int =
+    when (severity.lowercase()) {
+        "high" -> 0
+        "medium" -> 1
+        "low" -> 2
+        else -> 3
+    }
+
+private fun FieldUiState.withCachedFarmSnapshots(
+    snapshots: List<FarmSnapshot>,
+    activeSnapshot: FarmSnapshot? = snapshot,
+): FieldUiState {
+    val cachedSnapshots = mergeFarmSnapshots(farmSnapshots, snapshots, activeSnapshot)
+    return copy(
+        farmSnapshots = cachedSnapshots,
+        allFarmDecisionFeed = buildAllFarmDecisionFeed(cachedSnapshots, availableFarms),
+    )
+}
+
+private fun FieldUiState.withFarmSnapshotSet(
+    snapshots: List<FarmSnapshot>,
+    activeSnapshot: FarmSnapshot? = snapshot,
+): FieldUiState {
+    val cachedSnapshots = mergeFarmSnapshots(emptyMap(), snapshots, activeSnapshot)
+    return copy(
+        farmSnapshots = cachedSnapshots,
+        allFarmDecisionFeed = buildAllFarmDecisionFeed(cachedSnapshots, availableFarms),
+    )
+}
+
 private fun farmLoadMessage(prefix: String, result: FarmLoadResult): String =
     if (result.availableFarms.isEmpty()) {
         "$prefix. No farm access is available."
@@ -3345,7 +3461,7 @@ private fun loginLoaded(state: FieldUiState, result: FarmLoadResult): FieldUiSta
             } else {
                 "Login worked, but ${result.failedFarmCount} farm snapshot(s) could not be loaded."
             },
-        )
+        ).withFarmSnapshotSet(result.snapshots, activeSnapshot = null)
     return FieldUiState.fromSnapshot(
         snapshot = snapshot,
         pendingCount = state.pendingCount,
@@ -3353,6 +3469,7 @@ private fun loginLoaded(state: FieldUiState, result: FarmLoadResult): FieldUiSta
         syncIntervalMinutes = state.syncIntervalMinutes,
         availableFarms = result.availableFarms,
         activeFarm = result.activeFarm,
+        farmSnapshots = result.snapshots,
     ).copy(
         baseUrl = state.baseUrl,
         email = state.email,
@@ -3388,7 +3505,7 @@ private fun farmsRefreshed(state: FieldUiState, result: FarmLoadResult): FieldUi
             selectedFarm = result.activeFarm,
             snapshot = null,
             statusMessage = farmLoadMessage("Refreshed farm access", result),
-        )
+        ).withFarmSnapshotSet(result.snapshots, activeSnapshot = null)
     return FieldUiState.fromSnapshot(
         snapshot = snapshot,
         pendingCount = state.pendingCount,
@@ -3396,6 +3513,7 @@ private fun farmsRefreshed(state: FieldUiState, result: FarmLoadResult): FieldUi
         syncIntervalMinutes = state.syncIntervalMinutes,
         availableFarms = result.availableFarms,
         activeFarm = result.activeFarm,
+        farmSnapshots = result.snapshots,
     ).copy(
         baseUrl = state.baseUrl,
         email = state.email,
@@ -3414,6 +3532,7 @@ private fun farmSelected(state: FieldUiState, snapshot: FarmSnapshot): FieldUiSt
         syncIntervalMinutes = state.syncIntervalMinutes,
         availableFarms = state.availableFarms,
         activeFarm = farmWithRole(snapshot.farm, state.availableFarms),
+        farmSnapshots = state.farmSnapshots.values.toList() + snapshot,
     ).copy(
         baseUrl = state.baseUrl,
         email = state.email,
@@ -3432,8 +3551,10 @@ private fun synced(state: FieldUiState, summary: SyncSummary): FieldUiState {
             syncIntervalMinutes = state.syncIntervalMinutes,
             availableFarms = state.availableFarms,
             activeFarm = farmWithRole(it.farm, state.availableFarms),
+            farmSnapshots = state.farmSnapshots.values.toList() + summary.refreshedSnapshots,
         )
     } ?: state.copy(pendingCount = summary.remainingQueueCount)
+        .withCachedFarmSnapshots(summary.refreshedSnapshots)
     return base.copy(
         baseUrl = state.baseUrl,
         email = state.email,
@@ -3502,7 +3623,19 @@ private fun selectCalendarItem(state: FieldUiState, item: CalendarItemSummary): 
     }
 
 private fun selectDecision(state: FieldUiState, item: DecisionItemSummary): FieldUiState {
-    val snapshot = state.snapshot ?: return state.copy(statusMessage = "Load a farm snapshot before opening a decision.")
+    val targetFarmId = item.farmId.orEmpty()
+    val snapshot = if (targetFarmId.isNotBlank()) {
+        state.farmSnapshots[targetFarmId] ?: state.snapshot?.takeIf { it.farm.id == targetFarmId }
+    } else {
+        state.snapshot
+    } ?: return state.copy(
+        currentScreen = AppScreen.Decisions,
+        statusMessage = "${item.farmName ?: "This farm"} is not cached. Refresh farms to open this decision.",
+    )
+    val targetState = state.copy(
+        selectedFarm = farmWithRole(snapshot.farm, state.availableFarms),
+        snapshot = snapshot,
+    ).withCachedFarmSnapshots(listOf(snapshot))
     val entityId = item.entityId.orEmpty()
     val targetType = item.entityType ?: when {
         !item.taskId.isNullOrBlank() -> "task"
@@ -3514,11 +3647,11 @@ private fun selectDecision(state: FieldUiState, item: DecisionItemSummary): Fiel
             val taskId = item.taskId ?: entityId
             val task = snapshot.tasks.firstOrNull { it.id == taskId }
             if (task != null) {
-                state.copy(selectedTaskId = task.id, currentScreen = AppScreen.TaskDetail)
+                targetState.copy(selectedTaskId = task.id, currentScreen = AppScreen.TaskDetail)
             } else {
                 val calendarItem = snapshot.calendarItems.firstOrNull { it.taskId == taskId || it.sourceId == taskId }
-                calendarItem?.let { selectCalendarItem(state, it) }
-                    ?: state.copy(currentScreen = AppScreen.Tasks, statusMessage = "Task is not in the cached snapshot.")
+                calendarItem?.let { selectCalendarItem(targetState, it) }
+                    ?: targetState.copy(currentScreen = AppScreen.Tasks, statusMessage = "Task is not in the cached snapshot.")
             }
         }
         "activity", "calendar_activity" -> {
@@ -3526,32 +3659,32 @@ private fun selectDecision(state: FieldUiState, item: DecisionItemSummary): Fiel
             val calendarItem = snapshot.calendarItems.firstOrNull {
                 it.activityId == activityId || (it.kind == "activity" && it.sourceId == activityId)
             }
-            calendarItem?.let { selectCalendarItem(state, it) }
-                ?: state.copy(currentScreen = AppScreen.Calendar, statusMessage = "Activity is not in the cached calendar.")
+            calendarItem?.let { selectCalendarItem(targetState, it) }
+                ?: targetState.copy(currentScreen = AppScreen.Calendar, statusMessage = "Activity is not in the cached calendar.")
         }
         "paddock" -> {
             if (snapshot.paddocks.any { it.id == entityId }) {
-                selectPaddock(state, entityId).copy(currentScreen = AppScreen.PaddockDetail)
+                selectPaddock(targetState, entityId).copy(currentScreen = AppScreen.PaddockDetail)
             } else {
-                state.copy(currentScreen = AppScreen.Paddocks, statusMessage = "Paddock is not in the cached snapshot.")
+                targetState.copy(currentScreen = AppScreen.Paddocks, statusMessage = "Paddock is not in the cached snapshot.")
             }
         }
         "mob" -> {
             if (snapshot.mobs.any { it.id == entityId }) {
-                selectMob(state, entityId).copy(currentScreen = AppScreen.MobDetail)
+                selectMob(targetState, entityId).copy(currentScreen = AppScreen.MobDetail)
             } else {
-                state.copy(currentScreen = AppScreen.Mobs, statusMessage = "Mob is not in the cached snapshot.")
+                targetState.copy(currentScreen = AppScreen.Mobs, statusMessage = "Mob is not in the cached snapshot.")
             }
         }
         "water_asset" -> {
             if (snapshot.waterAssets.any { it.id == entityId }) {
-                selectWaterAsset(state, entityId).copy(currentScreen = AppScreen.WaterAssetDetail)
+                selectWaterAsset(targetState, entityId).copy(currentScreen = AppScreen.WaterAssetDetail)
             } else {
-                state.copy(currentScreen = AppScreen.WaterAssets, statusMessage = "Water asset is not in the cached snapshot.")
+                targetState.copy(currentScreen = AppScreen.WaterAssets, statusMessage = "Water asset is not in the cached snapshot.")
             }
         }
-        "farm" -> state.copy(currentScreen = AppScreen.Farm)
-        else -> state.copy(currentScreen = AppScreen.Decisions, statusMessage = "This decision is not linked to an offline detail yet.")
+        "farm" -> targetState.copy(currentScreen = AppScreen.Farm)
+        else -> targetState.copy(currentScreen = AppScreen.Decisions, statusMessage = "This decision is not linked to an offline detail yet.")
     }
 }
 

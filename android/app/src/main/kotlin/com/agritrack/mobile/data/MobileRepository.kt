@@ -328,6 +328,7 @@ class MobileRepository(
             availableFarms = farms,
             activeFarm = activeFarm,
             snapshot = activeSnapshot,
+            snapshots = snapshotsByFarm.values.toList(),
             prefetchedCount = snapshotsByFarm.size,
             failedFarmCount = failedFarmCount,
         )

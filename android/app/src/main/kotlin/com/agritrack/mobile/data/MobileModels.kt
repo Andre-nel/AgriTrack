@@ -266,6 +266,8 @@ data class DecisionItemSummary(
     val entityId: String?,
     val taskId: String? = null,
     val activityId: String? = null,
+    val farmId: String? = null,
+    val farmName: String? = null,
 )
 
 data class MapFeatureSummary(
@@ -668,6 +670,8 @@ data class FarmSnapshot(
                         entityId = item.optNullableString("entity_id"),
                         taskId = item.optNullableString("task_id"),
                         activityId = item.optNullableString("activity_id"),
+                        farmId = item.optNullableString("farm_id"),
+                        farmName = item.optNullableString("farm_name"),
                     )
                 )
             }
@@ -839,6 +843,7 @@ data class FarmLoadResult(
     val availableFarms: List<FarmSummary>,
     val activeFarm: FarmSummary?,
     val snapshot: FarmSnapshot?,
+    val snapshots: List<FarmSnapshot> = snapshot?.let { listOf(it) }.orEmpty(),
     val prefetchedCount: Int = if (snapshot == null) 0 else 1,
     val failedFarmCount: Int = 0,
 )
