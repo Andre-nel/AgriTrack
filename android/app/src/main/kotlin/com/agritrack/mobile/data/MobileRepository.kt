@@ -339,7 +339,7 @@ class MobileRepository(
         }
         val snapshot = FarmSnapshot.fromJson(apiClient.farmSnapshot(token, farmId))
         fieldStore.saveSnapshot(snapshot, makeActive = makeActive)
-        return snapshot
+        return fieldStore.loadSnapshot(farmId) ?: snapshot
     }
 
     private fun refreshFarmIds(farmIds: Set<String>, token: String, activeFarmId: String?): List<FarmSnapshot> {

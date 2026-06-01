@@ -151,8 +151,8 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
         }.getOrDefault(emptyList())
     }
 
-    fun loadSnapshot(farmId: String): FarmSnapshot? =
-        readableDatabase.rawQuery(
+    fun loadSnapshot(farmId: String): FarmSnapshot? {
+        val snapshot = readableDatabase.rawQuery(
             "SELECT raw_json FROM snapshots WHERE farm_id = ?",
             arrayOf(farmId),
         ).use { cursor ->
@@ -162,6 +162,10 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
                 runCatching { FarmSnapshot.fromJson(JSONObject(cursor.getString(0))) }.getOrNull()
             }
         }
+        return snapshot
+            ?.withOptimisticCommands(pendingJsonForFarm(farmId))
+            ?.withOptimisticTaskPhotos(pendingTaskPhotoJsonForFarm(farmId))
+    }
 
     fun enqueue(command: MobileCommand) {
         writableDatabase.insertWithOnConflict(
@@ -192,6 +196,53 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 array.put(JSONObject(cursor.getString(0)))
+            }
+        }
+        return array
+    }
+
+    private fun pendingJsonForFarm(farmId: String): JSONArray {
+        val array = JSONArray()
+        readableDatabase.rawQuery(
+            """
+            SELECT payload FROM outbox
+            WHERE farm_id = ? AND status IN ('pending', 'failed')
+            ORDER BY created_at ASC
+            """.trimIndent(),
+            arrayOf(farmId),
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                array.put(JSONObject(cursor.getString(0)))
+            }
+        }
+        return array
+    }
+
+    private fun pendingTaskPhotoJsonForFarm(farmId: String): JSONArray {
+        val array = JSONArray()
+        readableDatabase.rawQuery(
+            """
+            SELECT client_attachment_id, farm_id, server_task_id, target_client_command_id,
+                   original_filename, content_type, byte_size, caption, captured_at
+            FROM task_photo_outbox
+            WHERE farm_id = ? AND status IN ('pending', 'failed')
+            ORDER BY created_at ASC
+            """.trimIndent(),
+            arrayOf(farmId),
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                array.put(
+                    JSONObject()
+                        .put("client_attachment_id", cursor.getString(0))
+                        .put("farm_id", cursor.getString(1))
+                        .putNullable("server_task_id", if (cursor.isNull(2)) null else cursor.getString(2))
+                        .putNullable("target_client_command_id", if (cursor.isNull(3)) null else cursor.getString(3))
+                        .put("original_filename", cursor.getString(4))
+                        .put("content_type", cursor.getString(5))
+                        .put("byte_size", cursor.getLong(6))
+                        .putNullable("caption", if (cursor.isNull(7)) null else cursor.getString(7))
+                        .putNullable("captured_at", if (cursor.isNull(8)) null else cursor.getString(8))
+                )
             }
         }
         return array
@@ -506,6 +557,9 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
     private fun normalizeBaseUrl(value: String): String {
         return MobileBaseUrl.normalize(value)
     }
+
+    private fun JSONObject.putNullable(key: String, value: String?): JSONObject =
+        if (value == null) put(key, JSONObject.NULL) else put(key, value)
 
     private companion object {
         const val DB_NAME = "agritrack_field_store.db"

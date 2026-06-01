@@ -207,6 +207,13 @@ data class TaskAttachmentSummary(
     val capturedAt: String?,
 )
 
+data class TaskCommentSummary(
+    val id: String,
+    val authorName: String?,
+    val body: String,
+    val createdAt: String?,
+)
+
 data class TaskSummary(
     val id: String,
     val displayKey: String,
@@ -220,6 +227,8 @@ data class TaskSummary(
     val priorityLabel: String,
     val dueDate: String?,
     val entityLinks: List<TaskEntityLinkSummary>,
+    val commentCount: Int,
+    val comments: List<TaskCommentSummary>,
     val attachmentCount: Int,
     val attachments: List<TaskAttachmentSummary>,
 ) {
@@ -546,6 +555,7 @@ data class FarmSnapshot(
             for (index in 0 until json.length()) {
                 val task = json.getJSONObject(index)
                 val linksJson = task.optJSONArray("entity_links") ?: JSONArray()
+                val commentsJson = task.optJSONArray("comments") ?: JSONArray()
                 val attachmentsJson = task.optJSONArray("attachments") ?: JSONArray()
                 add(
                     TaskSummary(
@@ -561,6 +571,8 @@ data class FarmSnapshot(
                         priorityLabel = task.optString("priority_label", task.optString("priority", "Low")),
                         dueDate = task.optNullableString("due_date"),
                         entityLinks = parseTaskEntityLinks(linksJson),
+                        commentCount = task.optInt("comment_count", commentsJson.length()),
+                        comments = parseTaskComments(commentsJson),
                         attachmentCount = task.optInt("attachment_count", attachmentsJson.length()),
                         attachments = buildList {
                             for (attachmentIndex in 0 until attachmentsJson.length()) {
@@ -580,6 +592,23 @@ data class FarmSnapshot(
                         },
                     )
                 )
+            }
+        }
+
+        private fun parseTaskComments(json: JSONArray): List<TaskCommentSummary> = buildList {
+            for (commentIndex in 0 until json.length()) {
+                val comment = json.getJSONObject(commentIndex)
+                val body = comment.optString("body")
+                if (body.isNotBlank()) {
+                    add(
+                        TaskCommentSummary(
+                            id = comment.optString("id"),
+                            authorName = comment.optNullableString("author_name"),
+                            body = body,
+                            createdAt = comment.optNullableString("created_at"),
+                        )
+                    )
+                }
             }
         }
 

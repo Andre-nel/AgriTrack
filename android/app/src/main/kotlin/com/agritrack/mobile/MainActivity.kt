@@ -227,7 +227,12 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     reduce = { state, _ ->
+                        val optimisticSnapshot = fieldStore.loadSnapshot(target.farmId)
                         state.copy(
+                            snapshot = optimisticSnapshot ?: state.snapshot,
+                            animalGroupTypes = optimisticSnapshot?.let {
+                                mergeAnimalGroupTypes(state.animalGroupTypes, animalGroupTypesFromSnapshot(it))
+                            } ?: state.animalGroupTypes,
                             pendingCount = fieldStore.pendingCount(),
                             statusMessage = "Queued task photo.",
                         )
@@ -270,8 +275,13 @@ class MainActivity : ComponentActivity() {
                         uiState.taskEntityType,
                         uiState.taskEntityId,
                     )
+                    val optimisticSnapshot = fieldStore.loadSnapshot(farm.id)
                     uiState = uiState.copy(
                         pendingCount = fieldStore.pendingCount(),
+                        snapshot = optimisticSnapshot ?: uiState.snapshot,
+                        animalGroupTypes = optimisticSnapshot?.let {
+                            mergeAnimalGroupTypes(uiState.animalGroupTypes, animalGroupTypesFromSnapshot(it))
+                        } ?: uiState.animalGroupTypes,
                         currentScreen = AppScreen.Home,
                         taskHeading = "",
                         taskDescription = "",
@@ -334,7 +344,13 @@ class MainActivity : ComponentActivity() {
             }
 
             fun queueAndMaybeSync(nextState: FieldUiState) {
+                val farmId = nextState.selectedFarm?.id ?: nextState.snapshot?.farm?.id
+                val optimisticSnapshot = farmId?.let { fieldStore.loadSnapshot(it) }
                 uiState = nextState.copy(
+                    snapshot = optimisticSnapshot ?: nextState.snapshot,
+                    animalGroupTypes = optimisticSnapshot?.let {
+                        mergeAnimalGroupTypes(nextState.animalGroupTypes, animalGroupTypesFromSnapshot(it))
+                    } ?: nextState.animalGroupTypes,
                     pendingCount = fieldStore.pendingCount(),
                     failedCommands = fieldStore.failedCommands(),
                 )
@@ -1959,6 +1975,13 @@ private fun TaskDetailScreen(
         task.entityLinks.forEach { link ->
             EntityCard(link.entityName ?: link.entityType, link.entityType)
         }
+        if (task.comments.isNotEmpty()) {
+            SectionCard("Notes") {
+                task.comments.forEach { comment ->
+                    EntityCard(comment.authorName ?: "Task note", comment.body)
+                }
+            }
+        }
         task.attachments.forEach { attachment ->
             EntityCard(attachment.originalFilename, attachment.caption ?: "${attachment.contentType} | ${attachment.byteSize} bytes")
         }
@@ -1989,6 +2012,14 @@ private fun TaskCard(
             task.assigneeName?.let { Text("Assignee: $it", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052)) }
             if (task.tags.isNotEmpty()) {
                 Text("Tags: ${task.tags.joinToString(", ")}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+            if (task.commentCount > 0) {
+                val latestNote = task.comments.lastOrNull()?.body
+                Text(
+                    latestNote?.let { "Latest note: $it" } ?: "${task.commentCount} note(s)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF516052),
+                )
             }
             if (task.attachmentCount > 0) {
                 Text("${task.attachmentCount} photo(s)", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
