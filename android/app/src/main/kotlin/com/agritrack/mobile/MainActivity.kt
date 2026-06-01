@@ -917,6 +917,7 @@ private fun AgriTrackApp(
                     onPasswordChange,
                     onLogin,
                     onOpenScreen,
+                    onDecisionSelected,
                     onFarmSelected,
                     onRefresh,
                     onSync,
@@ -1148,6 +1149,7 @@ private fun HomeScreen(
     onPasswordChange: (String) -> Unit,
     onLogin: () -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
+    onDecisionSelected: (DecisionItemSummary) -> Unit,
     onFarmSelected: (String) -> Unit,
     onRefresh: () -> Unit,
     onSync: () -> Unit,
@@ -1156,7 +1158,7 @@ private fun HomeScreen(
         LoginScreen(state, onBaseUrlChange, onEmailChange, onPasswordChange, onLogin)
         if (state.isAuthenticated) {
             FarmSummaryPanel(state, onRefresh, onOpenScreen, onFarmSelected)
-            DecisionFeedPanel(state.allFarmDecisionFeed, onOpenScreen)
+            DecisionFeedPanel(state.allFarmDecisionFeed, onOpenScreen, onDecisionSelected)
             DashboardMenu(state, onOpenScreen)
             SyncMiniPanel(state, onOpenScreen, onSync)
         }
@@ -1310,7 +1312,11 @@ private fun DashboardButton(title: String, detail: String, enabled: Boolean, onC
 }
 
 @Composable
-private fun DecisionFeedPanel(items: List<DecisionItemSummary>, onOpenScreen: (AppScreen) -> Unit) {
+private fun DecisionFeedPanel(
+    items: List<DecisionItemSummary>,
+    onOpenScreen: (AppScreen) -> Unit,
+    onDecisionSelected: (DecisionItemSummary) -> Unit,
+) {
     SectionCard("Decision Feed") {
         if (items.isEmpty()) {
             Text("No urgent field decisions in the cached farm snapshots.", color = Color(0xFF516052))
@@ -1320,7 +1326,9 @@ private fun DecisionFeedPanel(items: List<DecisionItemSummary>, onOpenScreen: (A
                 color = if (item.severity == "high") Color(0xFFF8EAE4) else Color(0xFFFFF6DF),
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onDecisionSelected(item) },
             ) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     item.farmName?.let { farmName ->
