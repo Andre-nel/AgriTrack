@@ -1,7 +1,13 @@
 from datetime import date
 from typing import Mapping
 
-from app.modules.analytics.constants import ANALYTICS_DEFAULT_GROUP_BY, ANALYTICS_GROUP_LABELS
+from app.modules.analytics.constants import (
+    ANALYTICS_DEFAULT_GROUP_BY,
+    ANALYTICS_GROUP_LABELS,
+    LSU_PADDOCK_TRACKING_DEFAULT_METRIC,
+    LSU_PADDOCK_TRACKING_METRIC_LABELS,
+    LSU_PADDOCK_TRACKING_PLOT_MODES,
+)
 
 
 def parse_query_date(value: str | None) -> date | None:
@@ -24,6 +30,20 @@ def normalize_analytics_group_by(raw_values: list[str]) -> list[str]:
     if not selected:
         return list(ANALYTICS_DEFAULT_GROUP_BY)
     return selected
+
+
+def normalize_lsu_paddock_tracking_metric(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate not in LSU_PADDOCK_TRACKING_METRIC_LABELS:
+        return LSU_PADDOCK_TRACKING_DEFAULT_METRIC
+    return candidate
+
+
+def normalize_lsu_paddock_tracking_plot_mode(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate not in LSU_PADDOCK_TRACKING_PLOT_MODES:
+        return "overlay"
+    return candidate
 
 
 def normalize_journal_tag(value: str | None) -> str:

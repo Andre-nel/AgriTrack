@@ -91,7 +91,8 @@ def init_cli(app: Flask) -> None:
         print(
             "Backfill complete: "
             f"{summary['mobs_backfilled']} mob(s), "
-            f"{summary['rows_created']} history row(s)"
+            f"{summary['rows_created']} history row(s), "
+            f"{summary['breakdown_rows_created']} breakdown row(s)"
         )
 
     @app.cli.command("mobile-create-user")

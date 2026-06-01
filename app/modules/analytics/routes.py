@@ -1,13 +1,22 @@
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation
 
 from flask import flash, redirect, render_template, request, url_for
 
 from app.extensions import db
-from app.models import AnimalGroupType, Farm, StockLedgerEntry
-from app.modules.analytics.constants import ANALYTICS_GROUP_LABELS, ANALYTICS_GROUP_ORDER
+from app.models import AnimalGroupType, Farm, Paddock, StockLedgerEntry
+from app.modules.analytics.constants import (
+    ANALYTICS_GROUP_LABELS,
+    ANALYTICS_GROUP_ORDER,
+    LSU_PADDOCK_TRACKING_METRIC_LABELS,
+    LSU_PADDOCK_TRACKING_METRIC_ORDER,
+    LSU_PADDOCK_TRACKING_PLOT_MODES,
+)
 from app.modules.analytics.forms import (
     journal_return_query_args,
     normalize_analytics_group_by,
+    normalize_lsu_paddock_tracking_metric,
+    normalize_lsu_paddock_tracking_plot_mode,
     parse_query_date,
 )
 from app.modules.analytics.presenters import (
@@ -16,7 +25,12 @@ from app.modules.analytics.presenters import (
     current_stock_totals_by_group,
     group_analytics_journal_entries,
 )
-from app.modules.analytics.services import create_journal_entry
+from app.modules.analytics.services import (
+    build_lsu_paddock_tracking_report,
+    create_journal_entry,
+    earliest_lsu_paddock_breakdown_date,
+    lsu_paddock_breakdown_uncovered_paddocks,
+)
 
 
 def register_legacy_routes(bp) -> None:
@@ -173,6 +187,143 @@ def register_legacy_routes(bp) -> None:
             end_date=end_date,
             chart_data=chart_data,
             latest_totals=latest_totals,
+        )
+
+    @bp.get("/analytics/lsu-paddock-tracking")
+    def analytics_lsu_paddock_tracking():
+        selected_filters = {
+            "farm_id": (request.args.get("farm_id") or "").strip(),
+            "species": (request.args.get("species") or "").strip(),
+        }
+        requested_paddock_ids = {
+            (value or "").strip()
+            for value in request.args.getlist("paddock_id")
+            if (value or "").strip()
+        }
+        metric = normalize_lsu_paddock_tracking_metric(request.args.get("metric"))
+        plot_mode = normalize_lsu_paddock_tracking_plot_mode(request.args.get("plot_mode"))
+        min_value_raw = (request.args.get("min_value") or "").strip()
+        min_value = None
+        group_by_species = (request.args.get("group_by_species") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        today = date.today()
+
+        try:
+            start_date = parse_query_date(request.args.get("start_date"))
+            end_date = parse_query_date(request.args.get("end_date")) or today
+        except ValueError:
+            flash("LSU Paddock Tracking dates must be valid (YYYY-MM-DD)", "error")
+            return redirect(url_for("web.analytics_lsu_paddock_tracking"))
+
+        if start_date and end_date < start_date:
+            flash("LSU Paddock Tracking end date must be on or after the start date", "error")
+            return redirect(url_for("web.analytics_lsu_paddock_tracking"))
+
+        if min_value_raw:
+            try:
+                min_value = float(Decimal(min_value_raw))
+            except (InvalidOperation, ValueError):
+                flash("Minimum metric value must be a valid number", "error")
+                return redirect(url_for("web.analytics_lsu_paddock_tracking"))
+            if min_value < 0:
+                flash("Minimum metric value must be zero or greater", "error")
+                return redirect(url_for("web.analytics_lsu_paddock_tracking"))
+
+        farms = Farm.query.order_by(Farm.name).all()
+        group_types = AnimalGroupType.query.order_by(AnimalGroupType.species.asc()).all()
+        paddock_query = Paddock.query.join(Farm).order_by(Farm.name.asc(), Paddock.name.asc())
+        if selected_filters["farm_id"]:
+            paddock_query = paddock_query.filter(Paddock.farm_id == selected_filters["farm_id"])
+        scope_paddocks = paddock_query.all()
+        valid_scope_ids = {str(paddock.id) for paddock in scope_paddocks}
+
+        if requested_paddock_ids:
+            selected_paddocks = [
+                paddock
+                for paddock in scope_paddocks
+                if str(paddock.id) in requested_paddock_ids & valid_scope_ids
+            ]
+            if not selected_paddocks:
+                selected_paddocks = scope_paddocks
+        else:
+            selected_paddocks = scope_paddocks
+
+        selected_paddock_ids = [str(paddock.id) for paddock in selected_paddocks]
+        earliest_breakdown_date = earliest_lsu_paddock_breakdown_date(
+            paddock_ids=selected_paddock_ids,
+            species=selected_filters["species"],
+        )
+        if start_date is None:
+            rolling_start = today - timedelta(days=364)
+            start_date = (
+                max(rolling_start, earliest_breakdown_date)
+                if earliest_breakdown_date is not None
+                else rolling_start
+            )
+
+        include_farm_name = len({str(paddock.farm_id) for paddock in scope_paddocks}) > 1
+        report = build_lsu_paddock_tracking_report(
+            paddocks=selected_paddocks,
+            start_date=start_date,
+            end_date=end_date,
+            species=selected_filters["species"],
+            metric=metric,
+            plot_mode=plot_mode,
+            group_by_species=group_by_species,
+            include_farm_name=include_farm_name,
+            min_value=min_value,
+        )
+        uncovered_paddocks = lsu_paddock_breakdown_uncovered_paddocks(
+            paddocks=selected_paddocks,
+            start_date=start_date,
+            species=selected_filters["species"],
+            include_farm_name=include_farm_name,
+        )
+
+        filter_options = {
+            "farms": [{"id": str(farm.id), "name": farm.name} for farm in farms],
+            "species": sorted({group.species for group in group_types}),
+            "paddocks": [
+                {
+                    "id": str(paddock.id),
+                    "label": (
+                        f"{paddock.farm.name} | {paddock.name}"
+                        if include_farm_name
+                        else paddock.name
+                    ),
+                    "farm_name": paddock.farm.name,
+                }
+                for paddock in scope_paddocks
+            ],
+            "metrics": [
+                {"value": metric_value, "label": LSU_PADDOCK_TRACKING_METRIC_LABELS[metric_value]}
+                for metric_value in LSU_PADDOCK_TRACKING_METRIC_ORDER
+            ],
+            "plot_modes": [
+                {"value": value, "label": label}
+                for value, label in LSU_PADDOCK_TRACKING_PLOT_MODES.items()
+            ],
+        }
+
+        return render_template(
+            "analytics/lsu_paddock_tracking.html",
+            filter_options=filter_options,
+            selected_filters=selected_filters,
+            selected_paddock_ids=selected_paddock_ids,
+            metric=metric,
+            plot_mode=plot_mode,
+            group_by_species=group_by_species,
+            min_value_raw=min_value_raw,
+            start_date=start_date,
+            end_date=end_date,
+            chart_payload=report["chart_payload"],
+            summary_rows=report["summary_rows"],
+            has_history=report["has_history"],
+            uncovered_paddocks=uncovered_paddocks,
         )
 
     @bp.post("/analytics/journal")

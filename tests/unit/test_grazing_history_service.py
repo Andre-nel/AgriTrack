@@ -6,6 +6,7 @@ from app.models import (
     AnimalGroupType,
     Farm,
     GrazingAllocation,
+    GrazingAllocationLsuBreakdownHistory,
     GrazingAllocationLsuHistory,
     GrazingSession,
     Mob,
@@ -107,6 +108,70 @@ def test_sync_live_history_for_mob_rolls_forward_open_interval(app):
         assert float(rows[0].allocated_lsu) == 6.0
         assert float(rows[1].allocated_lsu) == 8.0
 
+        breakdown_rows = (
+            GrazingAllocationLsuBreakdownHistory.query.filter_by(paddock_id=paddock.id)
+            .order_by(GrazingAllocationLsuBreakdownHistory.effective_from.asc())
+            .all()
+        )
+        assert len(breakdown_rows) == 2
+        assert breakdown_rows[0].effective_to == breakdown_rows[1].effective_from
+        assert int(breakdown_rows[0].head_count) == 6
+        assert int(breakdown_rows[1].head_count) == 8
+        assert float(breakdown_rows[0].allocated_lsu) == 6.0
+        assert float(breakdown_rows[1].allocated_lsu) == 8.0
+
+
+def test_sync_live_history_for_mob_persists_species_breakdown(app):
+    with app.app_context():
+        farm, paddock, mob = _build_base_entities()
+        cattle = AnimalGroupType(species="Cattle", breed="Angus", sex="cow", age_class="adult")
+        sheep = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add_all([cattle, sheep])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(
+                    mob_id=mob.id,
+                    animal_group_type_id=cattle.id,
+                    head_count=6,
+                ),
+                AnimalGroupBalance(
+                    mob_id=mob.id,
+                    animal_group_type_id=sheep.id,
+                    head_count=12,
+                ),
+            ]
+        )
+        GrazingService.open_session(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+            allocations=[{"paddock_id": str(paddock.id), "allocation_fraction": "1.0"}],
+        )
+        db.session.flush()
+
+        aggregate = GrazingAllocationLsuHistory.query.filter_by(paddock_id=paddock.id).one()
+        assert float(aggregate.allocated_lsu) == 8.0
+
+        rows = (
+            db.session.query(GrazingAllocationLsuBreakdownHistory, AnimalGroupType)
+            .join(
+                AnimalGroupType,
+                GrazingAllocationLsuBreakdownHistory.animal_group_type_id == AnimalGroupType.id,
+            )
+            .filter(GrazingAllocationLsuBreakdownHistory.paddock_id == paddock.id)
+            .order_by(AnimalGroupType.species.asc())
+            .all()
+        )
+        by_species = {group.species: row for row, group in rows}
+        assert set(by_species) == {"Cattle", "Sheep"}
+        assert int(by_species["Cattle"].head_count) == 6
+        assert float(by_species["Cattle"].group_lsu) == 6.0
+        assert float(by_species["Cattle"].allocated_lsu) == 6.0
+        assert int(by_species["Sheep"].head_count) == 12
+        assert float(by_species["Sheep"].group_lsu) == 2.0
+        assert float(by_species["Sheep"].allocated_lsu) == 2.0
+
 
 def test_backfill_from_ledger_intersects_sessions(app):
     with app.app_context():
@@ -143,10 +208,17 @@ def test_backfill_from_ledger_intersects_sessions(app):
         summary = GrazingHistoryService.backfill_all_from_ledger()
         db.session.commit()
         rows = GrazingAllocationLsuHistory.query.filter_by(grazing_allocation_id=allocation.id).all()
+        breakdown_rows = GrazingAllocationLsuBreakdownHistory.query.filter_by(
+            grazing_allocation_id=allocation.id
+        ).all()
         assert summary["rows_created"] >= 1
+        assert summary["breakdown_rows_created"] >= 1
         assert len(rows) == 1
         assert rows[0].effective_from == datetime(2026, 1, 3, 7, 0)
         assert rows[0].effective_to == datetime(2026, 1, 6, 8, 0)
+        assert len(breakdown_rows) == 1
+        assert int(breakdown_rows[0].head_count) == 12
+        assert round(float(breakdown_rows[0].allocated_lsu), 2) == 2.00
 
 
 def test_build_paddock_daily_metrics_resets_pressure_and_includes_lsu_per_ha(app):
@@ -242,6 +314,23 @@ def test_sync_live_history_for_archived_mob_closes_open_rows_at_archive_time(app
                 source=GrazingHistoryService.SOURCE_LIVE,
             )
         )
+        db.session.add(
+            GrazingAllocationLsuBreakdownHistory(
+                farm_id=farm.id,
+                mob_id=mob.id,
+                paddock_id=paddock.id,
+                grazing_session_id=session.id,
+                grazing_allocation_id=allocation.id,
+                animal_group_type_id=group.id,
+                effective_from=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+                effective_to=None,
+                allocation_fraction=1,
+                head_count=8,
+                group_lsu=1,
+                allocated_lsu=1,
+                source=GrazingHistoryService.SOURCE_LIVE,
+            )
+        )
         archive_time = datetime(2026, 3, 4, 10, 30, tzinfo=timezone.utc)
         mob.status = "archived"
         mob.updated_at = archive_time
@@ -254,5 +343,10 @@ def test_sync_live_history_for_archived_mob_closes_open_rows_at_archive_time(app
         db.session.commit()
 
         row = GrazingAllocationLsuHistory.query.filter_by(grazing_allocation_id=allocation.id).first()
+        breakdown_row = GrazingAllocationLsuBreakdownHistory.query.filter_by(
+            grazing_allocation_id=allocation.id
+        ).first()
         assert row is not None
+        assert breakdown_row is not None
         assert row.effective_to == GrazingHistoryService._normalize_datetime(archive_time)
+        assert breakdown_row.effective_to == GrazingHistoryService._normalize_datetime(archive_time)

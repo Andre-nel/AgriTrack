@@ -19,6 +19,11 @@ class GrazingSession(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         back_populates="grazing_session",
         cascade="all, delete-orphan",
     )
+    lsu_breakdown_history = db.relationship(
+        "GrazingAllocationLsuBreakdownHistory",
+        back_populates="grazing_session",
+        cascade="all, delete-orphan",
+    )
 
 
 class GrazingAllocation(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
@@ -34,6 +39,11 @@ class GrazingAllocation(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     paddock = db.relationship("Paddock", back_populates="grazing_allocations")
     lsu_history = db.relationship(
         "GrazingAllocationLsuHistory",
+        back_populates="grazing_allocation",
+        cascade="all, delete-orphan",
+    )
+    lsu_breakdown_history = db.relationship(
+        "GrazingAllocationLsuBreakdownHistory",
         back_populates="grazing_allocation",
         cascade="all, delete-orphan",
     )
@@ -90,5 +100,73 @@ class GrazingAllocationLsuHistory(UUIDPrimaryKeyMixin, TimestampMixin, db.Model)
             "grazing_allocation_id",
             "effective_from",
             name="uq_grazing_lsu_history_allocation_effective_from",
+        ),
+    )
+
+
+class GrazingAllocationLsuBreakdownHistory(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "grazing_allocation_lsu_breakdown_history"
+
+    farm_id = db.Column(db.String(36), db.ForeignKey("farms.id"), nullable=False, index=True)
+    mob_id = db.Column(db.String(36), db.ForeignKey("mobs.id"), nullable=False, index=True)
+    paddock_id = db.Column(db.String(36), db.ForeignKey("paddocks.id"), nullable=False, index=True)
+    grazing_session_id = db.Column(
+        db.String(36), db.ForeignKey("grazing_sessions.id"), nullable=False, index=True
+    )
+    grazing_allocation_id = db.Column(
+        db.String(36), db.ForeignKey("grazing_allocations.id"), nullable=False, index=True
+    )
+    animal_group_type_id = db.Column(
+        db.String(36), db.ForeignKey("animal_group_types.id"), nullable=False, index=True
+    )
+    effective_from = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    effective_to = db.Column(db.DateTime(timezone=True), index=True)
+    allocation_fraction = db.Column(db.Numeric(5, 4), nullable=False)
+    head_count = db.Column(db.Integer, nullable=False)
+    group_lsu = db.Column(db.Numeric(12, 4), nullable=False)
+    allocated_lsu = db.Column(db.Numeric(12, 4), nullable=False)
+    source = db.Column(db.String(20), nullable=False, default="live")
+
+    farm = db.relationship("Farm")
+    mob = db.relationship("Mob")
+    paddock = db.relationship("Paddock")
+    animal_group_type = db.relationship("AnimalGroupType")
+    grazing_session = db.relationship(
+        "GrazingSession", back_populates="lsu_breakdown_history"
+    )
+    grazing_allocation = db.relationship(
+        "GrazingAllocation", back_populates="lsu_breakdown_history"
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "source IN ('backfill_ledger', 'live')",
+            name="ck_grazing_lsu_breakdown_history_source",
+        ),
+        db.CheckConstraint(
+            "effective_to IS NULL OR effective_to > effective_from",
+            name="ck_grazing_lsu_breakdown_history_effective_range",
+        ),
+        db.CheckConstraint(
+            "allocation_fraction > 0 and allocation_fraction <= 1",
+            name="ck_grazing_lsu_breakdown_history_fraction",
+        ),
+        db.CheckConstraint(
+            "head_count >= 0",
+            name="ck_grazing_lsu_breakdown_history_head_count_non_negative",
+        ),
+        db.CheckConstraint(
+            "group_lsu >= 0",
+            name="ck_grazing_lsu_breakdown_history_group_lsu_non_negative",
+        ),
+        db.CheckConstraint(
+            "allocated_lsu >= 0",
+            name="ck_grazing_lsu_breakdown_history_allocated_non_negative",
+        ),
+        db.UniqueConstraint(
+            "grazing_allocation_id",
+            "animal_group_type_id",
+            "effective_from",
+            name="uq_grazing_lsu_breakdown_allocation_group_effective_from",
         ),
     )

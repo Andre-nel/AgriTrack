@@ -2,7 +2,12 @@ from app.models.animal_group import AnimalGroupBalance, AnimalGroupType
 from app.models.calendar import CalendarActivity, CalendarActivityException
 from app.models.farm import Farm
 from app.models.finance import CashTransaction, CashTransactionLine
-from app.models.grazing import GrazingAllocation, GrazingAllocationLsuHistory, GrazingSession
+from app.models.grazing import (
+    GrazingAllocation,
+    GrazingAllocationLsuBreakdownHistory,
+    GrazingAllocationLsuHistory,
+    GrazingSession,
+)
 from app.models.journal import JournalEntry
 from app.models.mobile import MobileAuthToken, MobileSyncCommand
 from app.models.mob import Mob
@@ -36,6 +41,7 @@ __all__ = [
     "DailyStockSnapshot",
     "Farm",
     "GrazingAllocation",
+    "GrazingAllocationLsuBreakdownHistory",
     "GrazingAllocationLsuHistory",
     "GrazingSession",
     "JournalEntry",

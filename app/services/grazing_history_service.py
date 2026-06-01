@@ -7,6 +7,7 @@ from app.extensions import db
 from app.models import (
     AnimalGroupType,
     GrazingAllocation,
+    GrazingAllocationLsuBreakdownHistory,
     GrazingAllocationLsuHistory,
     GrazingSession,
     Mob,
@@ -61,8 +62,27 @@ class GrazingHistoryService:
         )
 
     @classmethod
+    def _breakdown_values_match(
+        cls,
+        row: GrazingAllocationLsuBreakdownHistory,
+        *,
+        allocation_fraction: float,
+        head_count: int,
+        group_lsu: float,
+        allocated_lsu: float,
+    ) -> bool:
+        return (
+            abs(float(row.allocation_fraction) - allocation_fraction) < 0.0001
+            and int(row.head_count) == int(head_count)
+            and abs(float(row.group_lsu) - group_lsu) < 0.0001
+            and abs(float(row.allocated_lsu) - allocated_lsu) < 0.0001
+        )
+
+    @classmethod
     def _close_or_delete_open_row(
-        cls, row: GrazingAllocationLsuHistory, effective_to: datetime
+        cls,
+        row: GrazingAllocationLsuHistory | GrazingAllocationLsuBreakdownHistory,
+        effective_to: datetime,
     ) -> None:
         close_at = cls._normalize_datetime(effective_to)
         if close_at is None:
@@ -186,7 +206,7 @@ class GrazingHistoryService:
 
     @classmethod
     def close_open_history_for_session(cls, session: GrazingSession, end_at: datetime) -> None:
-        rows = (
+        aggregate_rows = (
             GrazingAllocationLsuHistory.query.filter(
                 GrazingAllocationLsuHistory.grazing_session_id == session.id,
                 GrazingAllocationLsuHistory.effective_to.is_(None),
@@ -194,8 +214,43 @@ class GrazingHistoryService:
             .order_by(GrazingAllocationLsuHistory.effective_from.asc())
             .all()
         )
-        for row in rows:
+        breakdown_rows = (
+            GrazingAllocationLsuBreakdownHistory.query.filter(
+                GrazingAllocationLsuBreakdownHistory.grazing_session_id == session.id,
+                GrazingAllocationLsuBreakdownHistory.effective_to.is_(None),
+            )
+            .order_by(GrazingAllocationLsuBreakdownHistory.effective_from.asc())
+            .all()
+        )
+        for row in aggregate_rows + breakdown_rows:
             cls._close_or_delete_open_row(row, end_at)
+
+    @classmethod
+    def _mob_lsu_breakdown_from_balances(cls, mob: Mob) -> list[dict]:
+        breakdown = []
+        for balance in mob.balances:
+            head_count = int(balance.head_count or 0)
+            if head_count <= 0:
+                continue
+
+            group = balance.animal_group_type
+            group_lsu = head_count * ReportingService.group_lsu_per_head(
+                group.species,
+                group.sex,
+                group.age_class,
+            )
+            if group_lsu <= 0:
+                continue
+
+            breakdown.append(
+                {
+                    "animal_group_type_id": str(group.id),
+                    "head_count": head_count,
+                    "group_lsu": group_lsu,
+                }
+            )
+
+        return sorted(breakdown, key=lambda row: row["animal_group_type_id"])
 
     @classmethod
     def sync_live_history_for_mob(cls, mob: Mob | str, effective_at: datetime | None = None) -> None:
@@ -212,10 +267,18 @@ class GrazingHistoryService:
             .order_by(GrazingAllocationLsuHistory.effective_from.asc())
             .all()
         )
+        open_breakdown_rows = (
+            GrazingAllocationLsuBreakdownHistory.query.filter(
+                GrazingAllocationLsuBreakdownHistory.mob_id == mob_obj.id,
+                GrazingAllocationLsuBreakdownHistory.effective_to.is_(None),
+            )
+            .order_by(GrazingAllocationLsuBreakdownHistory.effective_from.asc())
+            .all()
+        )
 
         if mob_obj.status != "active":
             close_at = mob_obj.updated_at or sync_at
-            for row in open_rows:
+            for row in open_rows + open_breakdown_rows:
                 cls._close_or_delete_open_row(row, close_at)
             return
 
@@ -226,24 +289,43 @@ class GrazingHistoryService:
         )
 
         if active_session is None:
-            for row in open_rows:
+            for row in open_rows + open_breakdown_rows:
                 cls._close_or_delete_open_row(row, sync_at)
             return
 
-        mob_total_lsu = ReportingService.mob_total_lsu(active_session.mob)
+        group_breakdown = cls._mob_lsu_breakdown_from_balances(active_session.mob)
+        mob_total_lsu = sum(row["group_lsu"] for row in group_breakdown)
         allocations = list(active_session.allocations)
         open_rows_by_allocation = {
             str(row.grazing_allocation_id): row
             for row in open_rows
             if str(row.grazing_session_id) == str(active_session.id)
         }
+        open_breakdown_rows_by_key = {
+            (str(row.grazing_allocation_id), str(row.animal_group_type_id)): row
+            for row in open_breakdown_rows
+            if str(row.grazing_session_id) == str(active_session.id)
+        }
         allocation_ids = {str(allocation.id) for allocation in allocations}
+        active_breakdown_keys = {
+            (str(allocation.id), row["animal_group_type_id"])
+            for allocation in allocations
+            for row in group_breakdown
+        }
 
         for row in open_rows:
             if str(row.grazing_session_id) != str(active_session.id):
                 cls._close_or_delete_open_row(row, sync_at)
                 continue
             if str(row.grazing_allocation_id) not in allocation_ids:
+                cls._close_or_delete_open_row(row, sync_at)
+
+        for row in open_breakdown_rows:
+            key = (str(row.grazing_allocation_id), str(row.animal_group_type_id))
+            if str(row.grazing_session_id) != str(active_session.id):
+                cls._close_or_delete_open_row(row, sync_at)
+                continue
+            if str(row.grazing_allocation_id) not in allocation_ids or key not in active_breakdown_keys:
                 cls._close_or_delete_open_row(row, sync_at)
 
         for allocation in allocations:
@@ -254,17 +336,14 @@ class GrazingHistoryService:
             if allocated_lsu <= 0:
                 if existing_row is not None:
                     cls._close_or_delete_open_row(existing_row, sync_at)
-                continue
-
-            if existing_row is not None and cls._history_values_match(
+            elif existing_row is not None and cls._history_values_match(
                 existing_row,
                 allocation_fraction=allocation_fraction,
                 mob_total_lsu=mob_total_lsu,
                 allocated_lsu=allocated_lsu,
             ):
-                continue
-
-            if existing_row is not None:
+                pass
+            elif existing_row is not None:
                 existing_from = cls._normalize_datetime(existing_row.effective_from)
                 sync_from = cls._normalize_datetime(sync_at)
                 if existing_from is not None and sync_from is not None and existing_from == sync_from:
@@ -272,23 +351,90 @@ class GrazingHistoryService:
                     existing_row.mob_total_lsu = mob_total_lsu
                     existing_row.allocated_lsu = allocated_lsu
                     existing_row.source = cls.SOURCE_LIVE
-                    continue
-                cls._close_or_delete_open_row(existing_row, sync_at)
-
-            db.session.add(
-                GrazingAllocationLsuHistory(
-                    farm_id=active_session.farm_id,
-                    mob_id=active_session.mob_id,
-                    paddock_id=allocation.paddock_id,
-                    grazing_session_id=active_session.id,
-                    grazing_allocation_id=allocation.id,
-                    effective_from=sync_at,
-                    allocation_fraction=allocation_fraction,
-                    mob_total_lsu=mob_total_lsu,
-                    allocated_lsu=allocated_lsu,
-                    source=cls.SOURCE_LIVE,
+                else:
+                    cls._close_or_delete_open_row(existing_row, sync_at)
+                    db.session.add(
+                        GrazingAllocationLsuHistory(
+                            farm_id=active_session.farm_id,
+                            mob_id=active_session.mob_id,
+                            paddock_id=allocation.paddock_id,
+                            grazing_session_id=active_session.id,
+                            grazing_allocation_id=allocation.id,
+                            effective_from=sync_at,
+                            allocation_fraction=allocation_fraction,
+                            mob_total_lsu=mob_total_lsu,
+                            allocated_lsu=allocated_lsu,
+                            source=cls.SOURCE_LIVE,
+                        )
+                    )
+            else:
+                db.session.add(
+                    GrazingAllocationLsuHistory(
+                        farm_id=active_session.farm_id,
+                        mob_id=active_session.mob_id,
+                        paddock_id=allocation.paddock_id,
+                        grazing_session_id=active_session.id,
+                        grazing_allocation_id=allocation.id,
+                        effective_from=sync_at,
+                        allocation_fraction=allocation_fraction,
+                        mob_total_lsu=mob_total_lsu,
+                        allocated_lsu=allocated_lsu,
+                        source=cls.SOURCE_LIVE,
+                    )
                 )
-            )
+
+            for group_row in group_breakdown:
+                group_allocated_lsu = group_row["group_lsu"] * allocation_fraction
+                existing_breakdown = open_breakdown_rows_by_key.get(
+                    (str(allocation.id), group_row["animal_group_type_id"])
+                )
+
+                if group_allocated_lsu <= 0:
+                    if existing_breakdown is not None:
+                        cls._close_or_delete_open_row(existing_breakdown, sync_at)
+                    continue
+
+                if existing_breakdown is not None and cls._breakdown_values_match(
+                    existing_breakdown,
+                    allocation_fraction=allocation_fraction,
+                    head_count=group_row["head_count"],
+                    group_lsu=group_row["group_lsu"],
+                    allocated_lsu=group_allocated_lsu,
+                ):
+                    continue
+
+                if existing_breakdown is not None:
+                    existing_from = cls._normalize_datetime(existing_breakdown.effective_from)
+                    sync_from = cls._normalize_datetime(sync_at)
+                    if (
+                        existing_from is not None
+                        and sync_from is not None
+                        and existing_from == sync_from
+                    ):
+                        existing_breakdown.allocation_fraction = allocation_fraction
+                        existing_breakdown.head_count = group_row["head_count"]
+                        existing_breakdown.group_lsu = group_row["group_lsu"]
+                        existing_breakdown.allocated_lsu = group_allocated_lsu
+                        existing_breakdown.source = cls.SOURCE_LIVE
+                        continue
+                    cls._close_or_delete_open_row(existing_breakdown, sync_at)
+
+                db.session.add(
+                    GrazingAllocationLsuBreakdownHistory(
+                        farm_id=active_session.farm_id,
+                        mob_id=active_session.mob_id,
+                        paddock_id=allocation.paddock_id,
+                        grazing_session_id=active_session.id,
+                        grazing_allocation_id=allocation.id,
+                        animal_group_type_id=group_row["animal_group_type_id"],
+                        effective_from=sync_at,
+                        allocation_fraction=allocation_fraction,
+                        head_count=group_row["head_count"],
+                        group_lsu=group_row["group_lsu"],
+                        allocated_lsu=group_allocated_lsu,
+                        source=cls.SOURCE_LIVE,
+                    )
+                )
 
     @classmethod
     def _stock_delta_for_event(cls, event_type: StockEventType, quantity: int) -> int:
@@ -331,13 +477,15 @@ class GrazingHistoryService:
                 continue
 
             if previous_time is not None and previous_time < event_time:
-                current_total = cls._mob_total_lsu_from_counts(group_counts, group_meta)
+                breakdown = cls._mob_lsu_breakdown_from_counts(group_counts, group_meta)
+                current_total = sum(row["group_lsu"] for row in breakdown)
                 if current_total > 0:
                     intervals.append(
                         {
                             "start": previous_time,
                             "end": event_time,
                             "mob_total_lsu": current_total,
+                            "breakdown": breakdown,
                         }
                     )
 
@@ -353,13 +501,15 @@ class GrazingHistoryService:
             previous_time = event_time
 
         if previous_time is not None:
-            current_total = cls._mob_total_lsu_from_counts(group_counts, group_meta)
+            breakdown = cls._mob_lsu_breakdown_from_counts(group_counts, group_meta)
+            current_total = sum(row["group_lsu"] for row in breakdown)
             if current_total > 0:
                 intervals.append(
                     {
                         "start": previous_time,
                         "end": None,
                         "mob_total_lsu": current_total,
+                        "breakdown": breakdown,
                     }
                 )
 
@@ -369,23 +519,42 @@ class GrazingHistoryService:
     def _mob_total_lsu_from_counts(
         cls, group_counts: dict[str, int], group_meta: dict[str, AnimalGroupType]
     ) -> float:
-        total = 0.0
+        return sum(
+            row["group_lsu"] for row in cls._mob_lsu_breakdown_from_counts(group_counts, group_meta)
+        )
+
+    @classmethod
+    def _mob_lsu_breakdown_from_counts(
+        cls, group_counts: dict[str, int], group_meta: dict[str, AnimalGroupType]
+    ) -> list[dict]:
+        breakdown = []
         for group_id, head_count in group_counts.items():
             if head_count <= 0:
                 continue
             group = group_meta[group_id]
-            total += head_count * ReportingService.group_lsu_per_head(
+            group_lsu = head_count * ReportingService.group_lsu_per_head(
                 group.species, group.sex, group.age_class
             )
-        return total
+            if group_lsu <= 0:
+                continue
+            breakdown.append(
+                {
+                    "animal_group_type_id": str(group_id),
+                    "head_count": int(head_count),
+                    "group_lsu": group_lsu,
+                }
+            )
+        return sorted(breakdown, key=lambda row: row["animal_group_type_id"])
 
     @classmethod
     def backfill_all_from_ledger(cls, *, as_of: datetime | None = None) -> dict:
         rebuild_at = as_of or datetime.now(timezone.utc)
         db.session.query(GrazingAllocationLsuHistory).delete(synchronize_session=False)
+        db.session.query(GrazingAllocationLsuBreakdownHistory).delete(synchronize_session=False)
         db.session.flush()
 
         rows_created = 0
+        breakdown_rows_created = 0
         mobs_backfilled = 0
         allocations = (
             GrazingAllocation.query.join(GrazingSession)
@@ -439,6 +608,29 @@ class GrazingHistoryService:
                     )
                     rows_created += 1
 
+                    for group_row in interval.get("breakdown", []):
+                        group_allocated_lsu = group_row["group_lsu"] * allocation_fraction
+                        if group_allocated_lsu <= 0:
+                            continue
+                        db.session.add(
+                            GrazingAllocationLsuBreakdownHistory(
+                                farm_id=session.farm_id,
+                                mob_id=session.mob_id,
+                                paddock_id=allocation.paddock_id,
+                                grazing_session_id=session.id,
+                                grazing_allocation_id=allocation.id,
+                                animal_group_type_id=group_row["animal_group_type_id"],
+                                effective_from=overlap_start,
+                                effective_to=overlap_end,
+                                allocation_fraction=allocation_fraction,
+                                head_count=group_row["head_count"],
+                                group_lsu=group_row["group_lsu"],
+                                allocated_lsu=group_allocated_lsu,
+                                source=cls.SOURCE_BACKFILL,
+                            )
+                        )
+                        breakdown_rows_created += 1
+
         db.session.flush()
 
         active_sessions = GrazingSession.query.join(Mob).filter(
@@ -457,7 +649,11 @@ class GrazingHistoryService:
             if not open_rows:
                 cls.sync_live_history_for_mob(session.mob, effective_at=rebuild_at)
 
-        return {"mobs_backfilled": mobs_backfilled, "rows_created": rows_created}
+        return {
+            "mobs_backfilled": mobs_backfilled,
+            "rows_created": rows_created,
+            "breakdown_rows_created": breakdown_rows_created,
+        }
 
     @staticmethod
     def _min_datetime(left: datetime | None, right: datetime | None) -> datetime | None:

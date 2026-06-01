@@ -22,3 +22,19 @@ ANALYTICS_STOCK_OUT_TYPES = {
     StockEventType.transfer_out,
     StockEventType.adjustment_out,
 }
+LSU_PADDOCK_TRACKING_METRIC_LABELS = {
+    "lsu_per_ha": "LSU/ha",
+    "current_lsu": "LSU",
+    "head_count": "Head Count",
+}
+LSU_PADDOCK_TRACKING_METRIC_AXIS_LABELS = {
+    "lsu_per_ha": "LSU/ha",
+    "current_lsu": "LSU",
+    "head_count": "Head Count",
+}
+LSU_PADDOCK_TRACKING_METRIC_ORDER = ("lsu_per_ha", "current_lsu", "head_count")
+LSU_PADDOCK_TRACKING_DEFAULT_METRIC = "lsu_per_ha"
+LSU_PADDOCK_TRACKING_PLOT_MODES = {
+    "overlay": "Overlay Selected Paddocks",
+    "paddock": "Separate Plot Per Paddock",
+}
