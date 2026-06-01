@@ -727,6 +727,9 @@ data class MobileOption(
 )
 
 data class MobileFormOptions(
+    val speciesOptions: List<MobileOption> = emptyList(),
+    val sexOptionsBySpecies: Map<String, List<MobileOption>> = emptyMap(),
+    val ageClassOptionsBySpecies: Map<String, List<MobileOption>> = emptyMap(),
     val taskStatuses: List<MobileOption> = emptyList(),
     val taskPriorities: List<MobileOption> = emptyList(),
     val waterStatusOptionsByType: Map<String, List<MobileOption>> = emptyMap(),
@@ -735,20 +738,26 @@ data class MobileFormOptions(
 ) {
     companion object {
         fun fromJson(json: JSONObject): MobileFormOptions {
-            val waterStatusJson = json.optJSONObject("water_status_options_by_type") ?: JSONObject()
-            val waterStatus = linkedMapOf<String, List<MobileOption>>()
-            val keys = waterStatusJson.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                waterStatus[key] = parseOptions(waterStatusJson.optJSONArray(key) ?: JSONArray())
-            }
             return MobileFormOptions(
+                speciesOptions = parseOptions(json.optJSONArray("species_options") ?: JSONArray()),
+                sexOptionsBySpecies = parseOptionMap(json.optJSONObject("sex_options_by_species") ?: JSONObject()),
+                ageClassOptionsBySpecies = parseOptionMap(json.optJSONObject("age_class_options_by_species") ?: JSONObject()),
                 taskStatuses = parseOptions(json.optJSONArray("task_statuses") ?: JSONArray()),
                 taskPriorities = parseOptions(json.optJSONArray("task_priorities") ?: JSONArray()),
-                waterStatusOptionsByType = waterStatus,
+                waterStatusOptionsByType = parseOptionMap(json.optJSONObject("water_status_options_by_type") ?: JSONObject()),
                 waterLevelAssetTypes = json.optJSONArray("water_level_asset_types").strings().toSet(),
                 waterLevelOptions = parseOptions(json.optJSONArray("water_level_options") ?: JSONArray()),
             )
+        }
+
+        private fun parseOptionMap(json: JSONObject): Map<String, List<MobileOption>> {
+            val optionsByKey = linkedMapOf<String, List<MobileOption>>()
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                optionsByKey[key] = parseOptions(json.optJSONArray(key) ?: JSONArray())
+            }
+            return optionsByKey
         }
 
         private fun parseOptions(json: JSONArray): List<MobileOption> = buildList {

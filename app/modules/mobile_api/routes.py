@@ -246,6 +246,28 @@ def _serialize_balance(balance: AnimalGroupBalance) -> dict:
     }
 
 
+def _option(value: str) -> dict:
+    return {"value": value, "label": value.replace("_", " ").title()}
+
+
+def _stock_form_options() -> dict:
+    species_options = [
+        {"value": species, "label": species}
+        for species in StockService.SPECIES_MAP.values()
+    ]
+    return {
+        "species_options": species_options,
+        "sex_options_by_species": {
+            species: [_option(option) for option in options]
+            for species, options in StockService.SEX_OPTIONS.items()
+        },
+        "age_class_options_by_species": {
+            species: [_option(option) for option in options]
+            for species, options in StockService.AGE_CLASS_OPTIONS.items()
+        },
+    }
+
+
 def _serialize_mob(mob: Mob) -> dict:
     balances = sorted(
         (balance for balance in mob.balances if int(balance.head_count) > 0),
@@ -800,6 +822,7 @@ def bootstrap():
                 "max_commands_per_request": MAX_COMMANDS_PER_REQUEST,
             },
             "form_options": {
+                **_stock_form_options(),
                 "task_statuses": [
                     {"value": status, "label": TASK_STATUS_LABELS[status]} for status in TASK_STATUSES
                 ],
@@ -1372,19 +1395,45 @@ def _handle_paddock_event_create(farm: Farm, payload: dict) -> dict:
     return {"event_id": str(event.id)}
 
 
+def _resolve_stock_count_group(payload: dict) -> tuple[AnimalGroupType, bool]:
+    group_id = str(payload.get("animal_group_type_id") or "").strip()
+    if group_id:
+        group_type = db.session.get(AnimalGroupType, group_id)
+        if group_type is None:
+            raise ValueError("animal_group_type_id is invalid")
+        return group_type, False
+
+    group_payload = payload.get("animal_group_type")
+    if not isinstance(group_payload, dict):
+        raise ValueError("animal_group_type_id or animal_group_type is required")
+
+    breed = " ".join(str(group_payload.get("breed") or "").strip().split())
+    if not breed:
+        raise ValueError("breed is required")
+
+    return (
+        StockService.get_or_create_group_type(
+            species=str(group_payload.get("species") or "").strip(),
+            breed=breed,
+            sex=str(group_payload.get("sex") or "").strip(),
+            age_class=str(group_payload.get("age_class") or "").strip(),
+        ),
+        True,
+    )
+
+
 def _handle_stock_count_record(farm: Farm, payload: dict) -> dict:
     mob = _get_active_mob_for_farm(farm, str(payload.get("mob_id") or "").strip())
-    group_id = str(payload.get("animal_group_type_id") or "").strip()
-    if not group_id:
-        raise ValueError("animal_group_type_id is required")
-    if db.session.get(AnimalGroupType, group_id) is None:
-        raise ValueError("animal_group_type_id is invalid")
+    group_type, uses_group_payload = _resolve_stock_count_group(payload)
+    group_id = str(group_type.id)
     try:
         counted_quantity = int(payload.get("quantity"))
     except (TypeError, ValueError) as exc:
         raise ValueError("quantity must be a whole number") from exc
     if counted_quantity < 0:
         raise ValueError("quantity must be greater than or equal to 0")
+    if uses_group_payload and counted_quantity <= 0:
+        raise ValueError("quantity must be greater than 0 for a new animal group")
 
     current_balance = AnimalGroupBalance.query.filter_by(
         mob_id=mob.id,
@@ -1413,6 +1462,7 @@ def _handle_stock_count_record(farm: Farm, payload: dict) -> dict:
     db.session.flush()
     return {
         "ledger_id": str(ledger.id),
+        "animal_group_type_id": group_id,
         "event_type": event_type.value,
         "quantity": abs(delta),
         "head_count": counted_quantity,

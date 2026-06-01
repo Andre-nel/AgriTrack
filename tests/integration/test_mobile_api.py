@@ -17,6 +17,7 @@ from app.models import (
     Paddock,
     PaddockEvent,
     RainfallRecord,
+    StockLedgerEntry,
     Task,
     TaskAttachment,
     TaskComment,
@@ -952,6 +953,123 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert db.session.get(Task, task_id).status == "in_progress"
         assert TaskComment.query.filter_by(task_id=task_id).count() == 1
         assert MobileSyncCommand.query.filter_by(status="applied").count() == 12
+
+
+def test_mobile_stock_count_can_create_animal_group_from_payload(client, app):
+    with app.app_context():
+        farm = Farm(name="New Group Mobile Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        mob = Mob(farm_id=farm.id, name="New Group Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+        farm_id = str(farm.id)
+        mob_id = str(mob.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={
+            "commands": [
+                {
+                    "client_command_id": "new-group-count-1",
+                    "type": "stock_count.record",
+                    "farm_id": farm_id,
+                    "payload": {
+                        "mob_id": mob_id,
+                        "animal_group_type": {
+                            "species": "Sheep",
+                            "breed": "Merino",
+                            "sex": "ewe",
+                            "age_class": "adult",
+                        },
+                        "quantity": 17,
+                        "note": "Mobile new group count",
+                    },
+                }
+            ]
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["results"][0]
+    assert result["status"] == "applied"
+    group_id = result["response"]["animal_group_type_id"]
+
+    with app.app_context():
+        group = AnimalGroupType.query.filter_by(
+            species="Sheep",
+            breed="Merino",
+            sex="ewe",
+            age_class="adult",
+        ).one()
+        assert str(group.id) == group_id
+        balance = AnimalGroupBalance.query.filter_by(
+            mob_id=mob_id,
+            animal_group_type_id=group.id,
+        ).one()
+        assert balance.head_count == 17
+        ledger = StockLedgerEntry.query.filter_by(
+            mob_id=mob_id,
+            animal_group_type_id=group.id,
+        ).one()
+        assert ledger.event_type.value == "adjustment_in"
+        assert ledger.quantity == 17
+
+
+def test_mobile_stock_count_new_group_validation_failures(client, app):
+    with app.app_context():
+        farm = Farm(name="Invalid New Group Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        mob = Mob(farm_id=farm.id, name="Invalid Group Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+        farm_id = str(farm.id)
+        mob_id = str(mob.id)
+        db.session.commit()
+
+    def command(client_id, group_payload, quantity=5):
+        return {
+            "client_command_id": client_id,
+            "type": "stock_count.record",
+            "farm_id": farm_id,
+            "payload": {
+                "mob_id": mob_id,
+                "animal_group_type": group_payload,
+                "quantity": quantity,
+            },
+        }
+
+    token = _login(client)
+    valid_group = {"species": "Sheep", "breed": "Merino", "sex": "ewe", "age_class": "adult"}
+    response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={
+            "commands": [
+                command("bad-species", {**valid_group, "species": "Horse"}),
+                command("bad-sex", {**valid_group, "sex": "cow"}),
+                command("bad-age", {**valid_group, "age_class": "calf"}),
+                command("blank-breed", {**valid_group, "breed": "  "}),
+                command("negative-count", valid_group, -1),
+                command("zero-new-count", valid_group, 0),
+            ]
+        },
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200
+    results = response.get_json()["results"]
+    assert [result["status"] for result in results] == ["failed"] * 6
+    assert {result["error"]["code"] for result in results} == {"invalid_command"}
+
+    with app.app_context():
+        assert AnimalGroupBalance.query.filter_by(mob_id=mob_id).count() == 0
+        assert StockLedgerEntry.query.filter_by(mob_id=mob_id).count() == 0
 
 
 def test_mobile_task_close_requires_note(client, app):

@@ -118,6 +118,30 @@ class MobileRepository(
         )
     }
 
+    fun queueStockCountForNewGroup(
+        farmId: String,
+        mobId: String,
+        species: String,
+        breed: String,
+        sex: String,
+        ageClass: String,
+        quantity: Int,
+        note: String,
+    ) {
+        fieldStore.enqueue(
+            MobileCommand.stockCount(
+                farmId = farmId,
+                mobId = mobId,
+                species = species,
+                breed = breed,
+                sex = sex,
+                ageClass = ageClass,
+                quantity = quantity,
+                note = note,
+            )
+        )
+    }
+
     fun queueWaterStatus(
         farmId: String,
         waterAssetId: String,

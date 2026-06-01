@@ -469,7 +469,7 @@ class MainActivity : ComponentActivity() {
                     onQueueRainfall = { queueAndMaybeSync(queueRainfall(uiState, repository())) },
                     onQueueMobCreate = { queueAndMaybeSync(queueMobCreate(uiState, repository())) },
                     onQueueMobMove = { allocations -> queueAndMaybeSync(queueMobMove(uiState, repository(), allocations)) },
-                    onQueueStockCount = { queueAndMaybeSync(queueStockCount(uiState, repository())) },
+                    onQueueStockCount = { rows, newGroup -> queueAndMaybeSync(queueStockCount(uiState, repository(), rows, newGroup)) },
                     onQueueMobTransfer = { queueAndMaybeSync(queueMobTransfer(uiState, repository())) },
                     onQueuePaddockUpdate = { queueAndMaybeSync(queuePaddockUpdate(uiState, repository())) },
                     onQueueMobNote = { queueAndMaybeSync(queueMobNote(uiState, repository())) },
@@ -732,6 +732,22 @@ private data class MoveAllocationDraft(
     val allocationPct: String = "",
 )
 
+private data class StockCountRowDraft(
+    val animalGroupTypeId: String,
+    val label: String,
+    val originalQuantity: Int,
+    val quantity: String,
+)
+
+private data class NewStockGroupDraft(
+    val enabled: Boolean = false,
+    val species: String = "Cattle",
+    val breed: String = "",
+    val sex: String = "mixed",
+    val ageClass: String = "calf",
+    val headCount: String = "",
+)
+
 private enum class AppScreen {
     Home,
     Farm,
@@ -826,7 +842,7 @@ private fun AgriTrackApp(
     onQueueRainfall: () -> Unit,
     onQueueMobCreate: () -> Unit,
     onQueueMobMove: (List<MoveAllocationDraft>) -> Unit,
-    onQueueStockCount: () -> Unit,
+    onQueueStockCount: (List<StockCountRowDraft>, NewStockGroupDraft) -> Unit,
     onQueueMobTransfer: () -> Unit,
     onQueuePaddockUpdate: () -> Unit,
     onQueueMobNote: () -> Unit,
@@ -991,8 +1007,6 @@ private fun AgriTrackApp(
                     state,
                     onBackHome,
                     onMobSelected,
-                    onAnimalGroupSelected,
-                    onStockQuantityChange,
                     onStockNoteChange,
                     onQueueStockCount,
                 )
@@ -2711,23 +2725,83 @@ private fun StockCountScreen(
     state: FieldUiState,
     onBackHome: () -> Unit,
     onMobSelected: (String) -> Unit,
-    onAnimalGroupSelected: (String) -> Unit,
-    onStockQuantityChange: (String) -> Unit,
     onStockNoteChange: (String) -> Unit,
-    onQueueStockCount: () -> Unit,
+    onQueueStockCount: (List<StockCountRowDraft>, NewStockGroupDraft) -> Unit,
 ) {
     FormScaffold("Stock Count", onBackHome) {
-        MobPicker(state.snapshot?.mobs.orEmpty(), state.selectedMobId, onMobSelected)
-        AnimalGroupPicker(state.animalGroupTypes, state.selectedAnimalGroupTypeId, onAnimalGroupSelected)
-        OutlinedTextField(
-            state.stockQuantity,
-            onStockQuantityChange,
-            label = { Text("Head count") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        val snapshot = state.snapshot
+        val mob = selectedMob(state)
+        val balanceKey = mob?.balances?.joinToString("|") { "${it.animalGroupTypeId}:${it.headCount}" }.orEmpty()
+        var rows by remember(mob?.id, balanceKey) {
+            mutableStateOf(initialStockCountRows(mob))
+        }
+        var newGroup by remember(snapshot?.farm?.id, mob?.id) {
+            mutableStateOf(defaultNewStockGroupDraft(state.formOptions))
+        }
+
+        MobPicker(snapshot?.mobs.orEmpty(), state.selectedMobId, onMobSelected)
+        SectionCard("Existing Animal Groups") {
+            if (rows.isEmpty()) {
+                Text("No animal groups in this mob yet.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+            rows.forEachIndexed { index, row ->
+                if (index > 0) {
+                    SectionDivider()
+                }
+                Text(row.label, fontWeight = FontWeight.SemiBold)
+                Text("Current head count: ${row.originalQuantity}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+                OutlinedTextField(
+                    row.quantity,
+                    { value ->
+                        rows = rows.toMutableList().also { draftRows ->
+                            draftRows[index] = draftRows[index].copy(quantity = value)
+                        }
+                    },
+                    label = { Text("Head count") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
         OutlinedTextField(state.stockNote, onStockNoteChange, label = { Text("Adjustment note") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = onQueueStockCount, enabled = state.snapshot != null, modifier = Modifier.fillMaxWidth()) {
+        SectionCard("Add Animal Group") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = newGroup.enabled,
+                    onCheckedChange = { enabled -> newGroup = newGroup.copy(enabled = enabled) },
+                )
+                Text("Create a new animal group")
+            }
+            if (newGroup.enabled) {
+                OptionPicker("Species", newGroup.species, stockSpeciesOptions(state.formOptions)) { species ->
+                    newGroup = newGroup.copy(
+                        species = species,
+                        breed = "",
+                        sex = defaultStockSex(state.formOptions, species),
+                        ageClass = defaultStockAgeClass(state.formOptions, species),
+                    )
+                }
+                BreedEntry(
+                    value = newGroup.breed,
+                    suggestions = breedSuggestionsForSpecies(snapshot, newGroup.species),
+                    onValueChange = { breed -> newGroup = newGroup.copy(breed = breed) },
+                )
+                OptionPicker("Sex", newGroup.sex, stockSexOptions(state.formOptions, newGroup.species)) { sex ->
+                    newGroup = newGroup.copy(sex = sex)
+                }
+                OptionPicker("Age class", newGroup.ageClass, stockAgeClassOptions(state.formOptions, newGroup.species)) { ageClass ->
+                    newGroup = newGroup.copy(ageClass = ageClass)
+                }
+                OutlinedTextField(
+                    newGroup.headCount,
+                    { value -> newGroup = newGroup.copy(headCount = value) },
+                    label = { Text("Head count") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        Button(onClick = { onQueueStockCount(rows, newGroup) }, enabled = mob != null, modifier = Modifier.fillMaxWidth()) {
             Text("Queue Count")
         }
     }
@@ -2958,6 +3032,35 @@ private fun AnimalGroupPicker(
     Picker("Animal group", selected?.label ?: "No animal groups", animalGroupTypes.isNotEmpty(), expanded, { expanded = it }) {
         animalGroupTypes.forEach { group ->
             DropdownMenuItem(text = { Text(group.label) }, onClick = { expanded = false; onAnimalGroupSelected(group.id) })
+        }
+    }
+}
+
+@Composable
+private fun BreedEntry(
+    value: String,
+    suggestions: List<String>,
+    onValueChange: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value,
+            onValueChange,
+            label = { Text("Breed") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (suggestions.isNotEmpty()) {
+            Box {
+                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(value.ifBlank { "Choose used breed" })
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    suggestions.forEach { breed ->
+                        DropdownMenuItem(text = { Text(breed) }, onClick = { expanded = false; onValueChange(breed) })
+                    }
+                }
+            }
         }
     }
 }
@@ -3537,15 +3640,66 @@ private fun queueMobMove(
     return state.copy(currentScreen = AppScreen.Home, moveNote = "", statusMessage = "Queued mob move.")
 }
 
-private fun queueStockCount(state: FieldUiState, repo: MobileRepository): FieldUiState {
+private fun queueStockCount(
+    state: FieldUiState,
+    repo: MobileRepository,
+    rows: List<StockCountRowDraft>,
+    newGroup: NewStockGroupDraft,
+): FieldUiState {
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a stock count.")
-    val quantity = state.stockQuantity.toIntOrNull() ?: return state.copy(statusMessage = "Head count must be a whole number.")
-    if (quantity < 0) return state.copy(statusMessage = "Head count must be zero or more.")
     val mobId = state.selectedMobId.ifBlank { state.snapshot?.mobs?.firstOrNull()?.id.orEmpty() }
-    val groupId = state.selectedAnimalGroupTypeId.ifBlank { selectedMob(state)?.balances?.firstOrNull()?.animalGroupTypeId.orEmpty() }
-    if (mobId.isBlank() || groupId.isBlank()) return state.copy(statusMessage = "Choose a mob and animal group.")
-    repo.queueStockCount(farm.id, mobId, groupId, quantity, state.stockNote)
-    return state.copy(currentScreen = AppScreen.Home, stockNote = "", statusMessage = "Queued stock count.")
+    if (mobId.isBlank()) return state.copy(statusMessage = "Choose a mob.")
+    val mob = selectedMob(state)
+    var queued = 0
+    rows.forEach { row ->
+        val quantity = row.quantity.toIntOrNull()
+            ?: return state.copy(statusMessage = "Head count for ${row.label} must be a whole number.")
+        if (quantity < 0) return state.copy(statusMessage = "Head count for ${row.label} must be zero or more.")
+        if (quantity != row.originalQuantity) {
+            repo.queueStockCount(farm.id, mobId, row.animalGroupTypeId, quantity, state.stockNote)
+            queued += 1
+        }
+    }
+
+    if (newGroup.enabled) {
+        val speciesValues = stockSpeciesOptions(state.formOptions).map { it.value }.toSet()
+        val sexValues = stockSexOptions(state.formOptions, newGroup.species).map { it.value }.toSet()
+        val ageValues = stockAgeClassOptions(state.formOptions, newGroup.species).map { it.value }.toSet()
+        val breed = newGroup.breed.trim()
+        val quantity = newGroup.headCount.toIntOrNull()
+            ?: return state.copy(statusMessage = "New group head count must be a whole number.")
+        if (newGroup.species !in speciesValues) return state.copy(statusMessage = "Choose a valid species.")
+        if (breed.isBlank()) return state.copy(statusMessage = "Breed is required for a new animal group.")
+        if (newGroup.sex !in sexValues) return state.copy(statusMessage = "Choose a valid sex.")
+        if (newGroup.ageClass !in ageValues) return state.copy(statusMessage = "Choose a valid age class.")
+        if (quantity <= 0) return state.copy(statusMessage = "New group head count must be greater than zero.")
+        val duplicate = mob?.balances.orEmpty().any { balance ->
+            balance.animalGroupType.species == newGroup.species &&
+                balance.animalGroupType.breed == breed &&
+                balance.animalGroupType.sex == newGroup.sex &&
+                balance.animalGroupType.ageClass == newGroup.ageClass
+        }
+        if (duplicate) {
+            return state.copy(statusMessage = "This animal group already exists in the mob. Update its existing row.")
+        }
+        repo.queueStockCountForNewGroup(
+            farm.id,
+            mobId,
+            newGroup.species,
+            breed,
+            newGroup.sex,
+            newGroup.ageClass,
+            quantity,
+            state.stockNote,
+        )
+        queued += 1
+    }
+
+    if (queued == 0) {
+        return state.copy(statusMessage = "No stock count changes to queue.")
+    }
+    val updateLabel = if (queued == 1) "update" else "updates"
+    return state.copy(currentScreen = AppScreen.Home, stockNote = "", statusMessage = "Queued $queued stock count $updateLabel.")
 }
 
 private fun queueMobTransfer(state: FieldUiState, repo: MobileRepository): FieldUiState {
@@ -3642,6 +3796,65 @@ private fun selectedPaddock(state: FieldUiState): PaddockSummary? =
 private fun selectedWaterAsset(state: FieldUiState): WaterAssetSummary? =
     state.snapshot?.waterAssets?.firstOrNull { it.id == state.selectedWaterAssetId }
 
+private fun initialStockCountRows(mob: MobSummary?): List<StockCountRowDraft> =
+    mob?.balances.orEmpty().map { balance ->
+        StockCountRowDraft(
+            animalGroupTypeId = balance.animalGroupTypeId,
+            label = balance.animalGroupType.label,
+            originalQuantity = balance.headCount,
+            quantity = balance.headCount.toString(),
+        )
+    }
+
+private fun defaultNewStockGroupDraft(formOptions: MobileFormOptions): NewStockGroupDraft {
+    val species = stockSpeciesOptions(formOptions).firstOrNull()?.value ?: "Cattle"
+    return NewStockGroupDraft(
+        species = species,
+        sex = defaultStockSex(formOptions, species),
+        ageClass = defaultStockAgeClass(formOptions, species),
+    )
+}
+
+private fun breedSuggestionsForSpecies(snapshot: FarmSnapshot?, species: String): List<String> =
+    snapshot?.mobs.orEmpty()
+        .flatMap { mob -> mob.balances }
+        .filter { balance -> balance.animalGroupType.species == species }
+        .map { balance -> balance.animalGroupType.breed.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sorted()
+
+private fun stockSpeciesOptions(formOptions: MobileFormOptions): List<MobileOption> =
+    formOptions.speciesOptions.ifEmpty {
+        listOf("Cattle", "Sheep", "Goat").map { MobileOption(it, it) }
+    }
+
+private fun stockSexOptions(formOptions: MobileFormOptions, species: String): List<MobileOption> =
+    formOptions.sexOptionsBySpecies[species].orEmpty().ifEmpty {
+        when (species) {
+            "Sheep", "Goat" -> stockOptions("mixed", "ewe", "ram", "wether")
+            else -> stockOptions("mixed", "cow", "bul", "ox")
+        }
+    }
+
+private fun stockAgeClassOptions(formOptions: MobileFormOptions, species: String): List<MobileOption> =
+    formOptions.ageClassOptionsBySpecies[species].orEmpty().ifEmpty {
+        when (species) {
+            "Sheep" -> stockOptions("lamb", "young", "adult", "old")
+            "Goat" -> stockOptions("kid", "young", "adult", "old")
+            else -> stockOptions("calf", "young", "adult", "old")
+        }
+    }
+
+private fun defaultStockSex(formOptions: MobileFormOptions, species: String): String =
+    stockSexOptions(formOptions, species).firstOrNull()?.value ?: "mixed"
+
+private fun defaultStockAgeClass(formOptions: MobileFormOptions, species: String): String =
+    stockAgeClassOptions(formOptions, species).firstOrNull()?.value ?: "adult"
+
+private fun stockOptions(vararg values: String): List<MobileOption> =
+    values.map { MobileOption(it, it.replace("_", " ").replaceFirstChar(Char::titlecase)) }
+
 private fun animalGroupTypesFromSnapshot(snapshot: FarmSnapshot?): List<AnimalGroupTypeSummary> {
     if (snapshot == null) return emptyList()
     return mergeAnimalGroupTypes(emptyList(), snapshot.mobs.flatMap { mob -> mob.balances.map { it.animalGroupType } })
@@ -3661,6 +3874,17 @@ private fun defaultMobileFormOptions(): MobileFormOptions {
     fun options(vararg values: String): List<MobileOption> =
         values.map { MobileOption(it, it.replace("_", " ").replaceFirstChar(Char::titlecase)) }
     return MobileFormOptions(
+        speciesOptions = listOf("Cattle", "Sheep", "Goat").map { MobileOption(it, it) },
+        sexOptionsBySpecies = mapOf(
+            "Cattle" to options("mixed", "cow", "bul", "ox"),
+            "Sheep" to options("mixed", "ewe", "ram", "wether"),
+            "Goat" to options("mixed", "ewe", "ram", "wether"),
+        ),
+        ageClassOptionsBySpecies = mapOf(
+            "Cattle" to options("calf", "young", "adult", "old"),
+            "Sheep" to options("lamb", "young", "adult", "old"),
+            "Goat" to options("kid", "young", "adult", "old"),
+        ),
         taskStatuses = options("todo", "selected_for_execution", "in_progress", "impeded", "ready_for_verification", "verification_in_progress", "closed"),
         taskPriorities = options("lowest", "low", "high", "highest"),
         waterStatusOptionsByType = mapOf(

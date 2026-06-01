@@ -159,6 +159,38 @@ data class MobileCommand(
             )
         }
 
+        fun stockCount(
+            farmId: String,
+            mobId: String,
+            species: String,
+            breed: String,
+            sex: String,
+            ageClass: String,
+            quantity: Int,
+            note: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("mob_id", mobId)
+                .put(
+                    "animal_group_type",
+                    JSONObject()
+                        .put("species", species.trim())
+                        .put("breed", breed.trim())
+                        .put("sex", sex.trim())
+                        .put("age_class", ageClass.trim())
+                )
+                .put("quantity", quantity)
+            if (note.isNotBlank()) {
+                payload.put("note", note.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "stock_count.record",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
         fun waterAssetStatus(
             farmId: String,
             waterAssetId: String,

@@ -191,6 +191,9 @@ Important response fields:
     "max_commands_per_request": 100
   },
   "form_options": {
+    "species_options": [],
+    "sex_options_by_species": {},
+    "age_class_options_by_species": {},
     "task_statuses": [],
     "task_priorities": [],
     "water_status_options_by_type": {},
@@ -337,7 +340,7 @@ Supported command types:
 - `mob.create`: `name`, optional `origin_note`.
 - `mob_event.create`: `mob_id`, `description`, optional `tags`, optional `event_at`.
 - `paddock_event.create`: `paddock_id`, `description`, optional `tags`, optional `event_at`.
-- `stock_count.record`: `mob_id`, `animal_group_type_id`, `quantity`, optional `note`.
+- `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group.
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
 - `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.
 - `task.create`: `heading`, `description`, optional `space_id`, optional `due_date`, optional entity link ids.

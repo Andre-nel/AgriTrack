@@ -179,6 +179,33 @@ class OfflineCommandQueueTest {
     }
 
     @Test
+    fun newGroupStockCountCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.stockCount(
+            farmId = "farm-1",
+            mobId = "mob-1",
+            species = "Sheep",
+            breed = "Merino",
+            sex = "ewe",
+            ageClass = "adult",
+            quantity = 18,
+            note = "New ewe group",
+        )
+
+        val json = command.toJson()
+        val payload = json.getJSONObject("payload")
+        val group = payload.getJSONObject("animal_group_type")
+
+        assertEquals("stock_count.record", json.getString("type"))
+        assertEquals("mob-1", payload.getString("mob_id"))
+        assertEquals("Sheep", group.getString("species"))
+        assertEquals("Merino", group.getString("breed"))
+        assertEquals("ewe", group.getString("sex"))
+        assertEquals("adult", group.getString("age_class"))
+        assertEquals(18, payload.getInt("quantity"))
+        assertEquals("New ewe group", payload.getString("note"))
+    }
+
+    @Test
     fun fieldEditCommandsShapeSupportedSyncPayloads() {
         val water = MobileCommand.waterAssetStatus(
             farmId = "farm-1",

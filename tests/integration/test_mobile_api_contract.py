@@ -62,6 +62,11 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
     ]
     for command_type in command_types:
         assert command_type in docs
+    assert "species_options" in form_options
+    assert "sex_options_by_species" in form_options
+    assert "age_class_options_by_species" in form_options
+    assert '"species_options"' in docs
+    assert '"animal_group_type"' in docs
     assert "task_statuses" in form_options
     assert "task_priorities" in form_options
     assert "water_status_options_by_type" in form_options

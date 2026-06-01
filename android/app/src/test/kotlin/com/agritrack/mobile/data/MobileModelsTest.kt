@@ -284,6 +284,26 @@ class MobileModelsTest {
                     "form_options",
                     JSONObject()
                         .put(
+                            "species_options",
+                            JSONArray()
+                                .put(JSONObject().put("value", "Cattle").put("label", "Cattle"))
+                                .put(JSONObject().put("value", "Sheep").put("label", "Sheep"))
+                        )
+                        .put(
+                            "sex_options_by_species",
+                            JSONObject().put(
+                                "Sheep",
+                                JSONArray().put(JSONObject().put("value", "ewe").put("label", "Ewe"))
+                            )
+                        )
+                        .put(
+                            "age_class_options_by_species",
+                            JSONObject().put(
+                                "Sheep",
+                                JSONArray().put(JSONObject().put("value", "lamb").put("label", "Lamb"))
+                            )
+                        )
+                        .put(
                             "task_statuses",
                             JSONArray().put(JSONObject().put("value", "todo").put("label", "TO DO"))
                         )
@@ -308,6 +328,9 @@ class MobileModelsTest {
         assertEquals("North Block - Manager", bootstrap.farms.first().displayLabel)
         assertEquals(null, bootstrap.farms.last().role)
         assertEquals("South Block", bootstrap.farms.last().displayLabel)
+        assertEquals("Cattle", bootstrap.formOptions.speciesOptions.first().value)
+        assertEquals("ewe", bootstrap.formOptions.sexOptionsBySpecies["Sheep"]?.first()?.value)
+        assertEquals("lamb", bootstrap.formOptions.ageClassOptionsBySpecies["Sheep"]?.first()?.value)
         assertEquals("todo", bootstrap.formOptions.taskStatuses.first().value)
         assertEquals("operational", bootstrap.formOptions.waterStatusOptionsByType["tank"]?.first()?.value)
         assertEquals(true, "tank" in bootstrap.formOptions.waterLevelAssetTypes)
