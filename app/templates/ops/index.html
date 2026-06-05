@@ -3,7 +3,7 @@
 {% block content %}
 <section class="hero">
   <h1>Operations</h1>
-  <p>Private farm-LAN status for the local database, backups, maps, and task attachments.</p>
+  <p>Private farm-LAN status for the local database, backups, maps, and attachments.</p>
 </section>
 
 <section class="cards ops-grid">
@@ -26,6 +26,7 @@
     <h2>Assets</h2>
     <p>Maps: <strong>{{ "ready" if maps_dir.exists() else "not created yet" }}</strong></p>
     <p>Task photos: <strong>{{ "ready" if attachments_dir.exists() else "not created yet" }}</strong></p>
+    <p>Note photos: <strong>{{ "ready" if note_attachments_dir.exists() else "not created yet" }}</strong></p>
   </article>
 </section>
 {% endblock %}

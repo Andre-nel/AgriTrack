@@ -13,6 +13,7 @@ from app.models.mobile import MobileAuthToken, MobileSyncCommand
 from app.models.mob import Mob
 from app.models.mob_event import MobEvent
 from app.models.movement import MobLineage, MovementEvent, MovementEventMob
+from app.models.note_attachment import NoteAttachment
 from app.models.paddock import Paddock
 from app.models.paddock_event import PaddockEvent
 from app.models.rainfall import RainfallRecord
@@ -30,6 +31,7 @@ from app.models.task import (
 )
 from app.models.user import User, UserFarmRole
 from app.models.water import WaterAsset, WaterAssetServedPaddock, WaterConnection
+from app.models.water_asset_event import WaterAssetEvent
 
 __all__ = [
     "AnimalGroupBalance",
@@ -52,6 +54,7 @@ __all__ = [
     "MobLineage",
     "MovementEvent",
     "MovementEventMob",
+    "NoteAttachment",
     "Paddock",
     "PaddockEvent",
     "RainfallRecord",
@@ -67,6 +70,7 @@ __all__ = [
     "User",
     "UserFarmRole",
     "WaterAsset",
+    "WaterAssetEvent",
     "WaterAssetServedPaddock",
     "WaterConnection",
 ]

@@ -22,6 +22,7 @@ internal fun FarmSnapshot.withOptimisticCommands(commands: JSONArray): FarmSnaps
             "mob.create" -> changed = applyMobCreate(json, command, payload) || changed
             "mob_event.create" -> changed = applyMobEventCreate(json, command, payload) || changed
             "paddock_event.create" -> changed = applyPaddockEventCreate(json, command, payload) || changed
+            "water_asset_event.create" -> changed = applyWaterAssetEventCreate(json, command, payload) || changed
             "stock_count.record" -> {
                 if (applyStockCount(json, command, payload)) {
                     changed = true
@@ -128,6 +129,8 @@ private fun applyMobEventCreate(json: JSONObject, command: JSONObject, payload: 
             .putOptional("event_at", payload.optionalString("event_at"))
             .put("tags", copyArray(payload.optJSONArray("tags")))
             .put("description", description)
+            .put("attachment_count", 0)
+            .put("attachments", JSONArray())
             .put("pending_sync", true),
     )
     return true
@@ -149,6 +152,31 @@ private fun applyPaddockEventCreate(json: JSONObject, command: JSONObject, paylo
             .putOptional("event_at", payload.optionalString("event_at"))
             .put("tags", copyArray(payload.optJSONArray("tags")))
             .put("description", description)
+            .put("attachment_count", 0)
+            .put("attachments", JSONArray())
+            .put("pending_sync", true),
+    )
+    return true
+}
+
+private fun applyWaterAssetEventCreate(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val waterAssetId = payload.optString("water_asset_id")
+    val description = payload.optString("description").trim()
+    if (waterAssetId.isBlank() || description.isBlank()) {
+        return false
+    }
+    prependObject(
+        json,
+        "water_asset_events",
+        JSONObject()
+            .put("id", pendingId(command, "water-asset-event"))
+            .put("farm_id", command.optString("farm_id"))
+            .put("water_asset_id", waterAssetId)
+            .putOptional("event_at", payload.optionalString("event_at"))
+            .put("tags", copyArray(payload.optJSONArray("tags")))
+            .put("description", description)
+            .put("attachment_count", 0)
+            .put("attachments", JSONArray())
             .put("pending_sync", true),
     )
     return true

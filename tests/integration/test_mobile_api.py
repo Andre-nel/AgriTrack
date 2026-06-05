@@ -14,6 +14,7 @@ from app.models import (
     MobileSyncCommand,
     Mob,
     MobEvent,
+    NoteAttachment,
     Paddock,
     PaddockEvent,
     RainfallRecord,
@@ -27,6 +28,7 @@ from app.models import (
     User,
     UserFarmRole,
     WaterAsset,
+    WaterAssetEvent,
     WaterAssetServedPaddock,
     WaterConnection,
 )
@@ -311,6 +313,14 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
         db.session.add_all([tank, trough])
         db.session.flush()
         db.session.add(
+            WaterAssetEvent(
+                farm_id=farm.id,
+                water_asset_id=trough.id,
+                tags_csv="inspection,field note",
+                description="Float valve checked on water run",
+            )
+        )
+        db.session.add(
             WaterConnection(
                 farm_id=farm.id,
                 flow_type="gravity",
@@ -339,6 +349,8 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert payload["mob_events"][0]["tags"] == ["health", "field note"]
     assert payload["paddock_events"][0]["tags"] == ["pasture", "field note"]
     assert payload["paddock_events"][0]["description"] == "Pasture recovering after rain"
+    assert payload["water_asset_events"][0]["tags"] == ["inspection", "field note"]
+    assert payload["water_asset_events"][0]["description"] == "Float valve checked on water run"
     assert {asset["name"] for asset in payload["water_assets"]} == {"Header Tank", "North Trough"}
     assert payload["water_connections"][0]["flow_type"] == "gravity"
     assert payload["tasks"][0]["heading"] == "Check north trough"
@@ -739,6 +751,112 @@ def test_mobile_task_attachment_upload_is_idempotent_and_visible_in_snapshot(cli
         assert TaskAttachment.query.filter_by(task_id=task_id).count() == 1
 
 
+def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    with app.app_context():
+        farm = Farm(name="Note Attachment Mobile Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        paddock = Paddock(farm_id=farm.id, name="Note Camp", area_ha=12, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="Note Mob", status="active")
+        asset = WaterAsset(
+            farm_id=farm.id,
+            name="Note Trough",
+            asset_type="trough",
+            active=True,
+            status="operational",
+            water_level="full",
+        )
+        db.session.add_all([paddock, mob, asset])
+        db.session.flush()
+        mob_event = MobEvent(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            tags_csv="health",
+            description="Mob note with photo",
+        )
+        paddock_event = PaddockEvent(
+            farm_id=farm.id,
+            paddock_id=paddock.id,
+            tags_csv="pasture",
+            description="Paddock note with photo",
+        )
+        water_event = WaterAssetEvent(
+            farm_id=farm.id,
+            water_asset_id=asset.id,
+            tags_csv="water",
+            description="Water note with photo",
+        )
+        db.session.add_all([mob_event, paddock_event, water_event])
+        db.session.flush()
+        farm_id = str(farm.id)
+        event_targets = [
+            ("mob", str(mob_event.id), f"/api/mobile/v1/farms/{farm.id}/mob-events/{mob_event.id}/attachments"),
+            (
+                "paddock",
+                str(paddock_event.id),
+                f"/api/mobile/v1/farms/{farm.id}/paddock-events/{paddock_event.id}/attachments",
+            ),
+            (
+                "water",
+                str(water_event.id),
+                f"/api/mobile/v1/farms/{farm.id}/water-asset-events/{water_event.id}/attachments",
+            ),
+        ]
+        db.session.commit()
+
+    token = _login(client)
+    uploaded = []
+    for label, event_id, url in event_targets:
+        response = client.post(
+            url,
+            headers=_auth(token),
+            data={
+                "client_attachment_id": f"{label}-photo-1",
+                "caption": f"{label} note photo",
+                "file": (BytesIO(f"{label} jpeg bytes".encode("utf-8")), f"{label}.jpg", "image/jpeg"),
+            },
+            content_type="multipart/form-data",
+        )
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["duplicate"] is False
+        assert payload["attachment"]["event_id"] == event_id
+        uploaded.append(payload["attachment"])
+
+    duplicate = client.post(
+        event_targets[-1][2],
+        headers=_auth(token),
+        data={
+            "client_attachment_id": "water-photo-1",
+            "file": (BytesIO(b"duplicate bytes"), "duplicate.jpg", "image/jpeg"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.get_json()["duplicate"] is True
+    assert duplicate.get_json()["attachment"]["id"] == uploaded[-1]["id"]
+
+    snapshot = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+    assert snapshot.status_code == 200
+    snapshot_payload = snapshot.get_json()
+    assert snapshot_payload["mob_events"][0]["attachment_count"] == 1
+    assert snapshot_payload["paddock_events"][0]["attachment_count"] == 1
+    assert snapshot_payload["water_asset_events"][0]["attachment_count"] == 1
+
+    for attachment in uploaded:
+        file_response = client.get(
+            f"/api/mobile/v1/farms/{farm_id}/note-attachments/{attachment['id']}",
+            headers=_auth(token),
+        )
+        assert file_response.status_code == 200
+        assert file_response.data.endswith(b"jpeg bytes")
+
+    with app.app_context():
+        assert NoteAttachment.query.filter_by(farm_id=farm_id).count() == 3
+
+
 def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, app):
     with app.app_context():
         farm = Farm(name="Sync Mobile Farm", timezone="UTC", active=True)
@@ -906,6 +1024,16 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             "farm_id": farm_id,
             "payload": {"water_asset_id": tank_id, "water_level": "full"},
         },
+        {
+            "client_command_id": "water-note-1",
+            "type": "water_asset_event.create",
+            "farm_id": farm_id,
+            "payload": {
+                "water_asset_id": tank_id,
+                "tags": ["inspection", "field"],
+                "description": "Tank inspected from mobile",
+            },
+        },
     ]
     response = client.post(
         "/api/mobile/v1/sync/commands",
@@ -914,7 +1042,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
     )
     assert response.status_code == 200
     payload = response.get_json()
-    assert [result["status"] for result in payload["results"]] == ["applied"] * 12
+    assert [result["status"] for result in payload["results"]] == ["applied"] * 13
     assert all(result["duplicate"] is False for result in payload["results"])
 
     duplicate = client.post(
@@ -933,6 +1061,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert created_mob.origin_note == "Created in the mobile app"
         assert MobEvent.query.filter_by(farm_id=farm_id).count() == 1
         assert PaddockEvent.query.filter_by(farm_id=farm_id).count() == 1
+        assert WaterAssetEvent.query.filter_by(farm_id=farm_id).count() == 1
         balance = AnimalGroupBalance.query.filter_by(
             mob_id=mob_id,
             animal_group_type_id=group_id,
@@ -952,7 +1081,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert Task.query.filter_by(heading="Mobile-created task").count() == 1
         assert db.session.get(Task, task_id).status == "in_progress"
         assert TaskComment.query.filter_by(task_id=task_id).count() == 1
-        assert MobileSyncCommand.query.filter_by(status="applied").count() == 12
+        assert MobileSyncCommand.query.filter_by(status="applied").count() == 13
 
 
 def test_mobile_stock_count_can_create_animal_group_from_payload(client, app):

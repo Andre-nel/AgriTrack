@@ -4,7 +4,15 @@ from io import BytesIO
 from pathlib import Path
 
 from app.extensions import db
-from app.models import Farm, Paddock, WaterAsset, WaterAssetServedPaddock, WaterConnection
+from app.models import (
+    Farm,
+    NoteAttachment,
+    Paddock,
+    WaterAsset,
+    WaterAssetEvent,
+    WaterAssetServedPaddock,
+    WaterConnection,
+)
 
 
 def _square_ring(lon_start: float, lat_start: float, size_deg: float) -> list[tuple[float, float]]:
@@ -1500,6 +1508,55 @@ def test_farm_water_workspace_renders_asset_modal_launchers(client, app):
         connection["source_asset_id"] == asset_id or connection["destination_asset_id"] == asset_id
         for connection in editor_config["connectionRecords"]
     ) is False
+
+
+def test_farm_water_workspace_records_water_asset_note_with_image(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    with app.app_context():
+        farm = Farm(name="Water Note Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        asset = WaterAsset(
+            farm_id=farm.id,
+            name="Photo Trough",
+            asset_type="trough",
+            active=True,
+            status="operational",
+            water_level="full",
+        )
+        db.session.add(asset)
+        db.session.flush()
+        farm_id = str(farm.id)
+        asset_id = str(asset.id)
+        db.session.commit()
+
+    response = client.post(
+        f"/farms/{farm_id}/water/assets/{asset_id}/events",
+        data={
+            "event_tags": "leak, inspection",
+            "event_description": "Trough inspected with field photo",
+            "event_images": (BytesIO(b"water-note-photo"), "trough.jpg", "image/jpeg"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 302
+
+    with app.app_context():
+        event = WaterAssetEvent.query.filter_by(water_asset_id=asset_id).one()
+        attachment = NoteAttachment.query.filter_by(water_asset_event_id=event.id).one()
+        assert event.description == "Trough inspected with field photo"
+        assert attachment.original_filename == "trough.jpg"
+        attachment_id = str(attachment.id)
+
+    page = client.get(f"/farms/{farm_id}/water")
+    body = page.data.decode("utf-8")
+    assert "Trough inspected with field photo" in body
+    assert f"/note-attachments/{attachment_id}" in body
+
+    image_response = client.get(f"/note-attachments/{attachment_id}")
+    assert image_response.status_code == 200
+    assert image_response.data == b"water-note-photo"
 
 
 def test_update_water_asset_form_reopens_asset_modal_on_validation_error(client, app):

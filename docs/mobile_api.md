@@ -179,6 +179,7 @@ Important response fields:
       "mob.create",
       "mob_event.create",
       "paddock_event.create",
+      "water_asset_event.create",
       "stock_count.record",
       "mob.move",
       "mob.transfer",
@@ -223,6 +224,7 @@ Response groups:
   "rainfall": [],
   "mob_events": [],
   "paddock_events": [],
+  "water_asset_events": [],
   "water_assets": [],
   "water_connections": [],
   "task_spaces": [],
@@ -288,6 +290,26 @@ Successful responses include:
 Task objects in snapshots include `attachment_count` and a lightweight
 `attachments` array.
 
+### Note Photo Attachments
+
+Note images can be attached to mob, paddock, and water asset notes after the
+note event exists on the server:
+
+- `POST /api/mobile/v1/farms/<farm_id>/mob-events/<event_id>/attachments`
+- `POST /api/mobile/v1/farms/<farm_id>/paddock-events/<event_id>/attachments`
+- `POST /api/mobile/v1/farms/<farm_id>/water-asset-events/<event_id>/attachments`
+
+Uploads use the same multipart fields as task photos: required
+`client_attachment_id` and `file`; optional `caption`, `captured_at`, and
+`sha256`. Uploads are idempotent for each mobile user and
+`client_attachment_id`.
+
+Mob, paddock, and water asset event objects in snapshots include
+`attachment_count` and a lightweight `attachments` array. Image bytes can be
+fetched with:
+
+`GET /api/mobile/v1/farms/<farm_id>/note-attachments/<attachment_id>`
+
 ## Offline Sync Commands
 
 `POST /api/mobile/v1/sync/commands`
@@ -340,6 +362,7 @@ Supported command types:
 - `mob.create`: `name`, optional `origin_note`.
 - `mob_event.create`: `mob_id`, `description`, optional `tags`, optional `event_at`.
 - `paddock_event.create`: `paddock_id`, `description`, optional `tags`, optional `event_at`.
+- `water_asset_event.create`: `water_asset_id`, `description`, optional `tags`, optional `event_at`.
 - `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group.
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
 - `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.

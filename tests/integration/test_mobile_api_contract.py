@@ -51,6 +51,7 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
         "mob.create",
         "mob_event.create",
         "paddock_event.create",
+        "water_asset_event.create",
         "stock_count.record",
         "mob.move",
         "mob.transfer",

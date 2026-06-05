@@ -137,6 +137,24 @@ data class MobileCommand(
             )
         }
 
+        fun waterAssetNote(
+            farmId: String,
+            waterAssetId: String,
+            description: String,
+            tags: List<String>,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("water_asset_id", waterAssetId)
+                .put("description", description.trim())
+                .put("tags", JSONArray(tags))
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "water_asset_event.create",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
         fun stockCount(
             farmId: String,
             mobId: String,

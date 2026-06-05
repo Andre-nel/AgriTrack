@@ -173,12 +173,26 @@ data class RainfallSummary(
     val note: String?,
 )
 
+data class NoteAttachmentSummary(
+    val id: String,
+    val eventType: String,
+    val eventId: String,
+    val clientAttachmentId: String,
+    val originalFilename: String,
+    val contentType: String,
+    val byteSize: Int,
+    val caption: String?,
+    val capturedAt: String?,
+)
+
 data class MobEventSummary(
     val id: String,
     val mobId: String,
     val eventAt: String?,
     val tags: List<String>,
     val description: String,
+    val attachmentCount: Int,
+    val attachments: List<NoteAttachmentSummary>,
 )
 
 data class PaddockEventSummary(
@@ -187,6 +201,18 @@ data class PaddockEventSummary(
     val eventAt: String?,
     val tags: List<String>,
     val description: String,
+    val attachmentCount: Int,
+    val attachments: List<NoteAttachmentSummary>,
+)
+
+data class WaterAssetEventSummary(
+    val id: String,
+    val waterAssetId: String,
+    val eventAt: String?,
+    val tags: List<String>,
+    val description: String,
+    val attachmentCount: Int,
+    val attachments: List<NoteAttachmentSummary>,
 )
 
 data class TaskEntityLinkSummary(
@@ -296,6 +322,7 @@ data class FarmSnapshot(
     val rainfallCount: Int,
     val mobEventCount: Int,
     val paddockEventCount: Int,
+    val waterAssetEventCount: Int,
     val taskCount: Int,
     val calendarItemCount: Int,
     val decisionCount: Int,
@@ -307,6 +334,7 @@ data class FarmSnapshot(
     val rainfall: List<RainfallSummary>,
     val mobEvents: List<MobEventSummary>,
     val paddockEvents: List<PaddockEventSummary>,
+    val waterAssetEvents: List<WaterAssetEventSummary>,
     val tasks: List<TaskSummary>,
     val calendarItems: List<CalendarItemSummary>,
     val decisionFeed: List<DecisionItemSummary>,
@@ -325,6 +353,7 @@ data class FarmSnapshot(
             val rainfall = parseRainfall(json.optJSONArray("rainfall") ?: JSONArray())
             val mobEvents = parseMobEvents(json.optJSONArray("mob_events") ?: JSONArray())
             val paddockEvents = parsePaddockEvents(json.optJSONArray("paddock_events") ?: JSONArray())
+            val waterAssetEvents = parseWaterAssetEvents(json.optJSONArray("water_asset_events") ?: JSONArray())
             val tasks = parseTasks(json.optJSONArray("tasks") ?: JSONArray())
             val calendarItems = parseCalendarItems(json.optJSONArray("calendar_items") ?: JSONArray())
             val decisions = parseDecisionFeed(json.optJSONArray("decision_feed") ?: JSONArray())
@@ -342,6 +371,7 @@ data class FarmSnapshot(
                 rainfallCount = rainfall.size,
                 mobEventCount = mobEvents.size,
                 paddockEventCount = paddockEvents.size,
+                waterAssetEventCount = waterAssetEvents.size,
                 taskCount = tasks.size,
                 calendarItemCount = calendarItems.size,
                 decisionCount = decisions.size,
@@ -353,6 +383,7 @@ data class FarmSnapshot(
                 rainfall = rainfall,
                 mobEvents = mobEvents,
                 paddockEvents = paddockEvents,
+                waterAssetEvents = waterAssetEvents,
                 tasks = tasks,
                 calendarItems = calendarItems,
                 decisionFeed = decisions,
@@ -533,6 +564,8 @@ data class FarmSnapshot(
                         eventAt = event.optNullableString("event_at"),
                         tags = event.optJSONArray("tags").strings(),
                         description = event.optString("description"),
+                        attachmentCount = event.optInt("attachment_count", event.optJSONArray("attachments")?.length() ?: 0),
+                        attachments = parseNoteAttachments(event.optJSONArray("attachments") ?: JSONArray()),
                     )
                 )
             }
@@ -548,6 +581,44 @@ data class FarmSnapshot(
                         eventAt = event.optNullableString("event_at"),
                         tags = event.optJSONArray("tags").strings(),
                         description = event.optString("description"),
+                        attachmentCount = event.optInt("attachment_count", event.optJSONArray("attachments")?.length() ?: 0),
+                        attachments = parseNoteAttachments(event.optJSONArray("attachments") ?: JSONArray()),
+                    )
+                )
+            }
+        }
+
+        private fun parseWaterAssetEvents(json: JSONArray): List<WaterAssetEventSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val event = json.getJSONObject(index)
+                add(
+                    WaterAssetEventSummary(
+                        id = event.optString("id"),
+                        waterAssetId = event.optString("water_asset_id"),
+                        eventAt = event.optNullableString("event_at"),
+                        tags = event.optJSONArray("tags").strings(),
+                        description = event.optString("description"),
+                        attachmentCount = event.optInt("attachment_count", event.optJSONArray("attachments")?.length() ?: 0),
+                        attachments = parseNoteAttachments(event.optJSONArray("attachments") ?: JSONArray()),
+                    )
+                )
+            }
+        }
+
+        private fun parseNoteAttachments(json: JSONArray): List<NoteAttachmentSummary> = buildList {
+            for (attachmentIndex in 0 until json.length()) {
+                val attachment = json.getJSONObject(attachmentIndex)
+                add(
+                    NoteAttachmentSummary(
+                        id = attachment.optString("id"),
+                        eventType = attachment.optString("event_type"),
+                        eventId = attachment.optString("event_id"),
+                        clientAttachmentId = attachment.optString("client_attachment_id"),
+                        originalFilename = attachment.optString("original_filename", "photo"),
+                        contentType = attachment.optString("content_type", "image/jpeg"),
+                        byteSize = attachment.optInt("byte_size", 0),
+                        caption = attachment.optNullableString("caption"),
+                        capturedAt = attachment.optNullableString("captured_at"),
                     )
                 )
             }

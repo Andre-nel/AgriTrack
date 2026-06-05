@@ -159,7 +159,7 @@
 
 <section class="card">
   <h2>Mob Comments / Log Notes</h2>
-  <form method="post" action="{{ url_for('web.mob_event_create_form', mob_id=mob.id) }}" class="grid-form">
+  <form method="post" action="{{ url_for('web.mob_event_create_form', mob_id=mob.id) }}" class="grid-form" enctype="multipart/form-data">
     <label>Tags / Keywords (comma separated)
       <input
         name="event_tags"
@@ -173,6 +173,9 @@
         placeholder="Describe what was done, what you observed, and any follow-up notes."
         required
       ></textarea>
+    </label>
+    <label>Images
+      <input type="file" name="event_images" accept="image/*" multiple />
     </label>
     <button type="submit" class="btn">Record Note</button>
   </form>
@@ -193,16 +196,30 @@
   </form>
 
   <table>
-    <thead><tr><th>Recorded At</th><th>Tags</th><th>Note</th></tr></thead>
+    <thead><tr><th>Recorded At</th><th>Tags</th><th>Note</th><th>Images</th></tr></thead>
     <tbody>
       {% for row in mob_events %}
       <tr>
         <td>{{ row.event_at }}</td>
         <td>{{ row.tags | join(", ") }}</td>
         <td>{{ row.description }}</td>
+        <td>
+          {% if row.attachments %}
+          <div class="note-attachment-grid">
+            {% for attachment in row.attachments %}
+            <a class="note-attachment-card" href="{{ url_for('web.note_attachment_file', attachment_id=attachment.id) }}" target="_blank" rel="noopener">
+              <img src="{{ url_for('web.note_attachment_file', attachment_id=attachment.id) }}" alt="{{ attachment.caption or attachment.original_filename }}" />
+              <span>{{ attachment.original_filename }}</span>
+            </a>
+            {% endfor %}
+          </div>
+          {% else %}
+          <span class="muted">None</span>
+          {% endif %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="3">No mob events recorded yet.</td></tr>
+      <tr><td colspan="4">No mob events recorded yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

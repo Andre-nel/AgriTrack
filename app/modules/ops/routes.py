@@ -24,6 +24,7 @@ def index():
         latest_backup_mtime=_mtime(latest_backup),
         maps_dir=instance_path / "maps",
         attachments_dir=instance_path / "task_attachments",
+        note_attachments_dir=instance_path / "note_attachments",
     )
 
 

@@ -1287,6 +1287,22 @@ a { color: #1b5f49; }
   margin: 0;
 }
 
+.water-asset-notes {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.water-asset-notes h3 {
+  margin: 0;
+}
+
+.water-asset-note-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
 .comment-card,
 .link-card {
   border: 1px solid var(--line);
@@ -1332,6 +1348,36 @@ a { color: #1b5f49; }
   display: grid;
   gap: 0.25rem;
   padding: 0.75rem;
+}
+
+.note-attachment-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  max-width: 420px;
+}
+
+.note-attachment-card {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.note-attachment-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  object-fit: cover;
+  background: #eef3ea;
+}
+
+.note-attachment-card span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 .task-card-link {

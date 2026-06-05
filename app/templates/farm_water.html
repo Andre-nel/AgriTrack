@@ -258,6 +258,7 @@
   <div class="water-asset-list">
     {% for asset in assets %}
     {% set linked_tasks = linked_tasks_by_water_asset_id.get(asset.id|string, []) %}
+    {% set asset_events = water_asset_events_by_asset_id.get(asset.id|string, []) %}
     <article class="water-asset-card" id="asset-{{ asset.id }}">
       <button
         type="button"
@@ -295,6 +296,54 @@
           {% endfor %}
         </ul>
         {% endif %}
+      </div>
+      <div class="water-asset-notes">
+        <h3>Asset Notes</h3>
+        <form
+          method="post"
+          action="{{ url_for('web.water_asset_event_create_form', farm_id=farm.id, asset_id=asset.id) }}"
+          class="grid-form"
+          enctype="multipart/form-data"
+        >
+          <label>Tags / Keywords
+            <input name="event_tags" placeholder="e.g. leak, pump, inspection" />
+          </label>
+          <label>Note
+            <textarea
+              name="event_description"
+              rows="3"
+              placeholder="Record water observations, maintenance notes, or follow-up items."
+              required
+            ></textarea>
+          </label>
+          <label>Images
+            <input type="file" name="event_images" accept="image/*" multiple />
+          </label>
+          <button type="submit" class="btn">Record Note</button>
+        </form>
+        <div class="water-asset-note-list">
+          {% for row in asset_events %}
+          <article class="comment-card">
+            <div class="task-card-topline">
+              <span class="muted">{{ row.event_at }}</span>
+              <span class="tag-pill">{{ row.tags | join(", ") }}</span>
+            </div>
+            <p class="text-body">{{ row.description }}</p>
+            {% if row.attachments %}
+            <div class="note-attachment-grid">
+              {% for attachment in row.attachments %}
+              <a class="note-attachment-card" href="{{ url_for('web.note_attachment_file', attachment_id=attachment.id) }}" target="_blank" rel="noopener">
+                <img src="{{ url_for('web.note_attachment_file', attachment_id=attachment.id) }}" alt="{{ attachment.caption or attachment.original_filename }}" />
+                <span>{{ attachment.original_filename }}</span>
+              </a>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </article>
+          {% else %}
+          <p class="task-empty-state">No water asset notes recorded yet.</p>
+          {% endfor %}
+        </div>
       </div>
     </article>
     {% else %}

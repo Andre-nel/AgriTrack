@@ -15,6 +15,8 @@ from app.models import (
     PaddockEvent,
     RainfallRecord,
     StockLedgerEntry,
+    WaterAsset,
+    WaterAssetEvent,
 )
 from app.models.stock_ledger import StockEventType
 from app.modules.analytics.constants import (
@@ -260,6 +262,41 @@ def build_analytics_journal_entries(
                 "source_label": "Paddock Note",
                 "farm_name": farm_name,
                 "mob_name": paddock_name,
+                "tags": tags,
+                "description": event.description,
+            }
+        )
+
+    water_asset_event_query = (
+        db.session.query(
+            WaterAssetEvent,
+            Farm.name.label("farm_name"),
+            WaterAsset.name.label("water_asset_name"),
+        )
+        .join(Farm, WaterAssetEvent.farm_id == Farm.id)
+        .join(WaterAsset, WaterAssetEvent.water_asset_id == WaterAsset.id)
+        .filter(WaterAssetEvent.event_at >= start_dt, WaterAssetEvent.event_at < end_dt)
+    )
+    if farm_id:
+        water_asset_event_query = water_asset_event_query.filter(WaterAssetEvent.farm_id == farm_id)
+
+    for event, farm_name, water_asset_name in water_asset_event_query.all():
+        tags = MobEventService.tags_from_csv(event.tags_csv)
+        if not tags:
+            tags = normalize_journal_tags(
+                [
+                    "water asset note",
+                    f"farm {farm_name}",
+                    f"water asset {water_asset_name}",
+                ]
+            )
+        entries.append(
+            {
+                "id": f"water_asset_event:{event.id}",
+                "event_at": _normalize_journal_datetime(event.event_at),
+                "source_label": "Water Asset Note",
+                "farm_name": farm_name,
+                "mob_name": water_asset_name,
                 "tags": tags,
                 "description": event.description,
             }

@@ -105,6 +105,21 @@ class MobileModelsTest {
                                 .put("id", "event-1")
                                 .put("mob_id", "mob-1")
                                 .put("description", "Mob looks settled")
+                                .put("attachment_count", 1)
+                                .put(
+                                    "attachments",
+                                    JSONArray()
+                                        .put(
+                                            JSONObject()
+                                                .put("id", "note-attachment-1")
+                                                .put("event_type", "mob_event")
+                                                .put("event_id", "event-1")
+                                                .put("client_attachment_id", "note-photo-1")
+                                                .put("original_filename", "mob-note.jpg")
+                                                .put("content_type", "image/jpeg")
+                                                .put("byte_size", 21)
+                                        )
+                                )
                         )
                 )
                 .put(
@@ -115,6 +130,16 @@ class MobileModelsTest {
                                 .put("id", "paddock-event-1")
                                 .put("paddock_id", "paddock-1")
                                 .put("description", "Pasture recovering")
+                        )
+                )
+                .put(
+                    "water_asset_events",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "water-event-1")
+                                .put("water_asset_id", "tank-1")
+                                .put("description", "Tank checked")
                         )
                 )
                 .put(
@@ -227,6 +252,7 @@ class MobileModelsTest {
         assertEquals(1, snapshot.waterAssetCount)
         assertEquals(1, snapshot.mobEventCount)
         assertEquals(1, snapshot.paddockEventCount)
+        assertEquals(1, snapshot.waterAssetEventCount)
         assertEquals("North Camp", snapshot.paddocks.first().name)
         assertEquals(12.5, snapshot.paddocks.first().areaHa ?: 0.0, 0.0)
         assertEquals(10.0, snapshot.paddocks.first().grazeableAreaHa ?: 0.0, 0.0)
@@ -238,7 +264,10 @@ class MobileModelsTest {
         assertEquals(37.0, snapshot.grazingByPaddock.first().groupHeads.first().head, 0.0)
         assertEquals("2026-05-24T12:00:00+00:00", snapshot.grazingByPaddock.first().mobs.first().startAt)
         assertEquals("Mob looks settled", snapshot.mobEvents.first().description)
+        assertEquals(1, snapshot.mobEvents.first().attachmentCount)
+        assertEquals("mob-note.jpg", snapshot.mobEvents.first().attachments.first().originalFilename)
         assertEquals("Pasture recovering", snapshot.paddockEvents.first().description)
+        assertEquals("Tank checked", snapshot.waterAssetEvents.first().description)
         assertEquals("OPS-1", snapshot.tasks.first().displayKey)
         assertEquals(listOf("water", "field"), snapshot.tasks.first().tags)
         assertEquals("Field Team", snapshot.tasks.first().assigneeName)

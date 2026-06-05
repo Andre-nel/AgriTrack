@@ -14,3 +14,8 @@ class PaddockEvent(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     description = db.Column(db.Text, nullable=False)
 
     paddock = db.relationship("Paddock", back_populates="events")
+    attachments = db.relationship(
+        "NoteAttachment",
+        back_populates="paddock_event",
+        cascade="all, delete-orphan",
+    )

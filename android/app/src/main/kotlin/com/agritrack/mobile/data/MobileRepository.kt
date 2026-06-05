@@ -100,6 +100,10 @@ class MobileRepository(
         fieldStore.enqueue(MobileCommand.paddockNote(farmId, paddockId, description, tags))
     }
 
+    fun queueWaterAssetNote(farmId: String, waterAssetId: String, description: String, tags: List<String>) {
+        fieldStore.enqueue(MobileCommand.waterAssetNote(farmId, waterAssetId, description, tags))
+    }
+
     fun queueStockCount(
         farmId: String,
         mobId: String,

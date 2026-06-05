@@ -80,6 +80,11 @@ def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
                 "event_at": event.event_at,
                 "tags": tags,
                 "description": event.description,
+                "attachments": sorted(
+                    event.attachments,
+                    key=lambda attachment: attachment.created_at,
+                    reverse=True,
+                ),
             }
         )
     event_tag_options = sorted({tag for row in mob_events_all for tag in row["tags"]})

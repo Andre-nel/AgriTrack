@@ -65,7 +65,7 @@ def create_backup(*, source_db: Path, instance_dir: Path, backup_dir: Path) -> P
         manifest = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "source_database": str(source_db),
-            "includes": ["agritrack.db", "maps", "task_attachments"],
+            "includes": ["agritrack.db", "maps", "task_attachments", "note_attachments"],
         }
         (tmp_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -74,6 +74,7 @@ def create_backup(*, source_db: Path, instance_dir: Path, backup_dir: Path) -> P
             archive.write(tmp_dir / "manifest.json", "manifest.json")
             add_tree(archive, instance_dir / "maps", "maps")
             add_tree(archive, instance_dir / "task_attachments", "task_attachments")
+            add_tree(archive, instance_dir / "note_attachments", "note_attachments")
 
     return target
 

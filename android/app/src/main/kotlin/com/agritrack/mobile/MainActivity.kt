@@ -504,6 +504,7 @@ class MainActivity : ComponentActivity() {
                     onQueuePaddockUpdate = { queueAndMaybeSync(queuePaddockUpdate(uiState, repository())) },
                     onQueueMobNote = { queueAndMaybeSync(queueMobNote(uiState, repository())) },
                     onQueuePaddockNote = { queueAndMaybeSync(queuePaddockNote(uiState, repository())) },
+                    onQueueWaterNote = { queueAndMaybeSync(queueWaterAssetNote(uiState, repository())) },
                     onQueueWaterUpdate = { queueAndMaybeSync(queueWaterUpdate(uiState, repository())) },
                     onQueueTaskCreate = { queueAndMaybeSync(queueTaskCreate(uiState, repository())) },
                     onQueueTaskStatus = { task, status ->
@@ -883,6 +884,7 @@ private fun AgriTrackApp(
     onQueuePaddockUpdate: () -> Unit,
     onQueueMobNote: () -> Unit,
     onQueuePaddockNote: () -> Unit,
+    onQueueWaterNote: () -> Unit,
     onQueueWaterUpdate: () -> Unit,
     onQueueTaskCreate: () -> Unit,
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
@@ -1023,6 +1025,9 @@ private fun AgriTrackApp(
                     onWaterAssetSelected,
                     onOpenScreen,
                     onStartTaskForEntity,
+                    onEntityNoteChange,
+                    onEntityNoteTagsChange,
+                    onQueueWaterNote,
                 )
                 AppScreen.Rainfall -> RainfallScreen(
                     state,
@@ -2639,6 +2644,9 @@ private fun WaterAssetDetailScreen(
     onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
+    onEntityNoteChange: (String) -> Unit,
+    onEntityNoteTagsChange: (String) -> Unit,
+    onQueueWaterNote: () -> Unit,
 ) {
     FormScaffold("Water Asset Detail", onBackToList) {
         val snapshot = state.snapshot ?: return@FormScaffold
@@ -2667,6 +2675,37 @@ private fun WaterAssetDetailScreen(
         }
         SectionCard("Linked Tasks") {
             RelatedTasks(snapshot.tasks, "water_asset", asset.id)
+        }
+        SectionCard("Comments / Log Notes") {
+            OutlinedTextField(
+                state.entityNote,
+                onEntityNoteChange,
+                label = { Text("Note") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                state.entityNoteTags,
+                onEntityNoteTagsChange,
+                label = { Text("Tags") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = onQueueWaterNote,
+                enabled = state.entityNote.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Queue Note")
+            }
+            val notes = snapshot.waterAssetEvents.filter { it.waterAssetId == asset.id }.take(4)
+            if (notes.isEmpty()) {
+                Text("No notes recorded", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+            notes.forEach { note ->
+                EntityCard(
+                    title = note.eventAt ?: "Water asset note",
+                    detail = "${note.tags.joinToString(", ").ifBlank { "field note" }} | ${note.description}",
+                )
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
@@ -3611,6 +3650,8 @@ private fun selectWaterAsset(state: FieldUiState, assetId: String): FieldUiState
         waterStatus = asset?.status.orEmpty(),
         waterLevel = asset?.waterLevel.orEmpty(),
         waterActive = asset?.active ?: true,
+        entityNote = "",
+        entityNoteTags = "",
     )
 }
 
@@ -3914,6 +3955,14 @@ private fun queuePaddockNote(state: FieldUiState, repo: MobileRepository): Field
     if (state.entityNote.isBlank()) return state.copy(statusMessage = "Note is required.")
     repo.queuePaddockNote(farm.id, state.selectedPaddockId, state.entityNote, parseNoteTags(state.entityNoteTags))
     return state.copy(entityNote = "", entityNoteTags = "", statusMessage = "Queued paddock note.")
+}
+
+private fun queueWaterAssetNote(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before adding a note.")
+    if (state.selectedWaterAssetId.isBlank()) return state.copy(statusMessage = "Choose a water asset.")
+    if (state.entityNote.isBlank()) return state.copy(statusMessage = "Note is required.")
+    repo.queueWaterAssetNote(farm.id, state.selectedWaterAssetId, state.entityNote, parseNoteTags(state.entityNoteTags))
+    return state.copy(entityNote = "", entityNoteTags = "", statusMessage = "Queued water asset note.")
 }
 
 private fun queueWaterUpdate(state: FieldUiState, repo: MobileRepository): FieldUiState {

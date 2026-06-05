@@ -19,6 +19,7 @@ from app.models import (
     MobLineage,
     MovementEvent,
     MovementEventMob,
+    NoteAttachment,
     Paddock,
     PaddockEvent,
     RainfallRecord,
@@ -32,6 +33,7 @@ from app.models import (
     TaskStatusTransition,
     UserFarmRole,
     WaterAsset,
+    WaterAssetEvent,
     WaterAssetServedPaddock,
     WaterConnection,
 )
@@ -139,6 +141,12 @@ class FarmDeletionService:
         cls._delete_where(Task, cls._in_if_any(Task.id, task_ids))
         cls._delete_where(TaskSpace, cls._in_if_any(TaskSpace.id, task_space_ids))
 
+        cls._delete_where(NoteAttachment, NoteAttachment.farm_id == farm_id)
+        cls._delete_where(
+            WaterAssetEvent,
+            WaterAssetEvent.farm_id == farm_id,
+            cls._in_if_any(WaterAssetEvent.water_asset_id, water_asset_ids),
+        )
         cls._delete_where(
             WaterConnection,
             WaterConnection.farm_id == farm_id,

@@ -94,6 +94,7 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
             saveArray(snapshot.farm.id, "rainfall", json.optJSONArray("rainfall"), "id", now)
             saveArray(snapshot.farm.id, "mob_event", json.optJSONArray("mob_events"), "id", now)
             saveArray(snapshot.farm.id, "paddock_event", json.optJSONArray("paddock_events"), "id", now)
+            saveArray(snapshot.farm.id, "water_asset_event", json.optJSONArray("water_asset_events"), "id", now)
             saveArray(snapshot.farm.id, "task", json.optJSONArray("tasks"), "id", now)
             saveArray(snapshot.farm.id, "calendar_item", json.optJSONArray("calendar_items"), "date", now)
             saveArray(snapshot.farm.id, "decision", json.optJSONArray("decision_feed"), "title", now)

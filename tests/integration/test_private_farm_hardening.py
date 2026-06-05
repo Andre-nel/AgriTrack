@@ -93,10 +93,13 @@ def test_backup_zip_includes_sqlite_database_maps_and_task_attachments(tmp_path)
     instance_dir = tmp_path / "instance"
     maps_dir = instance_dir / "maps"
     attachments_dir = instance_dir / "task_attachments" / "farm-1"
+    note_attachments_dir = instance_dir / "note_attachments" / "farm-1" / "mob_event"
     maps_dir.mkdir(parents=True)
     attachments_dir.mkdir(parents=True)
+    note_attachments_dir.mkdir(parents=True)
     (maps_dir / "Backup Farm.kml").write_text("<kml />", encoding="utf-8")
     (attachments_dir / "photo.jpg").write_bytes(b"photo-bytes")
+    (note_attachments_dir / "note-photo.jpg").write_bytes(b"note-photo-bytes")
 
     backup_path = create_backup(
         source_db=source_db,
@@ -110,6 +113,7 @@ def test_backup_zip_includes_sqlite_database_maps_and_task_attachments(tmp_path)
         assert "manifest.json" in names
         assert "maps/Backup Farm.kml" in names
         assert "task_attachments/farm-1/photo.jpg" in names
+        assert "note_attachments/farm-1/mob_event/note-photo.jpg" in names
         archive.extract("agritrack.db", tmp_path / "restore")
 
     restored = sqlite3.connect(tmp_path / "restore" / "agritrack.db")

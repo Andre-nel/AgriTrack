@@ -44,6 +44,7 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
 
     farm = db.relationship("Farm", back_populates="water_assets")
     location_paddock = db.relationship("Paddock", back_populates="water_assets")
+    events = db.relationship("WaterAssetEvent", back_populates="water_asset", cascade="all, delete-orphan")
     task_entity_links = db.relationship("TaskEntityLink", back_populates="water_asset")
     served_paddock_links = db.relationship(
         "WaterAssetServedPaddock",

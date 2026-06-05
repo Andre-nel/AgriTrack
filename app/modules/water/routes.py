@@ -1,10 +1,10 @@
 from urllib.parse import urlencode
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import current_app, flash, g, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import Farm, Paddock, WaterAsset, WaterConnection
+from app.models import Farm, Paddock, WaterAsset, WaterAssetEvent, WaterConnection
 from app.modules.tasks.entity_links import linked_task_rows_by_water_asset
 from app.modules.water.forms import (
     normalize_water_asset_type_filters,
@@ -14,6 +14,8 @@ from app.modules.water.forms import (
     water_mass_update_field_specs,
 )
 from app.services.water_network_service import WaterNetworkService
+from app.services.note_attachment_service import NoteAttachmentService
+from app.services.water_asset_event_service import WaterAssetEventService
 
 
 def _farm_water_workspace_redirect_response(farm_id: str, *, open_asset_id: str | None = None):
@@ -45,6 +47,30 @@ def register_legacy_routes(bp) -> None:
         )
         assets = WaterNetworkService.assets_for_farm(str(farm.id))
         asset_ids = [str(asset.id) for asset in assets]
+        water_asset_events_by_asset_id = {asset_id: [] for asset_id in asset_ids}
+        if asset_ids:
+            event_rows = (
+                WaterAssetEvent.query.filter(
+                    WaterAssetEvent.farm_id == farm.id,
+                    WaterAssetEvent.water_asset_id.in_(asset_ids),
+                )
+                .order_by(WaterAssetEvent.event_at.desc(), WaterAssetEvent.created_at.desc())
+                .all()
+            )
+            for event in event_rows:
+                water_asset_events_by_asset_id.setdefault(str(event.water_asset_id), []).append(
+                    {
+                        "id": str(event.id),
+                        "event_at": event.event_at,
+                        "tags": WaterAssetEventService.tags_from_csv(event.tags_csv),
+                        "description": event.description,
+                        "attachments": sorted(
+                            event.attachments,
+                            key=lambda attachment: attachment.created_at,
+                            reverse=True,
+                        ),
+                    }
+                )
         linked_tasks_by_water_asset_id = linked_task_rows_by_water_asset(
             asset_ids,
             farm.timezone if farm else "UTC",
@@ -150,6 +176,7 @@ def register_legacy_routes(bp) -> None:
             selected_map_asset_types=selected_map_asset_types,
             water_asset_editor_config=water_asset_editor_config,
             linked_tasks_by_water_asset_id=linked_tasks_by_water_asset_id,
+            water_asset_events_by_asset_id=water_asset_events_by_asset_id,
         )
 
     @bp.get("/farms/<farm_id>/water/mass-update")
@@ -223,6 +250,40 @@ def register_legacy_routes(bp) -> None:
                 url_for("web.farm_water_workspace", farm_id=farm_id, open_asset_id=asset_id)
             )
         return redirect(url_for("web.farm_water_workspace", farm_id=farm_id))
+
+    @bp.post("/farms/<farm_id>/water/assets/<asset_id>/events")
+    def water_asset_event_create_form(farm_id, asset_id):
+        Farm.query.get_or_404(farm_id)
+        asset = WaterAsset.query.filter_by(id=asset_id, farm_id=farm_id).first_or_404()
+        raw_tags = request.form.get("event_tags")
+        description = request.form.get("event_description")
+
+        try:
+            event = WaterAssetEventService.create_event(
+                water_asset_id=asset.id,
+                farm_id=asset.farm_id,
+                description=description,
+                raw_tags=raw_tags,
+            )
+            db.session.flush()
+            attachments = NoteAttachmentService.create_attachments_from_uploads(
+                request.files.getlist("event_images"),
+                farm_id=str(asset.farm_id),
+                event_type="water_asset_event",
+                event_id=str(event.id),
+                instance_path=current_app.instance_path,
+                uploaded_by_user_id=(
+                    str(g.web_user.id) if getattr(g, "web_user", None) is not None else None
+                ),
+            )
+            db.session.commit()
+            suffix = f" with {len(attachments)} image(s)" if attachments else ""
+            flash(f"Water asset note recorded{suffix}", "success")
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+
+        return redirect(url_for("web.farm_water_workspace", farm_id=farm_id, _anchor=f"asset-{asset_id}"))
 
     @bp.post("/farms/<farm_id>/water/mass-update")
     def update_water_assets_mass_form(farm_id):

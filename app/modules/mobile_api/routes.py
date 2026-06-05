@@ -20,6 +20,7 @@ from app.models import (
     MobileSyncCommand,
     Mob,
     MobEvent,
+    NoteAttachment,
     Paddock,
     PaddockEvent,
     RainfallRecord,
@@ -30,6 +31,7 @@ from app.models import (
     TaskSpace,
     User,
     WaterAsset,
+    WaterAssetEvent,
     WaterConnection,
 )
 from app.models.stock_ledger import StockEventType
@@ -37,6 +39,7 @@ from app.modules.farms.map_routes import _build_farm_map_feature_collection
 from app.services.calendar_service import CalendarService
 from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
+from app.services.note_attachment_service import NoteAttachmentService
 from app.services.paddock_event_service import PaddockEventService
 from app.services.stock_service import StockService
 from app.services.task_service import (
@@ -47,6 +50,7 @@ from app.services.task_service import (
     TaskService,
 )
 from app.services.water_network_service import WaterNetworkService
+from app.services.water_asset_event_service import WaterAssetEventService
 
 bp = Blueprint("mobile_api", __name__)
 
@@ -319,6 +323,7 @@ def _serialize_rainfall(record: RainfallRecord) -> dict:
 
 
 def _serialize_mob_event(event: MobEvent) -> dict:
+    attachments = sorted(event.attachments, key=lambda item: item.created_at, reverse=True)
     return {
         "id": str(event.id),
         "farm_id": str(event.farm_id),
@@ -326,11 +331,14 @@ def _serialize_mob_event(event: MobEvent) -> dict:
         "event_at": _iso_datetime(event.event_at),
         "tags": MobEventService.tags_from_csv(event.tags_csv),
         "description": event.description,
+        "attachment_count": len(attachments),
+        "attachments": [_serialize_note_attachment(attachment) for attachment in attachments[:12]],
         "updated_at": _iso_datetime(event.updated_at),
     }
 
 
 def _serialize_paddock_event(event: PaddockEvent) -> dict:
+    attachments = sorted(event.attachments, key=lambda item: item.created_at, reverse=True)
     return {
         "id": str(event.id),
         "farm_id": str(event.farm_id),
@@ -338,6 +346,23 @@ def _serialize_paddock_event(event: PaddockEvent) -> dict:
         "event_at": _iso_datetime(event.event_at),
         "tags": PaddockEventService.tags_from_csv(event.tags_csv),
         "description": event.description,
+        "attachment_count": len(attachments),
+        "attachments": [_serialize_note_attachment(attachment) for attachment in attachments[:12]],
+        "updated_at": _iso_datetime(event.updated_at),
+    }
+
+
+def _serialize_water_asset_event(event: WaterAssetEvent) -> dict:
+    attachments = sorted(event.attachments, key=lambda item: item.created_at, reverse=True)
+    return {
+        "id": str(event.id),
+        "farm_id": str(event.farm_id),
+        "water_asset_id": str(event.water_asset_id),
+        "event_at": _iso_datetime(event.event_at),
+        "tags": WaterAssetEventService.tags_from_csv(event.tags_csv),
+        "description": event.description,
+        "attachment_count": len(attachments),
+        "attachments": [_serialize_note_attachment(attachment) for attachment in attachments[:12]],
         "updated_at": _iso_datetime(event.updated_at),
     }
 
@@ -378,6 +403,27 @@ def _serialize_task_attachment(attachment: TaskAttachment) -> dict:
     return {
         "id": str(attachment.id),
         "task_id": str(attachment.task_id),
+        "client_attachment_id": attachment.client_attachment_id,
+        "original_filename": attachment.original_filename,
+        "content_type": attachment.content_type,
+        "byte_size": attachment.byte_size,
+        "sha256": attachment.sha256,
+        "caption": attachment.caption,
+        "captured_at": _iso_datetime(attachment.captured_at),
+        "created_at": _iso_datetime(attachment.created_at),
+    }
+
+
+def _serialize_note_attachment(attachment: NoteAttachment) -> dict:
+    return {
+        "id": str(attachment.id),
+        "farm_id": str(attachment.farm_id),
+        "event_type": NoteAttachmentService.event_type_for_attachment(attachment),
+        "event_id": str(
+            attachment.mob_event_id
+            or attachment.paddock_event_id
+            or attachment.water_asset_event_id
+        ),
         "client_attachment_id": attachment.client_attachment_id,
         "original_filename": attachment.original_filename,
         "content_type": attachment.content_type,
@@ -810,6 +856,7 @@ def bootstrap():
                     "mob.create",
                     "mob_event.create",
                     "paddock_event.create",
+                    "water_asset_event.create",
                     "stock_count.record",
                     "mob.move",
                     "mob.transfer",
@@ -889,6 +936,12 @@ def farm_snapshot(farm_id):
         .limit(200)
         .all()
     )
+    water_asset_events = (
+        WaterAssetEvent.query.filter_by(farm_id=farm.id)
+        .order_by(WaterAssetEvent.event_at.desc(), WaterAssetEvent.created_at.desc())
+        .limit(200)
+        .all()
+    )
     water_assets = (
         WaterAsset.query.filter_by(farm_id=farm.id)
         .order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
@@ -939,6 +992,9 @@ def farm_snapshot(farm_id):
             "rainfall": [_serialize_rainfall(record) for record in rainfall],
             "mob_events": [_serialize_mob_event(event) for event in mob_events],
             "paddock_events": [_serialize_paddock_event(event) for event in paddock_events],
+            "water_asset_events": [
+                _serialize_water_asset_event(event) for event in water_asset_events
+            ],
             "water_assets": [
                 WaterNetworkService.serialize_asset(asset, network_state=network_state)
                 for asset in water_assets
@@ -1133,6 +1189,95 @@ def task_attachment_file(farm_id, task_id, attachment_id):
     )
 
 
+def _get_note_event_for_farm(farm: Farm, event_type: str, event_id: str):
+    normalized_id = str(event_id or "").strip()
+    if event_type == "mob_event":
+        event = MobEvent.query.filter_by(id=normalized_id, farm_id=farm.id).first()
+        message = "Mob note not found for this farm"
+    elif event_type == "paddock_event":
+        event = PaddockEvent.query.filter_by(id=normalized_id, farm_id=farm.id).first()
+        message = "Paddock note not found for this farm"
+    elif event_type == "water_asset_event":
+        event = WaterAssetEvent.query.filter_by(id=normalized_id, farm_id=farm.id).first()
+        message = "Water asset note not found for this farm"
+    else:
+        raise MobileApiError("invalid_payload", "Attachment event type is invalid")
+    if event is None:
+        raise MobileApiError("not_found", message, 404)
+    return event
+
+
+def _store_note_attachment(farm: Farm, event_type: str, event_id: str) -> tuple[NoteAttachment, bool]:
+    event = _get_note_event_for_farm(farm, event_type, event_id)
+    uploaded = request.files.get("file")
+    if uploaded is None or not uploaded.filename:
+        raise MobileApiError("invalid_payload", "file is required")
+    try:
+        return NoteAttachmentService.store_upload(
+            uploaded,
+            farm_id=str(farm.id),
+            event_type=event_type,
+            event_id=str(event.id),
+            instance_path=current_app.instance_path,
+            uploaded_by_user_id=str(g.mobile_user.id),
+            client_attachment_id=request.form.get("client_attachment_id"),
+            caption=request.form.get("caption"),
+            captured_at=_parse_iso_datetime(request.form.get("captured_at"), "captured_at"),
+            expected_sha256=request.form.get("sha256"),
+        )
+    except ValueError as exc:
+        raise MobileApiError("invalid_payload", str(exc), 400) from exc
+
+
+def _upload_note_attachment_response(farm_id: str, event_type: str, event_id: str):
+    farm = _get_accessible_farm(farm_id)
+    try:
+        attachment, duplicate = _store_note_attachment(farm, event_type, event_id)
+        db.session.commit()
+        return jsonify({"attachment": _serialize_note_attachment(attachment), "duplicate": duplicate})
+    except MobileApiError:
+        db.session.rollback()
+        raise
+
+
+@bp.post("/farms/<farm_id>/mob-events/<event_id>/attachments")
+def upload_mob_event_attachment(farm_id, event_id):
+    return _upload_note_attachment_response(farm_id, "mob_event", event_id)
+
+
+@bp.post("/farms/<farm_id>/paddock-events/<event_id>/attachments")
+def upload_paddock_event_attachment(farm_id, event_id):
+    return _upload_note_attachment_response(farm_id, "paddock_event", event_id)
+
+
+@bp.post("/farms/<farm_id>/water-asset-events/<event_id>/attachments")
+def upload_water_asset_event_attachment(farm_id, event_id):
+    return _upload_note_attachment_response(farm_id, "water_asset_event", event_id)
+
+
+@bp.get("/farms/<farm_id>/note-attachments/<attachment_id>")
+def note_attachment_file(farm_id, attachment_id):
+    _get_accessible_farm(farm_id)
+    attachment = NoteAttachment.query.filter_by(id=attachment_id, farm_id=farm_id).first()
+    if attachment is None:
+        raise MobileApiError("not_found", "Attachment not found", 404)
+    try:
+        target = NoteAttachmentService.absolute_attachment_path(
+            current_app.instance_path,
+            attachment.storage_path,
+        )
+    except FileNotFoundError as exc:
+        raise MobileApiError("not_found", "Attachment file not found", 404) from exc
+    if not target.exists():
+        raise MobileApiError("not_found", "Attachment file not found", 404)
+    return send_file(
+        target,
+        mimetype=attachment.content_type,
+        as_attachment=False,
+        download_name=attachment.original_filename,
+    )
+
+
 def _command_failure_result(
     *,
     client_command_id: str | None,
@@ -1305,6 +1450,7 @@ def _dispatch_command(command_type: str, farm: Farm, payload) -> dict:
         "mob.create": _handle_mob_create,
         "mob_event.create": _handle_mob_event_create,
         "paddock_event.create": _handle_paddock_event_create,
+        "water_asset_event.create": _handle_water_asset_event_create,
         "stock_count.record": _handle_stock_count_record,
         "mob.move": _handle_mob_move,
         "mob.transfer": _handle_mob_transfer,
@@ -1386,6 +1532,25 @@ def _handle_paddock_event_create(farm: Farm, payload: dict) -> dict:
         raw_tags = ",".join(str(value) for value in raw_tags)
     event = PaddockEventService.create_event(
         paddock_id=paddock.id,
+        farm_id=farm.id,
+        description=payload.get("description"),
+        raw_tags=raw_tags,
+        event_at=_parse_iso_datetime(payload.get("event_at"), "event_at"),
+    )
+    db.session.flush()
+    return {"event_id": str(event.id)}
+
+
+def _handle_water_asset_event_create(farm: Farm, payload: dict) -> dict:
+    asset_id = str(payload.get("water_asset_id") or payload.get("asset_id") or "").strip()
+    asset = WaterAsset.query.filter_by(id=asset_id, farm_id=farm.id).first()
+    if asset is None:
+        raise MobileApiError("not_found", "Water asset not found for this farm", 404)
+    raw_tags = payload.get("tags")
+    if isinstance(raw_tags, list):
+        raw_tags = ",".join(str(value) for value in raw_tags)
+    event = WaterAssetEventService.create_event(
+        water_asset_id=asset.id,
         farm_id=farm.id,
         description=payload.get("description"),
         raw_tags=raw_tags,

@@ -1,7 +1,7 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
-from flask import current_app, flash, redirect, render_template, request, url_for
+from flask import current_app, flash, g, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -9,6 +9,7 @@ from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, Pa
 from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
+from app.services.note_attachment_service import NoteAttachmentService
 from app.services.paddock_service import PaddockService
 from app.services.paddock_event_service import PaddockEventService
 from app.services.reporting_service import ReportingService
@@ -135,14 +136,26 @@ def register_legacy_routes(bp) -> None:
         description = request.form.get("event_description")
 
         try:
-            PaddockEventService.create_event(
+            event = PaddockEventService.create_event(
                 paddock_id=paddock.id,
                 farm_id=paddock.farm_id,
                 description=description,
                 raw_tags=raw_tags,
             )
+            db.session.flush()
+            attachments = NoteAttachmentService.create_attachments_from_uploads(
+                request.files.getlist("event_images"),
+                farm_id=str(paddock.farm_id),
+                event_type="paddock_event",
+                event_id=str(event.id),
+                instance_path=current_app.instance_path,
+                uploaded_by_user_id=(
+                    str(g.web_user.id) if getattr(g, "web_user", None) is not None else None
+                ),
+            )
             db.session.commit()
-            flash("Paddock note recorded", "success")
+            suffix = f" with {len(attachments)} image(s)" if attachments else ""
+            flash(f"Paddock note recorded{suffix}", "success")
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), "error")
@@ -309,6 +322,11 @@ def register_legacy_routes(bp) -> None:
                 "event_at": row.event_at,
                 "tags": PaddockEventService.tags_from_csv(row.tags_csv),
                 "description": row.description,
+                "attachments": sorted(
+                    row.attachments,
+                    key=lambda attachment: attachment.created_at,
+                    reverse=True,
+                ),
             }
             for row in (
                 PaddockEvent.query.filter_by(paddock_id=paddock.id)

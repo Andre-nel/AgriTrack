@@ -1,6 +1,6 @@
 from decimal import InvalidOperation
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import current_app, flash, g, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -11,6 +11,7 @@ from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_bal
 from app.services.mob_event_service import MobEventService
 from app.services.mob_service import MobService
 from app.services.movement_service import MovementService
+from app.services.note_attachment_service import NoteAttachmentService
 
 
 def _get_active_mob_or_404(mob_id: str) -> Mob:
@@ -54,14 +55,26 @@ def register_legacy_routes(bp) -> None:
         description = request.form.get("event_description")
 
         try:
-            MobEventService.create_event(
+            event = MobEventService.create_event(
                 mob_id=mob.id,
                 farm_id=mob.farm_id,
                 description=description,
                 raw_tags=tags_text,
             )
+            db.session.flush()
+            attachments = NoteAttachmentService.create_attachments_from_uploads(
+                request.files.getlist("event_images"),
+                farm_id=str(mob.farm_id),
+                event_type="mob_event",
+                event_id=str(event.id),
+                instance_path=current_app.instance_path,
+                uploaded_by_user_id=(
+                    str(g.web_user.id) if getattr(g, "web_user", None) is not None else None
+                ),
+            )
             db.session.commit()
-            flash("Mob note recorded", "success")
+            suffix = f" with {len(attachments)} image(s)" if attachments else ""
+            flash(f"Mob note recorded{suffix}", "success")
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), "error")

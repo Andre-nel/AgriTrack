@@ -25,6 +25,7 @@ class OptimisticSnapshotTest {
             .put(MobileCommand.waterAssetStatus("farm-1", "tank-1", "limited", "low", active = false).toJson())
             .put(MobileCommand.mobNote("farm-1", "mob-1", "Settled after move", listOf("move")).toJson())
             .put(MobileCommand.paddockNote("farm-1", "paddock-1", "Pasture recovering", listOf("pasture")).toJson())
+            .put(MobileCommand.waterAssetNote("farm-1", "tank-1", "Tank checked", listOf("water")).toJson())
             .put(MobileCommand.rainfall("farm-1", "2026-05-31", 8.5, "Storm").toJson())
 
         val optimistic = base.withOptimisticCommands(commands)
@@ -42,6 +43,7 @@ class OptimisticSnapshotTest {
         assertEquals("Storm", optimistic.rainfall.first().note)
         assertEquals("Settled after move", optimistic.mobEvents.first().description)
         assertEquals("Pasture recovering", optimistic.paddockEvents.first().description)
+        assertEquals("Tank checked", optimistic.waterAssetEvents.first().description)
     }
 
     @Test

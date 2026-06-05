@@ -13,9 +13,9 @@ This is a native Kotlin + Jetpack Compose client for the Flask mobile API at
   for offline reference.
 - Presents a field dashboard with entries for farm state, map features,
   calendar, mobs, paddocks, water assets, rainfall, decision hints, and sync.
-- Queues rainfall, mob creation, mob notes, paddock notes, multi-paddock mob
-  moves, stock counts, mob transfers, task updates, paddock edits, and water
-  asset updates with unique `client_command_id` values.
+- Queues rainfall, mob creation, mob notes, paddock notes, water asset notes,
+  multi-paddock mob moves, stock counts, mob transfers, task updates, paddock
+  edits, and water asset updates with unique `client_command_id` values.
 - Replays queued commands through `/sync/commands`, removes applied results,
   drops terminal validation failures, keeps retryable failures with their last
   error, and refreshes snapshots for farms with applied syncs.

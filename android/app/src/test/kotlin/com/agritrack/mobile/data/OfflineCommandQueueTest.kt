@@ -159,6 +159,24 @@ class OfflineCommandQueueTest {
     }
 
     @Test
+    fun waterAssetNoteCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.waterAssetNote(
+            farmId = "farm-1",
+            waterAssetId = "tank-1",
+            description = "Float valve checked",
+            tags = listOf("inspection", "water"),
+        )
+
+        val json = command.toJson()
+
+        assertEquals("water_asset_event.create", json.getString("type"))
+        assertEquals("farm-1", json.getString("farm_id"))
+        assertEquals("tank-1", json.getJSONObject("payload").getString("water_asset_id"))
+        assertEquals("Float valve checked", json.getJSONObject("payload").getString("description"))
+        assertEquals("inspection", json.getJSONObject("payload").getJSONArray("tags").getString(0))
+    }
+
+    @Test
     fun stockCountCommandShapesSupportedSyncPayload() {
         val command = MobileCommand.stockCount(
             farmId = "farm-1",
