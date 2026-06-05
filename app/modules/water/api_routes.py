@@ -74,6 +74,13 @@ def update_water_asset(asset_id):
     return jsonify(WaterNetworkService.serialize_asset(asset, network_state=network_state))
 
 
+@bp.get("/water-assets/<asset_id>/state-history")
+def get_water_asset_state_history(asset_id):
+    asset = WaterAsset.query.get_or_404(asset_id)
+    rows = WaterNetworkService.state_history_for_asset(str(asset.id))
+    return jsonify([WaterNetworkService.serialize_asset_state_history(row) for row in rows])
+
+
 @bp.get("/water-connections")
 def list_water_connections():
     query = WaterConnection.query.order_by(WaterConnection.flow_type.asc(), WaterConnection.created_at.asc())

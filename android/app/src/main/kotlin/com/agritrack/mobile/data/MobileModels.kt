@@ -215,6 +215,19 @@ data class WaterAssetEventSummary(
     val attachments: List<NoteAttachmentSummary>,
 )
 
+data class WaterAssetStateHistorySummary(
+    val id: String,
+    val waterAssetId: String,
+    val changeType: String,
+    val changedAt: String?,
+    val previousActive: Boolean?,
+    val previousStatus: String?,
+    val previousWaterLevel: String?,
+    val active: Boolean,
+    val status: String?,
+    val waterLevel: String?,
+)
+
 data class TaskEntityLinkSummary(
     val id: String,
     val taskId: String,
@@ -323,6 +336,7 @@ data class FarmSnapshot(
     val mobEventCount: Int,
     val paddockEventCount: Int,
     val waterAssetEventCount: Int,
+    val waterAssetStateHistoryCount: Int,
     val taskCount: Int,
     val calendarItemCount: Int,
     val decisionCount: Int,
@@ -335,6 +349,7 @@ data class FarmSnapshot(
     val mobEvents: List<MobEventSummary>,
     val paddockEvents: List<PaddockEventSummary>,
     val waterAssetEvents: List<WaterAssetEventSummary>,
+    val waterAssetStateHistory: List<WaterAssetStateHistorySummary>,
     val tasks: List<TaskSummary>,
     val calendarItems: List<CalendarItemSummary>,
     val decisionFeed: List<DecisionItemSummary>,
@@ -354,6 +369,7 @@ data class FarmSnapshot(
             val mobEvents = parseMobEvents(json.optJSONArray("mob_events") ?: JSONArray())
             val paddockEvents = parsePaddockEvents(json.optJSONArray("paddock_events") ?: JSONArray())
             val waterAssetEvents = parseWaterAssetEvents(json.optJSONArray("water_asset_events") ?: JSONArray())
+            val waterAssetStateHistory = parseWaterAssetStateHistory(json.optJSONArray("water_asset_state_history") ?: JSONArray())
             val tasks = parseTasks(json.optJSONArray("tasks") ?: JSONArray())
             val calendarItems = parseCalendarItems(json.optJSONArray("calendar_items") ?: JSONArray())
             val decisions = parseDecisionFeed(json.optJSONArray("decision_feed") ?: JSONArray())
@@ -372,6 +388,7 @@ data class FarmSnapshot(
                 mobEventCount = mobEvents.size,
                 paddockEventCount = paddockEvents.size,
                 waterAssetEventCount = waterAssetEvents.size,
+                waterAssetStateHistoryCount = waterAssetStateHistory.size,
                 taskCount = tasks.size,
                 calendarItemCount = calendarItems.size,
                 decisionCount = decisions.size,
@@ -384,6 +401,7 @@ data class FarmSnapshot(
                 mobEvents = mobEvents,
                 paddockEvents = paddockEvents,
                 waterAssetEvents = waterAssetEvents,
+                waterAssetStateHistory = waterAssetStateHistory,
                 tasks = tasks,
                 calendarItems = calendarItems,
                 decisionFeed = decisions,
@@ -600,6 +618,26 @@ data class FarmSnapshot(
                         description = event.optString("description"),
                         attachmentCount = event.optInt("attachment_count", event.optJSONArray("attachments")?.length() ?: 0),
                         attachments = parseNoteAttachments(event.optJSONArray("attachments") ?: JSONArray()),
+                    )
+                )
+            }
+        }
+
+        private fun parseWaterAssetStateHistory(json: JSONArray): List<WaterAssetStateHistorySummary> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                add(
+                    WaterAssetStateHistorySummary(
+                        id = row.optString("id"),
+                        waterAssetId = row.optString("water_asset_id"),
+                        changeType = row.optString("change_type", "updated"),
+                        changedAt = row.optNullableString("changed_at"),
+                        previousActive = row.optNullableBoolean("previous_active"),
+                        previousStatus = row.optNullableString("previous_status"),
+                        previousWaterLevel = row.optNullableString("previous_water_level"),
+                        active = row.optBoolean("active", true),
+                        status = row.optNullableString("status"),
+                        waterLevel = row.optNullableString("water_level"),
                     )
                 )
             }
@@ -944,6 +982,9 @@ private fun JSONArray?.strings(): List<String> {
 
 private fun JSONObject.optNullableString(name: String): String? =
     if (isNull(name)) null else optString(name).takeIf { it.isNotBlank() }
+
+private fun JSONObject.optNullableBoolean(name: String): Boolean? =
+    if (isNull(name)) null else optBoolean(name)
 
 private fun JSONObject.optNullableDouble(name: String): Double? {
     if (isNull(name)) return null

@@ -942,6 +942,10 @@ def farm_snapshot(farm_id):
         .limit(200)
         .all()
     )
+    water_asset_state_history = WaterNetworkService.recent_state_history_for_farm(
+        str(farm.id),
+        limit=500,
+    )
     water_assets = (
         WaterAsset.query.filter_by(farm_id=farm.id)
         .order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
@@ -994,6 +998,10 @@ def farm_snapshot(farm_id):
             "paddock_events": [_serialize_paddock_event(event) for event in paddock_events],
             "water_asset_events": [
                 _serialize_water_asset_event(event) for event in water_asset_events
+            ],
+            "water_asset_state_history": [
+                WaterNetworkService.serialize_asset_state_history(row)
+                for row in water_asset_state_history
             ],
             "water_assets": [
                 WaterNetworkService.serialize_asset(asset, network_state=network_state)

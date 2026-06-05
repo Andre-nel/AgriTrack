@@ -5,7 +5,7 @@ from math import cos, radians
 from sqlalchemy import or_
 
 from app.extensions import db
-from app.models import Paddock, WaterAsset, WaterAssetServedPaddock, WaterConnection
+from app.models import Paddock, WaterAsset, WaterAssetServedPaddock, WaterAssetStateHistory, WaterConnection
 from app.models.water import WATER_ASSET_TYPES, WATER_CONNECTION_FLOW_TYPES
 from app.services.paddock_service import PaddockService
 
@@ -74,6 +74,7 @@ class WaterNetworkService:
     GRAVITY_TROUGH_SOURCE_TYPES = {"cement_dam", "ground_dam", "pit", "tank", "weir"}
     TRANSFER_SOURCE_TYPES = {"borehole", "cement_dam", "ground_dam", "pit", "tank", "weir"}
     TRANSFER_DESTINATION_TYPES = {"borehole", "cement_dam", "pit", "tank"}
+    STATE_HISTORY_FIELDS = ("active", "status", "water_level")
 
     @staticmethod
     def normalize_name(value: str | None) -> str:
@@ -99,6 +100,43 @@ class WaterNetworkService:
         if value is None:
             return None
         return float(value)
+
+    @staticmethod
+    def _iso_datetime(value):
+        if value is None:
+            return None
+        return value.isoformat()
+
+    @classmethod
+    def _asset_state_snapshot(cls, asset: WaterAsset) -> dict:
+        return {
+            "active": bool(asset.active),
+            "status": asset.status,
+            "water_level": asset.water_level,
+        }
+
+    @classmethod
+    def _record_asset_state_history(
+        cls,
+        asset: WaterAsset,
+        *,
+        change_type: str,
+        previous_state: dict | None = None,
+    ) -> WaterAssetStateHistory:
+        previous_state = previous_state or {}
+        row = WaterAssetStateHistory(
+            water_asset_id=asset.id,
+            farm_id=asset.farm_id,
+            change_type=change_type,
+            previous_active=previous_state.get("active"),
+            previous_status=previous_state.get("status"),
+            previous_water_level=previous_state.get("water_level"),
+            active=bool(asset.active),
+            status=asset.status,
+            water_level=asset.water_level,
+        )
+        db.session.add(row)
+        return row
 
     @staticmethod
     def _current_value(payload: dict, field: str, current):
@@ -551,6 +589,7 @@ class WaterNetworkService:
         *,
         imported: bool = False,
     ) -> WaterAsset:
+        previous_state = cls._asset_state_snapshot(asset)
         validated = cls.validate_asset_payload(payload, asset=asset, imported=imported)
         served_paddock_ids = validated.pop("served_paddock_ids")
         for field, value in validated.items():
@@ -558,6 +597,13 @@ class WaterNetworkService:
         if asset.id is None:
             db.session.flush()
         cls._sync_served_paddocks(asset, served_paddock_ids)
+        current_state = cls._asset_state_snapshot(asset)
+        if any(previous_state[field] != current_state[field] for field in cls.STATE_HISTORY_FIELDS):
+            cls._record_asset_state_history(
+                asset,
+                change_type="updated",
+                previous_state=previous_state,
+            )
         if not imported:
             cls.ensure_default_trough_connections(validated["farm_id"])
         return asset
@@ -570,6 +616,7 @@ class WaterNetworkService:
         db.session.add(asset)
         db.session.flush()
         cls._sync_served_paddocks(asset, served_paddock_ids)
+        cls._record_asset_state_history(asset, change_type="created")
         if not imported:
             cls.ensure_default_trough_connections(validated["farm_id"])
         return asset
@@ -963,6 +1010,44 @@ class WaterNetworkService:
                 for link in served_links
             ],
         }
+
+    @classmethod
+    def serialize_asset_state_history(cls, row: WaterAssetStateHistory) -> dict:
+        return {
+            "id": str(row.id),
+            "farm_id": str(row.farm_id),
+            "water_asset_id": str(row.water_asset_id),
+            "change_type": row.change_type,
+            "changed_at": cls._iso_datetime(row.changed_at),
+            "previous_active": row.previous_active,
+            "previous_status": row.previous_status,
+            "previous_water_level": row.previous_water_level,
+            "active": row.active,
+            "status": row.status,
+            "water_level": row.water_level,
+        }
+
+    @classmethod
+    def state_history_for_asset(cls, asset_id: str) -> list[WaterAssetStateHistory]:
+        return (
+            WaterAssetStateHistory.query.filter_by(water_asset_id=asset_id)
+            .order_by(WaterAssetStateHistory.changed_at.desc(), WaterAssetStateHistory.id.desc())
+            .all()
+        )
+
+    @classmethod
+    def recent_state_history_for_farm(
+        cls,
+        farm_id: str,
+        *,
+        limit: int = 500,
+    ) -> list[WaterAssetStateHistory]:
+        return (
+            WaterAssetStateHistory.query.filter_by(farm_id=farm_id)
+            .order_by(WaterAssetStateHistory.changed_at.desc(), WaterAssetStateHistory.id.desc())
+            .limit(limit)
+            .all()
+        )
 
     @classmethod
     def validate_connection_payload(

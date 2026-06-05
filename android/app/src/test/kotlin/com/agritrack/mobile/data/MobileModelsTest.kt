@@ -143,6 +143,23 @@ class MobileModelsTest {
                         )
                 )
                 .put(
+                    "water_asset_state_history",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "water-history-1")
+                                .put("water_asset_id", "tank-1")
+                                .put("change_type", "updated")
+                                .put("changed_at", "2026-05-24T12:00:00+00:00")
+                                .put("previous_active", true)
+                                .put("previous_status", "operational")
+                                .put("previous_water_level", "low")
+                                .put("active", true)
+                                .put("status", "operational")
+                                .put("water_level", "full")
+                        )
+                )
+                .put(
                     "tasks",
                     JSONArray()
                         .put(
@@ -268,6 +285,9 @@ class MobileModelsTest {
         assertEquals("mob-note.jpg", snapshot.mobEvents.first().attachments.first().originalFilename)
         assertEquals("Pasture recovering", snapshot.paddockEvents.first().description)
         assertEquals("Tank checked", snapshot.waterAssetEvents.first().description)
+        assertEquals(1, snapshot.waterAssetStateHistoryCount)
+        assertEquals("low", snapshot.waterAssetStateHistory.first().previousWaterLevel)
+        assertEquals("full", snapshot.waterAssetStateHistory.first().waterLevel)
         assertEquals("OPS-1", snapshot.tasks.first().displayKey)
         assertEquals(listOf("water", "field"), snapshot.tasks.first().tags)
         assertEquals("Field Team", snapshot.tasks.first().assigneeName)

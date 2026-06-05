@@ -1374,8 +1374,17 @@ class FarmImportService:
         for existing_asset in preexisting_imported_water_assets:
             if str(existing_asset.id) in seen_preexisting_imported_water_asset_ids or not existing_asset.active:
                 continue
-            existing_asset.active = False
-            existing_asset.needs_review = True
+            WaterNetworkService.apply_asset_payload(
+                existing_asset,
+                {
+                    "farm_id": str(farm.id),
+                    "name": existing_asset.name,
+                    "asset_type": existing_asset.asset_type,
+                    "active": False,
+                    "needs_review": True,
+                },
+                imported=True,
+            )
             water_archived_count += 1
 
         WaterNetworkService.ensure_default_trough_connections(

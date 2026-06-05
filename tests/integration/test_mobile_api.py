@@ -29,6 +29,7 @@ from app.models import (
     UserFarmRole,
     WaterAsset,
     WaterAssetEvent,
+    WaterAssetStateHistory,
     WaterAssetServedPaddock,
     WaterConnection,
 )
@@ -1076,12 +1077,28 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert active_session is not None
         assert sorted(float(row.allocation_fraction) for row in active_session.allocations) == [0.5, 0.5]
         assert db.session.get(WaterAsset, tank_id).water_level == "full"
+        water_history = WaterAssetStateHistory.query.filter_by(water_asset_id=tank_id).one()
+        assert water_history.change_type == "updated"
+        assert water_history.previous_water_level == "low"
+        assert water_history.water_level == "full"
         assert db.session.get(Paddock, source_id).status == "resting"
         assert db.session.get(Paddock, source_id).notes == "Gate latch needs attention"
         assert Task.query.filter_by(heading="Mobile-created task").count() == 1
         assert db.session.get(Task, task_id).status == "in_progress"
         assert TaskComment.query.filter_by(task_id=task_id).count() == 1
         assert MobileSyncCommand.query.filter_by(status="applied").count() == 13
+
+    snapshot_response = client.get(
+        f"/api/mobile/v1/farms/{farm_id}/snapshot",
+        headers=_auth(token),
+    )
+    assert snapshot_response.status_code == 200
+    snapshot_payload = snapshot_response.get_json()
+    history_payload = snapshot_payload["water_asset_state_history"]
+    assert len(history_payload) == 1
+    assert history_payload[0]["water_asset_id"] == tank_id
+    assert history_payload[0]["previous_water_level"] == "low"
+    assert history_payload[0]["water_level"] == "full"
 
 
 def test_mobile_stock_count_can_create_animal_group_from_payload(client, app):

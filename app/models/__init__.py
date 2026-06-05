@@ -30,7 +30,7 @@ from app.models.task import (
     TaskStatusTransition,
 )
 from app.models.user import User, UserFarmRole
-from app.models.water import WaterAsset, WaterAssetServedPaddock, WaterConnection
+from app.models.water import WaterAsset, WaterAssetServedPaddock, WaterAssetStateHistory, WaterConnection
 from app.models.water_asset_event import WaterAssetEvent
 
 __all__ = [
@@ -72,5 +72,6 @@ __all__ = [
     "WaterAsset",
     "WaterAssetEvent",
     "WaterAssetServedPaddock",
+    "WaterAssetStateHistory",
     "WaterConnection",
 ]

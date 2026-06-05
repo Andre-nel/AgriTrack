@@ -11,6 +11,7 @@ from app.models import (
     WaterAsset,
     WaterAssetEvent,
     WaterAssetServedPaddock,
+    WaterAssetStateHistory,
     WaterConnection,
 )
 
@@ -715,6 +716,62 @@ def test_update_water_asset_type_change_clears_hidden_solar_fields(client, app):
     assert payload["water_level"] == "half"
     assert payload["capacity_m3"] == 15.0
     assert payload["material"] == "steel"
+
+
+def test_water_asset_state_history_records_create_and_future_state_updates(client, app):
+    with app.app_context():
+        farm = Farm(name="Water History Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    create_response = client.post(
+        "/api/water-assets",
+        json={
+            "farm_id": farm_id,
+            "name": "History Tank",
+            "asset_type": "tank",
+            "active": True,
+            "status": "operational",
+            "water_level": "low",
+        },
+    )
+    assert create_response.status_code == 201
+    asset_id = create_response.get_json()["id"]
+
+    with app.app_context():
+        rows = WaterAssetStateHistory.query.filter_by(water_asset_id=asset_id).all()
+        assert len(rows) == 1
+        assert rows[0].change_type == "created"
+        assert rows[0].previous_status is None
+        assert rows[0].status == "operational"
+        assert rows[0].water_level == "low"
+
+    update_response = client.patch(
+        f"/api/water-assets/{asset_id}",
+        json={"water_level": "full"},
+    )
+    assert update_response.status_code == 200
+
+    history_response = client.get(f"/api/water-assets/{asset_id}/state-history")
+    assert history_response.status_code == 200
+    history_payload = history_response.get_json()
+    assert len(history_payload) == 2
+    updated = next(row for row in history_payload if row["change_type"] == "updated")
+    assert updated["previous_active"] is True
+    assert updated["previous_status"] == "operational"
+    assert updated["previous_water_level"] == "low"
+    assert updated["active"] is True
+    assert updated["status"] == "operational"
+    assert updated["water_level"] == "full"
+
+    rename_response = client.patch(
+        f"/api/water-assets/{asset_id}",
+        json={"name": "History Tank Renamed"},
+    )
+    assert rename_response.status_code == 200
+    with app.app_context():
+        assert WaterAssetStateHistory.query.filter_by(water_asset_id=asset_id).count() == 2
 
 
 def test_update_water_asset_type_change_clears_hidden_windmill_fields(client, app):

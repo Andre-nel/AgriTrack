@@ -225,6 +225,7 @@ Response groups:
   "mob_events": [],
   "paddock_events": [],
   "water_asset_events": [],
+  "water_asset_state_history": [],
   "water_assets": [],
   "water_connections": [],
   "task_spaces": [],
@@ -239,13 +240,20 @@ Response groups:
 
 The snapshot is the Android read model for one selected farm. It represents
 current working state: open tasks, upcoming calendar items, current grazing
-allocation, current water state, recent rainfall, and decision hints. It is not
-a historical browser.
+allocation, current water state, recent rainfall, and decision hints. It also
+includes recent structured water asset state history. The migration that adds
+history creates one `baseline` row per existing water asset using the state at
+upgrade time; the server does not synthesize older state rows.
 
 `active_grazing_by_paddock` groups current grazing allocations for paddock
 detail views. Each mob row includes `mob_id`, `mob_name`, `allocation_pct`, and
 `start_at`; Android uses `start_at` to show how many days the mob has been
 grazing that paddock.
+
+`water_asset_state_history` rows include `water_asset_id`, `change_type`
+(`baseline`, `created`, or `updated`), `changed_at`, previous `active` /
+`status` / `water_level`, and the current `active` / `status` / `water_level`
+snapshot after the change.
 
 ### Mobile Map Data
 

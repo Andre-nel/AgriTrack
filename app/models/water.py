@@ -1,3 +1,5 @@
+from sqlalchemy import func
+
 from app.extensions import db
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -45,6 +47,11 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     farm = db.relationship("Farm", back_populates="water_assets")
     location_paddock = db.relationship("Paddock", back_populates="water_assets")
     events = db.relationship("WaterAssetEvent", back_populates="water_asset", cascade="all, delete-orphan")
+    state_history = db.relationship(
+        "WaterAssetStateHistory",
+        back_populates="water_asset",
+        cascade="all, delete-orphan",
+    )
     task_entity_links = db.relationship("TaskEntityLink", back_populates="water_asset")
     served_paddock_links = db.relationship(
         "WaterAssetServedPaddock",
@@ -103,6 +110,41 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         db.CheckConstraint(
             "weir_size IS NULL OR weir_size IN ('small', 'medium', 'large')",
             name="ck_water_asset_weir_size",
+        ),
+    )
+
+
+class WaterAssetStateHistory(UUIDPrimaryKeyMixin, db.Model):
+    __tablename__ = "water_asset_state_history"
+
+    water_asset_id = db.Column(
+        db.String(36),
+        db.ForeignKey("water_assets.id"),
+        nullable=False,
+        index=True,
+    )
+    farm_id = db.Column(db.String(36), db.ForeignKey("farms.id"), nullable=False, index=True)
+    change_type = db.Column(db.String(20), nullable=False, default="updated", index=True)
+    changed_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    previous_active = db.Column(db.Boolean)
+    previous_status = db.Column(db.String(40))
+    previous_water_level = db.Column(db.String(30))
+    active = db.Column(db.Boolean, nullable=False)
+    status = db.Column(db.String(40))
+    water_level = db.Column(db.String(30))
+
+    water_asset = db.relationship("WaterAsset", back_populates="state_history")
+    farm = db.relationship("Farm")
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "change_type IN ('baseline', 'created', 'updated')",
+            name="ck_water_asset_state_history_change_type",
+        ),
+        db.Index(
+            "ix_water_asset_state_history_asset_changed_at",
+            "water_asset_id",
+            "changed_at",
         ),
     )
 
