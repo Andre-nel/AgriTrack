@@ -38,3 +38,19 @@ LSU_PADDOCK_TRACKING_PLOT_MODES = {
     "overlay": "Overlay Selected Paddocks",
     "paddock": "Separate Plot Per Paddock",
 }
+WATER_ASSET_STATE_FIELD_LABELS = {
+    "active": "Active State",
+    "status": "Status",
+    "water_level": "Water Level",
+}
+WATER_ASSET_STATE_FIELD_ORDER = ("active", "status", "water_level")
+WATER_ASSET_STATE_DEFAULT_FIELDS = WATER_ASSET_STATE_FIELD_ORDER
+WATER_ASSET_ANALYTICS_PLOT_MODES = {
+    "overlay": "Overlay Selected Assets",
+    "asset": "Separate Plot Per Asset",
+}
+WATER_ASSET_CURRENT_ACTIVE_FILTERS = {
+    "all": "All Assets",
+    "active": "Active Assets",
+    "inactive": "Inactive Assets",
+}

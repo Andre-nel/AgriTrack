@@ -12,9 +12,12 @@ from app.models import (
     JournalEntry,
     Mob,
     Paddock,
+    WaterAsset,
+    WaterAssetStateHistory,
 )
 from app.modules.analytics.services import (
     build_lsu_paddock_tracking_report,
+    build_water_asset_state_report,
     create_journal_entry,
 )
 
@@ -49,6 +52,205 @@ def test_create_journal_entry_rejects_missing_farm(app):
                 description="Checked mob condition.",
                 event_at_raw="2026-03-05T09:30:00",
             )
+
+
+def test_build_water_asset_state_report_carries_baseline_and_summarizes(app):
+    with app.app_context():
+        farm = Farm(name="Water Analytics Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        tank = WaterAsset(
+            farm_id=farm.id,
+            name="History Tank",
+            asset_type="tank",
+            active=True,
+            status="leaking",
+            water_level="half",
+        )
+        trough = WaterAsset(
+            farm_id=farm.id,
+            name="History Trough",
+            asset_type="trough",
+            active=True,
+            status="operational",
+            water_level="full",
+        )
+        db.session.add_all([tank, trough])
+        db.session.flush()
+        db.session.add_all(
+            [
+                WaterAssetStateHistory(
+                    water_asset_id=tank.id,
+                    farm_id=farm.id,
+                    change_type="created",
+                    changed_at=datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc),
+                    previous_active=None,
+                    previous_status=None,
+                    previous_water_level=None,
+                    active=True,
+                    status="operational",
+                    water_level="low",
+                ),
+                WaterAssetStateHistory(
+                    water_asset_id=tank.id,
+                    farm_id=farm.id,
+                    change_type="updated",
+                    changed_at=datetime(2026, 1, 3, 8, 0, tzinfo=timezone.utc),
+                    previous_active=True,
+                    previous_status="operational",
+                    previous_water_level="low",
+                    active=True,
+                    status="operational",
+                    water_level="half",
+                ),
+                WaterAssetStateHistory(
+                    water_asset_id=tank.id,
+                    farm_id=farm.id,
+                    change_type="updated",
+                    changed_at=datetime(2026, 1, 5, 8, 0, tzinfo=timezone.utc),
+                    previous_active=True,
+                    previous_status="operational",
+                    previous_water_level="half",
+                    active=True,
+                    status="leaking",
+                    water_level="half",
+                ),
+                WaterAssetStateHistory(
+                    water_asset_id=trough.id,
+                    farm_id=farm.id,
+                    change_type="created",
+                    changed_at=datetime(2026, 1, 4, 12, 0, tzinfo=timezone.utc),
+                    previous_active=None,
+                    previous_status=None,
+                    previous_water_level=None,
+                    active=True,
+                    status="operational",
+                    water_level="full",
+                ),
+            ]
+        )
+        db.session.commit()
+
+        report = build_water_asset_state_report(
+            assets=[tank, trough],
+            start_date=date(2026, 1, 2),
+            end_date=date(2026, 1, 6),
+            state_fields=["active", "water_level"],
+            plot_mode="overlay",
+            include_farm_name=False,
+        )
+
+        assert report["chart_payload"]["labels"] == [
+            "2026-01-02",
+            "2026-01-03",
+            "2026-01-04",
+            "2026-01-05",
+            "2026-01-06",
+        ]
+        active_panel = report["chart_payload"]["panels"][0]
+        water_level_panel = report["chart_payload"]["panels"][1]
+        assert active_panel["title"] == "Active State Over Time"
+        assert active_panel["value_labels"] == {"0": "Inactive", "1": "Active"}
+        assert active_panel["datasets"] == [
+            {"label": "History Tank", "values": [1, 1, 1, 1, 1]},
+            {"label": "History Trough", "values": [None, None, 1, 1, 1]},
+        ]
+        assert water_level_panel["value_labels"] == {
+            "0": "Empty",
+            "1": "Low",
+            "2": "Half",
+            "3": "High",
+            "4": "Full",
+        }
+        assert water_level_panel["datasets"] == [
+            {"label": "History Tank", "values": [1, 2, 2, 2, 2]},
+            {"label": "History Trough", "values": [None, None, 4, 4, 4]},
+        ]
+
+        tank_summary = next(row for row in report["summary_rows"] if row["asset_name"] == "History Tank")
+        assert tank_summary["history_event_count"] == 2
+        assert tank_summary["active_days"] == 5
+        assert tank_summary["inactive_days"] == 0
+        assert tank_summary["status_change_count"] == 1
+        assert tank_summary["water_level_change_count"] == 1
+        assert tank_summary["dominant_status_label"] == "Operational"
+        assert tank_summary["dominant_water_level_label"] == "Half"
+        assert tank_summary["empty_low_days"] == 1
+        assert tank_summary["half_or_better_days"] == 4
+
+        trough_summary = next(
+            row for row in report["summary_rows"] if row["asset_name"] == "History Trough"
+        )
+        assert trough_summary["first_observed_date"] == "2026-01-04"
+        assert trough_summary["history_event_count"] == 1
+        assert trough_summary["active_days"] == 3
+        assert trough_summary["half_or_better_days"] == 3
+
+
+def test_build_water_asset_state_report_supports_asset_plot_mode(app):
+    with app.app_context():
+        farm = Farm(name="Water Asset Plot Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        tank = WaterAsset(
+            farm_id=farm.id,
+            name="Status Tank",
+            asset_type="tank",
+            active=True,
+            status="leaking",
+            water_level="half",
+        )
+        db.session.add(tank)
+        db.session.flush()
+        db.session.add_all(
+            [
+                WaterAssetStateHistory(
+                    water_asset_id=tank.id,
+                    farm_id=farm.id,
+                    change_type="created",
+                    changed_at=datetime(2026, 2, 1, 8, 0, tzinfo=timezone.utc),
+                    active=True,
+                    status="operational",
+                    water_level="half",
+                ),
+                WaterAssetStateHistory(
+                    water_asset_id=tank.id,
+                    farm_id=farm.id,
+                    change_type="updated",
+                    changed_at=datetime(2026, 2, 3, 8, 0, tzinfo=timezone.utc),
+                    previous_active=True,
+                    previous_status="operational",
+                    previous_water_level="half",
+                    active=True,
+                    status="leaking",
+                    water_level="half",
+                ),
+            ]
+        )
+        db.session.commit()
+
+        report = build_water_asset_state_report(
+            assets=[tank],
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 2, 3),
+            state_fields=["status"],
+            plot_mode="asset",
+            include_farm_name=False,
+        )
+
+        assert report["chart_payload"]["plot_mode"] == "asset"
+        assert report["chart_payload"]["panels"] == [
+            {
+                "id": "status:Status Tank | Status",
+                "title": "Status Tank | Status",
+                "field": "status",
+                "y_axis_label": "Status",
+                "y_min": 0,
+                "y_max": 1,
+                "value_labels": {"0": "Leaking", "1": "Operational"},
+                "datasets": [{"label": "Status Tank", "values": [1, 1, 0]}],
+            }
+        ]
 
 
 def test_build_lsu_paddock_tracking_report_filters_species_and_summarizes(app):

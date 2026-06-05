@@ -7,7 +7,12 @@ from app.modules.analytics.constants import (
     LSU_PADDOCK_TRACKING_DEFAULT_METRIC,
     LSU_PADDOCK_TRACKING_METRIC_LABELS,
     LSU_PADDOCK_TRACKING_PLOT_MODES,
+    WATER_ASSET_ANALYTICS_PLOT_MODES,
+    WATER_ASSET_CURRENT_ACTIVE_FILTERS,
+    WATER_ASSET_STATE_DEFAULT_FIELDS,
+    WATER_ASSET_STATE_FIELD_LABELS,
 )
+from app.models.water import WATER_ASSET_TYPES
 
 
 def parse_query_date(value: str | None) -> date | None:
@@ -42,6 +47,47 @@ def normalize_lsu_paddock_tracking_metric(value: str | None) -> str:
 def normalize_lsu_paddock_tracking_plot_mode(value: str | None) -> str:
     candidate = (value or "").strip().lower()
     if candidate not in LSU_PADDOCK_TRACKING_PLOT_MODES:
+        return "overlay"
+    return candidate
+
+
+def normalize_water_asset_analytics_asset_types(raw_values: list[str]) -> list[str]:
+    selected = []
+    seen = set()
+    for raw in raw_values:
+        value = (raw or "").strip().lower()
+        if value not in WATER_ASSET_TYPES or value in seen:
+            continue
+        selected.append(value)
+        seen.add(value)
+    return selected
+
+
+def normalize_water_asset_current_active_filter(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate not in WATER_ASSET_CURRENT_ACTIVE_FILTERS:
+        return "all"
+    return candidate
+
+
+def normalize_water_asset_state_fields(raw_values: list[str]) -> list[str]:
+    selected = []
+    seen = set()
+    for raw in raw_values:
+        value = (raw or "").strip().lower()
+        if value not in WATER_ASSET_STATE_FIELD_LABELS or value in seen:
+            continue
+        selected.append(value)
+        seen.add(value)
+
+    if not selected:
+        return list(WATER_ASSET_STATE_DEFAULT_FIELDS)
+    return selected
+
+
+def normalize_water_asset_analytics_plot_mode(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate not in WATER_ASSET_ANALYTICS_PLOT_MODES:
         return "overlay"
     return candidate
 

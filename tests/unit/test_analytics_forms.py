@@ -4,6 +4,10 @@ from app.modules.analytics.forms import (
     normalize_lsu_paddock_tracking_metric,
     normalize_lsu_paddock_tracking_plot_mode,
     normalize_journal_tags,
+    normalize_water_asset_analytics_asset_types,
+    normalize_water_asset_analytics_plot_mode,
+    normalize_water_asset_current_active_filter,
+    normalize_water_asset_state_fields,
     parse_query_date,
 )
 
@@ -25,6 +29,25 @@ def test_normalize_lsu_paddock_tracking_controls_default_safely():
     assert normalize_lsu_paddock_tracking_metric("bad") == "lsu_per_ha"
     assert normalize_lsu_paddock_tracking_plot_mode("paddock") == "paddock"
     assert normalize_lsu_paddock_tracking_plot_mode("bad") == "overlay"
+
+
+def test_normalize_water_asset_analytics_controls_default_safely():
+    assert normalize_water_asset_analytics_asset_types(
+        ["Tank", "bad", "tank", "trough"]
+    ) == ["tank", "trough"]
+    assert normalize_water_asset_current_active_filter("inactive") == "inactive"
+    assert normalize_water_asset_current_active_filter("bad") == "all"
+    assert normalize_water_asset_state_fields(["status", "bad", "status", "active"]) == [
+        "status",
+        "active",
+    ]
+    assert normalize_water_asset_state_fields(["bad"]) == [
+        "active",
+        "status",
+        "water_level",
+    ]
+    assert normalize_water_asset_analytics_plot_mode("asset") == "asset"
+    assert normalize_water_asset_analytics_plot_mode("bad") == "overlay"
 
 
 def test_normalize_journal_tags_deduplicates_and_normalizes():

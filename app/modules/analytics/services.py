@@ -12,12 +12,16 @@ from app.models import (
     GrazingSession,
     JournalEntry,
     Paddock,
+    WaterAsset,
+    WaterAssetStateHistory,
 )
 from app.modules.analytics.constants import (
     LSU_PADDOCK_TRACKING_METRIC_AXIS_LABELS,
     LSU_PADDOCK_TRACKING_METRIC_LABELS,
+    WATER_ASSET_STATE_FIELD_LABELS,
 )
 from app.services.mob_event_service import MobEventService
+from app.services.water_network_service import WaterNetworkService
 
 
 def create_journal_entry(
@@ -75,6 +79,398 @@ def _paddock_label(paddock: Paddock, include_farm_name: bool) -> str:
     if include_farm_name:
         return f"{paddock.farm.name} | {paddock.name}"
     return paddock.name
+
+
+def _choice_label(value: str | None) -> str:
+    if value is None:
+        return "N/A"
+    return value.replace("_", " ").title()
+
+
+def _water_asset_label(asset: WaterAsset, include_farm_name: bool) -> str:
+    if include_farm_name and asset.farm:
+        return f"{asset.farm.name} | {asset.name}"
+    return asset.name
+
+
+def _water_asset_state_from_row(row: WaterAssetStateHistory) -> dict:
+    return {
+        "active": bool(row.active),
+        "status": row.status,
+        "water_level": row.water_level,
+    }
+
+
+def _water_asset_history_rows(
+    *,
+    water_asset_ids: list[str],
+    end_date: date,
+) -> list[WaterAssetStateHistory]:
+    if not water_asset_ids:
+        return []
+
+    end_dt = datetime.combine(end_date + timedelta(days=1), time.min)
+    return (
+        WaterAssetStateHistory.query.filter(
+            WaterAssetStateHistory.water_asset_id.in_(water_asset_ids),
+            WaterAssetStateHistory.changed_at < end_dt,
+        )
+        .order_by(
+            WaterAssetStateHistory.water_asset_id.asc(),
+            WaterAssetStateHistory.changed_at.asc(),
+            WaterAssetStateHistory.id.asc(),
+        )
+        .all()
+    )
+
+
+def _water_asset_category_maps(
+    *,
+    field: str,
+    assets: list[WaterAsset],
+    history_rows: list[WaterAssetStateHistory],
+) -> dict:
+    if field == "active":
+        return {
+            "value_to_index": {False: 0, True: 1},
+            "index_to_label": {0: "Inactive", 1: "Active"},
+        }
+
+    if field == "water_level":
+        ordered_values = list(WaterNetworkService.WATER_LEVEL_OPTIONS)
+        observed_values = [
+            *(asset.water_level for asset in assets),
+            *(row.water_level for row in history_rows),
+        ]
+        discovered_values = {
+            value
+            for value in observed_values
+            if value
+        }
+        ordered_values.extend(sorted(discovered_values - set(ordered_values)))
+    else:
+        observed_values = [
+            *(asset.status for asset in assets),
+            *(row.status for row in history_rows),
+        ]
+        discovered_values = {
+            value
+            for value in observed_values
+            if value
+        }
+        ordered_values = sorted(discovered_values)
+
+    value_to_index = {value: index for index, value in enumerate(ordered_values)}
+    return {
+        "value_to_index": value_to_index,
+        "index_to_label": {index: _choice_label(value) for value, index in value_to_index.items()},
+    }
+
+
+def _build_water_asset_daily_states(
+    *,
+    history_rows: list[WaterAssetStateHistory],
+    start_date: date,
+    end_date: date,
+) -> tuple[list[dict | None], list[WaterAssetStateHistory]]:
+    start_dt = datetime.combine(start_date, time.min)
+    end_dt = datetime.combine(end_date + timedelta(days=1), time.min)
+    current_state = None
+    in_range_rows = []
+
+    for row in history_rows:
+        changed_at = _normalize_datetime(row.changed_at)
+        if changed_at is None:
+            continue
+        if changed_at < start_dt:
+            current_state = _water_asset_state_from_row(row)
+        elif changed_at < end_dt:
+            in_range_rows.append(row)
+
+    daily_states = []
+    row_index = 0
+    cursor = start_date
+    while cursor <= end_date:
+        day_end = datetime.combine(cursor + timedelta(days=1), time.min)
+        while row_index < len(in_range_rows):
+            row = in_range_rows[row_index]
+            changed_at = _normalize_datetime(row.changed_at)
+            if changed_at is None or changed_at >= day_end:
+                break
+            current_state = _water_asset_state_from_row(row)
+            row_index += 1
+        daily_states.append(current_state.copy() if current_state is not None else None)
+        cursor += timedelta(days=1)
+
+    return daily_states, in_range_rows
+
+
+def _dominant_value(
+    counts: dict,
+    *,
+    value_order: list | tuple,
+):
+    if not counts:
+        return None
+    order_by_value = {value: index for index, value in enumerate(value_order)}
+    return sorted(
+        counts,
+        key=lambda value: (
+            -counts[value],
+            order_by_value.get(value, len(order_by_value)),
+            str(value),
+        ),
+    )[0]
+
+
+def _state_value_counts(daily_states: list[dict | None], field: str) -> dict:
+    counts = defaultdict(int)
+    for state in daily_states:
+        if state is None:
+            continue
+        value = state.get(field)
+        if value is None:
+            continue
+        counts[value] += 1
+    return counts
+
+
+def _water_asset_change_count(
+    rows: list[WaterAssetStateHistory],
+    previous_field: str,
+    field: str,
+) -> int:
+    total = 0
+    for row in rows:
+        if row.change_type != "updated":
+            continue
+        if getattr(row, previous_field) != getattr(row, field):
+            total += 1
+    return total
+
+
+def _water_asset_summary_row(
+    *,
+    asset: WaterAsset,
+    daily_states: list[dict | None],
+    in_range_rows: list[WaterAssetStateHistory],
+    labels: list[str],
+    include_farm_name: bool,
+) -> dict:
+    known_indexes = [index for index, state in enumerate(daily_states) if state is not None]
+    latest_state = daily_states[known_indexes[-1]] if known_indexes else None
+    active_counts = _state_value_counts(daily_states, "active")
+    status_counts = _state_value_counts(daily_states, "status")
+    water_level_counts = _state_value_counts(daily_states, "water_level")
+    dominant_status = _dominant_value(status_counts, value_order=sorted(status_counts))
+    dominant_water_level = _dominant_value(
+        water_level_counts,
+        value_order=WaterNetworkService.WATER_LEVEL_OPTIONS,
+    )
+
+    latest_active = latest_state.get("active") if latest_state else None
+    latest_status = latest_state.get("status") if latest_state else None
+    latest_water_level = latest_state.get("water_level") if latest_state else None
+    return {
+        "asset_name": _water_asset_label(asset, include_farm_name),
+        "asset_type_label": WaterNetworkService.ASSET_TYPE_LABELS.get(
+            asset.asset_type,
+            asset.asset_type,
+        ),
+        "latest_active_label": (
+            "Active" if latest_active is True else "Inactive" if latest_active is False else "N/A"
+        ),
+        "latest_status_label": _choice_label(latest_status),
+        "latest_water_level_label": _choice_label(latest_water_level),
+        "first_observed_date": labels[known_indexes[0]] if known_indexes else None,
+        "last_observed_date": labels[known_indexes[-1]] if known_indexes else None,
+        "history_event_count": len(in_range_rows),
+        "active_days": active_counts.get(True, 0),
+        "inactive_days": active_counts.get(False, 0),
+        "status_change_count": _water_asset_change_count(
+            in_range_rows,
+            "previous_status",
+            "status",
+        ),
+        "water_level_change_count": _water_asset_change_count(
+            in_range_rows,
+            "previous_water_level",
+            "water_level",
+        ),
+        "dominant_status_label": _choice_label(dominant_status),
+        "dominant_water_level_label": _choice_label(dominant_water_level),
+        "empty_low_days": sum(
+            count for value, count in water_level_counts.items() if value in {"empty", "low"}
+        ),
+        "half_or_better_days": sum(
+            count
+            for value, count in water_level_counts.items()
+            if value in {"half", "high", "full"}
+        ),
+    }
+
+
+def _water_asset_chart_values(
+    *,
+    daily_states: list[dict | None],
+    field: str,
+    value_to_index: dict,
+) -> list[int | None]:
+    values = []
+    for state in daily_states:
+        if state is None:
+            values.append(None)
+            continue
+        value = state.get(field)
+        if value is None:
+            values.append(None)
+            continue
+        if field == "active":
+            values.append(1 if bool(value) else 0)
+        else:
+            values.append(value_to_index.get(value))
+    return values
+
+
+def _water_asset_chart_panel(
+    *,
+    field: str,
+    title: str,
+    datasets: list[dict],
+    index_to_label: dict,
+) -> dict:
+    return {
+        "id": f"{field}:{title}",
+        "title": title,
+        "field": field,
+        "y_axis_label": WATER_ASSET_STATE_FIELD_LABELS[field],
+        "y_min": 0,
+        "y_max": max(index_to_label) if index_to_label else 0,
+        "value_labels": {str(index): label for index, label in index_to_label.items()},
+        "datasets": datasets,
+    }
+
+
+def build_water_asset_state_report(
+    *,
+    assets: list[WaterAsset],
+    start_date: date,
+    end_date: date,
+    state_fields: list[str],
+    plot_mode: str,
+    include_farm_name: bool,
+) -> dict:
+    labels = []
+    cursor = start_date
+    while cursor <= end_date:
+        labels.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+
+    if not assets:
+        return {
+            "chart_payload": {"labels": labels, "plot_mode": plot_mode, "panels": []},
+            "summary_rows": [],
+            "has_history": False,
+        }
+
+    water_asset_ids = [str(asset.id) for asset in assets]
+    history_rows = _water_asset_history_rows(
+        water_asset_ids=water_asset_ids,
+        end_date=end_date,
+    )
+    rows_by_asset_id: dict[str, list[WaterAssetStateHistory]] = defaultdict(list)
+    for row in history_rows:
+        rows_by_asset_id[str(row.water_asset_id)].append(row)
+
+    category_maps = {
+        field: _water_asset_category_maps(field=field, assets=assets, history_rows=history_rows)
+        for field in state_fields
+    }
+    state_series_by_asset_id = {}
+    summary_rows = []
+    for asset in assets:
+        asset_id = str(asset.id)
+        daily_states, in_range_rows = _build_water_asset_daily_states(
+            history_rows=rows_by_asset_id.get(asset_id, []),
+            start_date=start_date,
+            end_date=end_date,
+        )
+        state_series_by_asset_id[asset_id] = {
+            "asset": asset,
+            "daily_states": daily_states,
+        }
+        summary_rows.append(
+            _water_asset_summary_row(
+                asset=asset,
+                daily_states=daily_states,
+                in_range_rows=in_range_rows,
+                labels=labels,
+                include_farm_name=include_farm_name,
+            )
+        )
+
+    panels = []
+    if plot_mode == "asset":
+        for asset in assets:
+            asset_id = str(asset.id)
+            asset_label = _water_asset_label(asset, include_farm_name)
+            daily_states = state_series_by_asset_id[asset_id]["daily_states"]
+            for field in state_fields:
+                category_map = category_maps[field]
+                values = _water_asset_chart_values(
+                    daily_states=daily_states,
+                    field=field,
+                    value_to_index=category_map["value_to_index"],
+                )
+                if not any(value is not None for value in values):
+                    continue
+                panels.append(
+                    _water_asset_chart_panel(
+                        field=field,
+                        title=f"{asset_label} | {WATER_ASSET_STATE_FIELD_LABELS[field]}",
+                        datasets=[{"label": asset_label, "values": values}],
+                        index_to_label=category_map["index_to_label"],
+                    )
+                )
+    else:
+        for field in state_fields:
+            category_map = category_maps[field]
+            datasets = []
+            for asset in assets:
+                asset_id = str(asset.id)
+                values = _water_asset_chart_values(
+                    daily_states=state_series_by_asset_id[asset_id]["daily_states"],
+                    field=field,
+                    value_to_index=category_map["value_to_index"],
+                )
+                if not any(value is not None for value in values):
+                    continue
+                datasets.append(
+                    {
+                        "label": _water_asset_label(asset, include_farm_name),
+                        "values": values,
+                    }
+                )
+            if datasets:
+                panels.append(
+                    _water_asset_chart_panel(
+                        field=field,
+                        title=f"{WATER_ASSET_STATE_FIELD_LABELS[field]} Over Time",
+                        datasets=datasets,
+                        index_to_label=category_map["index_to_label"],
+                    )
+                )
+
+    summary_rows.sort(key=lambda row: (row["asset_name"].lower(), row["asset_type_label"].lower()))
+    return {
+        "chart_payload": {
+            "labels": labels,
+            "plot_mode": plot_mode,
+            "panels": panels,
+        },
+        "summary_rows": summary_rows,
+        "has_history": bool(history_rows),
+    }
 
 
 def _build_lsu_day_stats(*, rows: list[dict], day: date, area_ha: float) -> dict:

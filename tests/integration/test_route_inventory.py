@@ -5,6 +5,7 @@ def test_core_route_inventory(app):
     assert "auth.login" in endpoints
     assert "web.dashboard" in endpoints
     assert "web.analytics_lsu_paddock_tracking" in endpoints
+    assert "web.analytics_water_assets" in endpoints
     assert "tasks.index" in endpoints
     assert "calendar.index" in endpoints
     assert "finance.cash_flow" in endpoints

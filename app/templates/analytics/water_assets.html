@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Water Assets | Analytics | AgriTrack{% endblock %}
+{% block content %}
+<a class="btn btn-secondary" href="{{ url_for('web.analytics_landing') }}">Back To Analytics</a>
+<h1>Water Assets</h1>
+<p class="muted">
+  Review recorded water asset active state, status, and water level history over time.
+</p>
+
+<section class="card">
+  <h2>Filters</h2>
+  <form method="get" action="{{ url_for('web.analytics_water_assets') }}" class="grid-form">
+    <div class="grid-two">
+      <label>Farm
+        <select name="farm_id">
+          <option value="">All farms</option>
+          {% for farm in filter_options.farms %}
+          <option value="{{ farm.id }}" {% if selected_filters.farm_id == farm.id %}selected{% endif %}>
+            {{ farm.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Current Active State
+        <select name="current_active">
+          {% for option in filter_options.current_active_options %}
+          <option value="{{ option.value }}" {% if option.value == current_active %}selected{% endif %}>
+            {{ option.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="grid-two">
+      <label>Current Status
+        <select name="current_status">
+          <option value="">All statuses</option>
+          {% for option in filter_options.statuses %}
+          <option value="{{ option.value }}" {% if selected_filters.current_status == option.value %}selected{% endif %}>
+            {{ option.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Current Water Level
+        <select name="current_water_level">
+          <option value="">All water levels</option>
+          {% for option in filter_options.water_levels %}
+          <option value="{{ option.value }}" {% if selected_filters.current_water_level == option.value %}selected{% endif %}>
+            {{ option.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="grid-two">
+      <label>Plot Layout
+        <select name="plot_mode">
+          {% for option in filter_options.plot_modes %}
+          <option value="{{ option.value }}" {% if option.value == plot_mode %}selected{% endif %}>
+            {{ option.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <span></span>
+    </div>
+
+    <div class="grid-two">
+      <label>Start Date
+        <input type="date" name="start_date" value="{{ start_date }}" />
+      </label>
+      <label>End Date
+        <input type="date" name="end_date" value="{{ end_date }}" />
+      </label>
+    </div>
+
+    <fieldset class="analytics-group-by">
+      <legend>Asset Types</legend>
+      <div class="analytics-checkbox-grid">
+        {% for option in filter_options.asset_types %}
+        <label class="analytics-checkbox">
+          <input
+            type="checkbox"
+            name="asset_type"
+            value="{{ option.value }}"
+            {% if option.value in selected_asset_types %}checked{% endif %}
+          />
+          <span>{{ option.label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <fieldset class="analytics-group-by">
+      <legend>Tracked Fields</legend>
+      <div class="analytics-checkbox-grid">
+        {% for option in filter_options.state_fields %}
+        <label class="analytics-checkbox">
+          <input
+            type="checkbox"
+            name="state_field"
+            value="{{ option.value }}"
+            {% if option.value in state_fields %}checked{% endif %}
+          />
+          <span>{{ option.label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <label>Water Assets
+      <select name="water_asset_id" multiple size="8" class="analytics-multi-select">
+        {% for option in filter_options.assets %}
+        <option value="{{ option.id }}" {% if option.id in selected_water_asset_ids %}selected{% endif %}>
+          {{ option.label }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.analytics_water_assets') }}">Clear</a>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Trend Charts</h2>
+  <p class="muted">Window: {{ start_date }} to {{ end_date }}</p>
+  {% if chart_payload.panels and selected_water_asset_ids %}
+  <div class="grazing-chart-grid">
+    {% for panel in chart_payload.panels %}
+    <article class="grazing-chart-card">
+      <h3>{{ panel.title }}</h3>
+      <div class="analytics-chart-wrap">
+        <canvas id="waterAssetChart{{ loop.index0 }}" data-panel-index="{{ loop.index0 }}" role="img" aria-label="{{ panel.title }} line graph"></canvas>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>No water asset state history is available for the selected filters.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Asset Statistics</h2>
+  <div class="analytics-table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Asset</th>
+          <th>Type</th>
+          <th>Latest Active</th>
+          <th>Latest Status</th>
+          <th>Latest Level</th>
+          <th>First Observed</th>
+          <th>Last Observed</th>
+          <th>Events</th>
+          <th>Active Days</th>
+          <th>Inactive Days</th>
+          <th>Status Changes</th>
+          <th>Level Changes</th>
+          <th>Dominant Status</th>
+          <th>Dominant Level</th>
+          <th>Empty/Low Days</th>
+          <th>Half+ Days</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in summary_rows %}
+        <tr>
+          <td>{{ row.asset_name }}</td>
+          <td>{{ row.asset_type_label }}</td>
+          <td>{{ row.latest_active_label }}</td>
+          <td>{{ row.latest_status_label }}</td>
+          <td>{{ row.latest_water_level_label }}</td>
+          <td>{{ row.first_observed_date or "N/A" }}</td>
+          <td>{{ row.last_observed_date or "N/A" }}</td>
+          <td>{{ row.history_event_count }}</td>
+          <td>{{ row.active_days }}</td>
+          <td>{{ row.inactive_days }}</td>
+          <td>{{ row.status_change_count }}</td>
+          <td>{{ row.water_level_change_count }}</td>
+          <td>{{ row.dominant_status_label }}</td>
+          <td>{{ row.dominant_water_level_label }}</td>
+          <td>{{ row.empty_low_days }}</td>
+          <td>{{ row.half_or_better_days }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="16">No water assets match the selected filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if chart_payload.panels and selected_water_asset_ids %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>
+{% endif %}
+<script id="waterAssetAnalyticsData" type="application/json">{{ chart_payload | tojson }}</script>
+<script src="{{ url_for('static', filename='analytics_water_assets.js') }}"></script>
+{% endblock %}

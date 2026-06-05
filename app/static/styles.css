@@ -695,6 +695,11 @@ a { color: #1b5f49; }
   min-height: 12rem;
 }
 
+.analytics-table-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
 .grazing-chart-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

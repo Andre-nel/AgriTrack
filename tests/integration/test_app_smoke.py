@@ -227,10 +227,15 @@ def test_analytics_pages_load(client):
     response = client.get("/analytics")
     assert response.status_code == 200
     assert b"Analytics" in response.data
+    assert b"Water Assets" in response.data
 
     response = client.get("/analytics/stock-tracking")
     assert response.status_code == 200
     assert b"Stock Tracking" in response.data
+
+    response = client.get("/analytics/water-assets")
+    assert response.status_code == 200
+    assert b"Water Assets" in response.data
 
     response = client.get("/analytics/grazing-management")
     assert response.status_code == 200

@@ -4,19 +4,27 @@ from decimal import Decimal, InvalidOperation
 from flask import flash, redirect, render_template, request, url_for
 
 from app.extensions import db
-from app.models import AnimalGroupType, Farm, Paddock, StockLedgerEntry
+from app.models import AnimalGroupType, Farm, Paddock, StockLedgerEntry, WaterAsset
 from app.modules.analytics.constants import (
     ANALYTICS_GROUP_LABELS,
     ANALYTICS_GROUP_ORDER,
     LSU_PADDOCK_TRACKING_METRIC_LABELS,
     LSU_PADDOCK_TRACKING_METRIC_ORDER,
     LSU_PADDOCK_TRACKING_PLOT_MODES,
+    WATER_ASSET_ANALYTICS_PLOT_MODES,
+    WATER_ASSET_CURRENT_ACTIVE_FILTERS,
+    WATER_ASSET_STATE_FIELD_LABELS,
+    WATER_ASSET_STATE_FIELD_ORDER,
 )
 from app.modules.analytics.forms import (
     journal_return_query_args,
     normalize_analytics_group_by,
     normalize_lsu_paddock_tracking_metric,
     normalize_lsu_paddock_tracking_plot_mode,
+    normalize_water_asset_analytics_asset_types,
+    normalize_water_asset_analytics_plot_mode,
+    normalize_water_asset_current_active_filter,
+    normalize_water_asset_state_fields,
     parse_query_date,
 )
 from app.modules.analytics.presenters import (
@@ -27,10 +35,22 @@ from app.modules.analytics.presenters import (
 )
 from app.modules.analytics.services import (
     build_lsu_paddock_tracking_report,
+    build_water_asset_state_report,
     create_journal_entry,
     earliest_lsu_paddock_breakdown_date,
     lsu_paddock_breakdown_uncovered_paddocks,
 )
+from app.services.water_network_service import WaterNetworkService
+
+
+def _choice_filter_label(value: str) -> str:
+    return value.replace("_", " ").title()
+
+
+def _water_asset_filter_label(asset: WaterAsset, include_farm_name: bool) -> str:
+    if include_farm_name and asset.farm:
+        return f"{asset.farm.name} | {asset.name}"
+    return asset.name
 
 
 def register_legacy_routes(bp) -> None:
@@ -187,6 +207,149 @@ def register_legacy_routes(bp) -> None:
             end_date=end_date,
             chart_data=chart_data,
             latest_totals=latest_totals,
+        )
+
+    @bp.get("/analytics/water-assets")
+    def analytics_water_assets():
+        selected_filters = {
+            "farm_id": (request.args.get("farm_id") or "").strip(),
+            "current_status": (request.args.get("current_status") or "").strip(),
+            "current_water_level": (request.args.get("current_water_level") or "").strip(),
+        }
+        selected_asset_types = normalize_water_asset_analytics_asset_types(
+            request.args.getlist("asset_type")
+        )
+        requested_water_asset_ids = {
+            (value or "").strip()
+            for value in request.args.getlist("water_asset_id")
+            if (value or "").strip()
+        }
+        current_active = normalize_water_asset_current_active_filter(
+            request.args.get("current_active")
+        )
+        state_fields = normalize_water_asset_state_fields(request.args.getlist("state_field"))
+        plot_mode = normalize_water_asset_analytics_plot_mode(request.args.get("plot_mode"))
+        today = date.today()
+
+        try:
+            start_date = parse_query_date(request.args.get("start_date")) or (
+                today - timedelta(days=364)
+            )
+            end_date = parse_query_date(request.args.get("end_date")) or today
+        except ValueError:
+            flash("Water asset analytics dates must be valid (YYYY-MM-DD)", "error")
+            return redirect(url_for("web.analytics_water_assets"))
+
+        if end_date < start_date:
+            flash("Water asset analytics end date must be on or after the start date", "error")
+            return redirect(url_for("web.analytics_water_assets"))
+
+        farms = Farm.query.order_by(Farm.name).all()
+        asset_query = WaterAsset.query.join(Farm).order_by(
+            Farm.name.asc(),
+            WaterAsset.asset_type.asc(),
+            WaterAsset.name.asc(),
+        )
+        if selected_filters["farm_id"]:
+            asset_query = asset_query.filter(WaterAsset.farm_id == selected_filters["farm_id"])
+        if selected_asset_types:
+            asset_query = asset_query.filter(WaterAsset.asset_type.in_(selected_asset_types))
+        if current_active == "active":
+            asset_query = asset_query.filter(WaterAsset.active.is_(True))
+        elif current_active == "inactive":
+            asset_query = asset_query.filter(WaterAsset.active.is_(False))
+        if selected_filters["current_status"]:
+            asset_query = asset_query.filter(WaterAsset.status == selected_filters["current_status"])
+        if selected_filters["current_water_level"]:
+            asset_query = asset_query.filter(
+                WaterAsset.water_level == selected_filters["current_water_level"]
+            )
+
+        scope_assets = asset_query.all()
+        valid_scope_ids = {str(asset.id) for asset in scope_assets}
+        if requested_water_asset_ids:
+            selected_assets = [
+                asset
+                for asset in scope_assets
+                if str(asset.id) in requested_water_asset_ids & valid_scope_ids
+            ]
+            if not selected_assets:
+                selected_assets = scope_assets
+        else:
+            selected_assets = scope_assets
+
+        selected_water_asset_ids = [str(asset.id) for asset in selected_assets]
+        include_farm_name = len({str(asset.farm_id) for asset in scope_assets}) > 1
+        report = build_water_asset_state_report(
+            assets=selected_assets,
+            start_date=start_date,
+            end_date=end_date,
+            state_fields=state_fields,
+            plot_mode=plot_mode,
+            include_farm_name=include_farm_name,
+        )
+        all_status_options = sorted(
+            {
+                option
+                for options in WaterNetworkService.STATUS_OPTIONS_BY_TYPE.values()
+                for option in options
+            }
+            | {asset.status for asset in scope_assets if asset.status}
+        )
+
+        filter_options = {
+            "farms": [{"id": str(farm.id), "name": farm.name} for farm in farms],
+            "asset_types": [
+                {
+                    "value": asset_type,
+                    "label": WaterNetworkService.ASSET_TYPE_LABELS.get(asset_type, asset_type),
+                }
+                for asset_type in WaterNetworkService.ASSET_TYPES
+            ],
+            "assets": [
+                {
+                    "id": str(asset.id),
+                    "label": _water_asset_filter_label(asset, include_farm_name),
+                    "farm_name": asset.farm.name if asset.farm else "",
+                }
+                for asset in scope_assets
+            ],
+            "current_active_options": [
+                {"value": value, "label": label}
+                for value, label in WATER_ASSET_CURRENT_ACTIVE_FILTERS.items()
+            ],
+            "statuses": [
+                {"value": value, "label": _choice_filter_label(value)}
+                for value in all_status_options
+            ],
+            "water_levels": [
+                {"value": value, "label": _choice_filter_label(value)}
+                for value in WaterNetworkService.WATER_LEVEL_OPTIONS
+            ],
+            "state_fields": [
+                {"value": value, "label": WATER_ASSET_STATE_FIELD_LABELS[value]}
+                for value in WATER_ASSET_STATE_FIELD_ORDER
+            ],
+            "plot_modes": [
+                {"value": value, "label": label}
+                for value, label in WATER_ASSET_ANALYTICS_PLOT_MODES.items()
+            ],
+        }
+
+        return render_template(
+            "analytics/water_assets.html",
+            filter_options=filter_options,
+            selected_filters=selected_filters,
+            selected_asset_types=selected_asset_types,
+            selected_water_asset_ids=selected_water_asset_ids,
+            current_active=current_active,
+            state_fields=state_fields,
+            plot_mode=plot_mode,
+            start_date=start_date,
+            end_date=end_date,
+            chart_payload=report["chart_payload"],
+            summary_rows=report["summary_rows"],
+            has_history=report["has_history"],
         )
 
     @bp.get("/analytics/lsu-paddock-tracking")
