@@ -1,5 +1,6 @@
 package com.agritrack.mobile
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.ConnectivityManager
@@ -11,6 +12,13 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -54,6 +62,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +77,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.viewinterop.AndroidView
 import com.agritrack.mobile.data.AnimalGroupTypeSummary
 import com.agritrack.mobile.data.CalendarFilterState
 import com.agritrack.mobile.data.CalendarItemSummary
@@ -101,6 +111,7 @@ import com.agritrack.mobile.data.filterWaterAssets
 import com.agritrack.mobile.data.grazingDurationDays
 import com.agritrack.mobile.data.mobPaddockGrazingStartAt
 import com.agritrack.mobile.data.mobGrazingPaddocks
+import com.agritrack.mobile.data.mobileMapFeatureCollectionJson
 import com.agritrack.mobile.data.paddockGrazing
 import com.agritrack.mobile.data.paddockMapFeature
 import com.agritrack.mobile.data.paddockStockLines
@@ -396,6 +407,7 @@ class MainActivity : ComponentActivity() {
             AgriTrackTheme {
                 AgriTrackApp(
                     state = uiState,
+                    preferSatelliteMap = uiState.connectionState != BackendConnectionState.Offline && isOnline(),
                     onBaseUrlChange = { uiState = uiState.copy(baseUrl = it) },
                     onEmailChange = { uiState = uiState.copy(email = it) },
                     onPasswordChange = { uiState = uiState.copy(password = it) },
@@ -832,6 +844,7 @@ private fun AgriTrackTheme(content: @Composable () -> Unit) {
 @Composable
 private fun AgriTrackApp(
     state: FieldUiState,
+    preferSatelliteMap: Boolean,
     onBaseUrlChange: (String) -> Unit,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
@@ -927,6 +940,7 @@ private fun AgriTrackApp(
                 AppScreen.Farm -> FarmScreen(state, onBackHome)
                 AppScreen.FarmMap -> FarmMapScreen(
                     state,
+                    preferSatelliteMap,
                     onBackHome,
                     onPaddockSelected,
                     onMobSelected,
@@ -935,6 +949,7 @@ private fun AgriTrackApp(
                 )
                 AppScreen.FarmMapFullscreen -> FarmMapFullscreenScreen(
                     state,
+                    preferSatelliteMap,
                     onBackHome,
                     onPaddockSelected,
                     onMobSelected,
@@ -1007,6 +1022,7 @@ private fun AgriTrackApp(
                     { onOpenScreen(AppScreen.Paddocks) },
                     onPaddockSelected,
                     onMobSelected,
+                    onWaterAssetSelected,
                     onOpenScreen,
                     onStartTaskForEntity,
                     onEntityNoteChange,
@@ -1326,7 +1342,7 @@ private fun DecisionFeedPanel(
         if (items.isEmpty()) {
             Text("No urgent field decisions in the cached farm snapshots.", color = Color(0xFF516052))
         }
-        items.take(6).forEach { item ->
+        items.take(12).forEach { item ->
             Surface(
                 color = if (item.severity == "high") Color(0xFFF8EAE4) else Color(0xFFFFF6DF),
                 shape = RoundedCornerShape(8.dp),
@@ -1393,6 +1409,7 @@ private fun FarmScreen(state: FieldUiState, onBackHome: () -> Unit) {
 @Composable
 private fun FarmMapScreen(
     state: FieldUiState,
+    preferSatelliteMap: Boolean,
     onBackHome: () -> Unit,
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
@@ -1404,6 +1421,7 @@ private fun FarmMapScreen(
         FarmMapContent(
             snapshot = snapshot,
             fullscreen = false,
+            preferSatelliteMap = preferSatelliteMap,
             mapModifier = Modifier.height(420.dp),
             onFullscreen = { onOpenScreen(AppScreen.FarmMapFullscreen) },
             onPaddockSelected = onPaddockSelected,
@@ -1417,6 +1435,7 @@ private fun FarmMapScreen(
 @Composable
 private fun FarmMapFullscreenScreen(
     state: FieldUiState,
+    preferSatelliteMap: Boolean,
     onBackHome: () -> Unit,
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
@@ -1434,6 +1453,7 @@ private fun FarmMapFullscreenScreen(
         FarmMapContent(
             snapshot = snapshot,
             fullscreen = true,
+            preferSatelliteMap = preferSatelliteMap,
             mapModifier = Modifier.weight(1f),
             onFullscreen = {},
             onPaddockSelected = onPaddockSelected,
@@ -1448,6 +1468,7 @@ private fun FarmMapFullscreenScreen(
 private fun FarmMapContent(
     snapshot: FarmSnapshot,
     fullscreen: Boolean,
+    preferSatelliteMap: Boolean,
     mapModifier: Modifier,
     onFullscreen: () -> Unit,
     onPaddockSelected: (String) -> Unit,
@@ -1456,18 +1477,33 @@ private fun FarmMapContent(
     onOpenScreen: (AppScreen) -> Unit,
 ) {
     var selectedMapItem by remember(snapshot.farm.id, fullscreen) { mutableStateOf<MapSelection?>(null) }
+    var satelliteUnavailable by remember(snapshot.farm.id, fullscreen) { mutableStateOf(false) }
+    LaunchedEffect(preferSatelliteMap, snapshot.mapFeatures) {
+        if (preferSatelliteMap) {
+            satelliteUnavailable = false
+        }
+    }
     snapshot.mapWarnings.forEach { warning -> Text(warning, color = Color(0xFF7A3424)) }
     if (!fullscreen) {
         OutlinedButton(onClick = onFullscreen, modifier = Modifier.fillMaxWidth()) {
             Text("Full Screen Map")
         }
     }
-    OfflineFarmMap(
-        features = snapshot.mapFeatures,
-        fullscreen = fullscreen,
-        modifier = mapModifier,
-        onSelection = { selectedMapItem = it },
-    )
+    if (preferSatelliteMap && !satelliteUnavailable && snapshot.mapFeatures.isNotEmpty()) {
+        SatelliteFarmMap(
+            features = snapshot.mapFeatures,
+            modifier = mapModifier,
+            onSelection = { selectedMapItem = it },
+            onUnavailable = { satelliteUnavailable = true },
+        )
+    } else {
+        OfflineFarmMap(
+            features = snapshot.mapFeatures,
+            fullscreen = fullscreen,
+            modifier = mapModifier,
+            onSelection = { selectedMapItem = it },
+        )
+    }
     selectedMapItem?.let { selection ->
         MapSelectionPanel(
             selection = selection,
@@ -1548,14 +1584,301 @@ private fun formatDurationDays(days: Double): String {
     return "$text $suffix"
 }
 
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun SatelliteFarmMap(
+    features: List<MapFeatureSummary>,
+    modifier: Modifier,
+    onSelection: (MapSelection) -> Unit,
+    onUnavailable: () -> Unit,
+) {
+    val featureCollectionJson = remember(features) { mobileMapFeatureCollectionJson(features) }
+    val html = remember(featureCollectionJson) { satelliteFarmMapHtml(featureCollectionJson) }
+    val pageKey = remember(featureCollectionJson) { featureCollectionJson.hashCode().toString() }
+    val latestFeatures = rememberUpdatedState(features)
+    val latestOnSelection = rememberUpdatedState(onSelection)
+    val latestOnUnavailable = rememberUpdatedState(onUnavailable)
+    var webView by remember { mutableStateOf<WebView?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            webView?.destroy()
+        }
+    }
+
+    AndroidView(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(modifier),
+        factory = { context ->
+            WebView(context).also { view ->
+                webView = view
+                view.settings.javaScriptEnabled = true
+                view.settings.domStorageEnabled = true
+                view.settings.cacheMode = WebSettings.LOAD_DEFAULT
+                view.settings.builtInZoomControls = false
+                view.settings.displayZoomControls = false
+                view.settings.allowFileAccess = false
+                view.settings.allowContentAccess = false
+                view.addJavascriptInterface(
+                    SatelliteMapBridge(
+                        onSelectionPayload = { payload ->
+                            parseSatelliteMapSelection(payload, latestFeatures.value)?.let {
+                                latestOnSelection.value(it)
+                            }
+                        },
+                        onUnavailable = { latestOnUnavailable.value() },
+                    ),
+                    "AndroidMapBridge",
+                )
+                view.webViewClient = object : WebViewClient() {
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: WebResourceError?,
+                    ) {
+                        if (request?.isForMainFrame == false || request?.url?.scheme in setOf("http", "https")) {
+                            latestOnUnavailable.value()
+                        }
+                    }
+
+                    override fun onReceivedHttpError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        errorResponse: WebResourceResponse?,
+                    ) {
+                        if (request?.isForMainFrame == false || request?.url?.scheme in setOf("http", "https")) {
+                            latestOnUnavailable.value()
+                        }
+                    }
+                }
+            }
+        },
+        update = { view ->
+            if (view.tag != pageKey) {
+                view.tag = pageKey
+                view.loadDataWithBaseURL(
+                    "https://mobile-map.agritrack.local/",
+                    html,
+                    "text/html",
+                    "UTF-8",
+                    null,
+                )
+            }
+        },
+    )
+}
+
+private class SatelliteMapBridge(
+    private val onSelectionPayload: (String) -> Unit,
+    private val onUnavailable: () -> Unit,
+) {
+    private val main = Handler(Looper.getMainLooper())
+
+    @JavascriptInterface
+    fun selectFeature(payload: String) {
+        main.post { onSelectionPayload(payload) }
+    }
+
+    @JavascriptInterface
+    fun mapUnavailable() {
+        main.post { onUnavailable() }
+    }
+}
+
+private fun parseSatelliteMapSelection(payload: String, features: List<MapFeatureSummary>): MapSelection? {
+    val json = runCatching { JSONObject(payload) }.getOrNull() ?: return null
+    val featureType = json.optString("feature_type")
+    val paddockId = json.optString("paddock_id")
+    val waterAssetId = json.optString("water_asset_id")
+    val name = json.optString("name")
+    val feature = when {
+        featureType == "water_asset" && waterAssetId.isNotBlank() ->
+            features.firstOrNull { it.featureType == "water_asset" && it.waterAssetId == waterAssetId }
+        paddockId.isNotBlank() ->
+            features.firstOrNull { it.paddockId == paddockId }
+        else ->
+            features.firstOrNull { it.featureType == featureType && it.name == name }
+    } ?: return null
+    val mobId = json.optString("mob_id")
+    val mob = mobId.takeIf { it.isNotBlank() }?.let { id ->
+        feature.mobs.firstOrNull { it.mobId == id }
+    }
+    return MapSelection(feature, mob)
+}
+
+private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
+    val safeFeatureCollectionJson = featureCollectionJson.replace("</", "<\\/")
+    return """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+          <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+          <style>
+            html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; }
+            body { background: #111816; }
+            .leaflet-container { background: #111816; font-family: system-ui, sans-serif; }
+          </style>
+        </head>
+        <body>
+          <div id="map"></div>
+          <script>
+            const AGRITRACK_FEATURES = $safeFeatureCollectionJson;
+            function notifyUnavailable() {
+              if (window.AndroidMapBridge && window.AndroidMapBridge.mapUnavailable) {
+                window.AndroidMapBridge.mapUnavailable();
+              }
+            }
+            window.addEventListener("error", notifyUnavailable, true);
+          </script>
+          <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+          <script>
+            (function () {
+              if (!window.L) {
+                notifyUnavailable();
+                return;
+              }
+
+              const map = L.map("map", {
+                zoomControl: true,
+                attributionControl: true,
+                scrollWheelZoom: true,
+                touchZoom: true,
+                maxZoom: 20
+              });
+
+              const baseLayer = L.tileLayer(
+                "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                {
+                  maxZoom: 20,
+                  attribution: "Powered by Esri | Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+                }
+              );
+              let tileErrors = 0;
+              baseLayer.on("tileerror", function () {
+                tileErrors += 1;
+                if (tileErrors >= 3) notifyUnavailable();
+              });
+              baseLayer.addTo(map);
+
+              function pressureColor(ratio) {
+                const value = Number(ratio);
+                if (!Number.isFinite(value)) return "#8F9A96";
+                if (value < 0.2) return "#38761D";
+                if (value < 0.4) return "#6AA84F";
+                if (value < 0.6) return "#B6D7A8";
+                if (value < 0.8) return "#F6B26B";
+                return "#CC0000";
+              }
+
+              function selectFeature(props, mob) {
+                if (!window.AndroidMapBridge || !window.AndroidMapBridge.selectFeature) return;
+                window.AndroidMapBridge.selectFeature(JSON.stringify({
+                  feature_type: props.feature_type || "",
+                  paddock_id: props.paddock_id || "",
+                  water_asset_id: props.feature_type === "water_asset" ? (props.id || "") : "",
+                  name: props.name || "",
+                  mob_id: mob ? (mob.mob_id || "") : ""
+                }));
+              }
+
+              function styleFeature(feature) {
+                const props = feature.properties || {};
+                if (props.feature_type === "water_connection") {
+                  return { color: "#2C7FB8", weight: 4, opacity: 0.9 };
+                }
+                return {
+                  color: "#44514D",
+                  weight: props.feature_type === "paddock" ? 2 : 1.5,
+                  opacity: 0.95,
+                  fillColor: pressureColor(props.grazing_pressure_ratio),
+                  fillOpacity: props.feature_type === "paddock" ? 0.46 : 0.18
+                };
+              }
+
+              function pointToLayer(feature, latlng) {
+                const props = feature.properties || {};
+                if (props.feature_type === "water_asset") {
+                  return L.circleMarker(latlng, {
+                    radius: 8,
+                    color: "#FFFFFF",
+                    weight: 2,
+                    fillColor: "#2563EB",
+                    fillOpacity: 1
+                  });
+                }
+                return L.circleMarker(latlng, {
+                  radius: 6,
+                  color: "#44514D",
+                  weight: 1.5,
+                  fillColor: "#8F9A96",
+                  fillOpacity: 0.9
+                });
+              }
+
+              const stockLayer = L.layerGroup();
+              const geoLayer = L.geoJSON(AGRITRACK_FEATURES, {
+                style: styleFeature,
+                pointToLayer: pointToLayer,
+                onEachFeature: function (feature, layer) {
+                  const props = feature.properties || {};
+                  if (props.name && layer.bindTooltip) {
+                    layer.bindTooltip(props.name, { sticky: true });
+                  }
+                  if (props.feature_type === "paddock" || props.feature_type === "water_asset") {
+                    layer.on("click", function () { selectFeature(props, null); });
+                  }
+                  if (props.feature_type === "paddock" && Array.isArray(props.mobs) && props.mobs.length && layer.getBounds) {
+                    const center = layer.getBounds().getCenter();
+                    props.mobs.slice(0, 4).forEach(function (mob, index) {
+                      const marker = L.circleMarker(
+                        [center.lat + index * 0.00003, center.lng + index * 0.00003],
+                        {
+                          radius: 9,
+                          color: "#FFFFFF",
+                          weight: 2,
+                          fillColor: "#8A5B2E",
+                          fillOpacity: 1
+                        }
+                      );
+                      marker.on("click", function (event) {
+                        if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
+                        selectFeature(props, mob);
+                      });
+                      stockLayer.addLayer(marker);
+                    });
+                  }
+                }
+              }).addTo(map);
+              stockLayer.addTo(map);
+
+              const bounds = geoLayer.getBounds();
+              if (bounds && bounds.isValid()) {
+                map.fitBounds(bounds, { padding: [20, 20] });
+              } else {
+                map.setView([-32.9102, 25.449], 13);
+              }
+            })();
+          </script>
+        </body>
+        </html>
+    """.trimIndent()
+}
+
 private data class MapDrawFeature(
     val source: MapFeatureSummary,
-    val polygons: List<List<Offset>>,
-    val lines: List<List<Offset>>,
-    val points: List<Offset>,
+    val polygons: List<List<MapPoint>>,
+    val lines: List<List<MapPoint>>,
+    val points: List<MapPoint>,
 )
 
-private data class MapBounds(val minX: Float, val minY: Float, val maxX: Float, val maxY: Float)
+private data class MapPoint(val x: Double, val y: Double)
+
+private data class MapBounds(val minX: Double, val minY: Double, val maxX: Double, val maxY: Double)
+
+private data class MapProjection(val scale: Double, val left: Double, val top: Double)
 
 @Composable
 private fun OfflineFarmMap(
@@ -1592,9 +1915,26 @@ private fun OfflineFarmMap(
                 }
             }
             .pointerInput(Unit) {
-                detectTransformGestures { _, gesturePan, gestureZoom, _ ->
-                    zoom = (zoom * gestureZoom).coerceIn(0.75f, 8f)
-                    pan += gesturePan
+                detectTransformGestures { gestureCenter, gesturePan, gestureZoom, _ ->
+                    val nextZoom = (zoom * gestureZoom).coerceIn(0.75f, 24f)
+                    val mapPointAtGesture = unprojectMapPoint(gestureCenter, bounds, canvasSize, zoom, pan)
+                    val projectedWithoutPan = projectMapPoint(
+                        mapPointAtGesture,
+                        bounds,
+                        canvasSize,
+                        nextZoom,
+                        Offset.Zero,
+                    )
+                    zoom = nextZoom
+                    pan = clampMapPan(
+                        bounds,
+                        canvasSize,
+                        zoom,
+                        Offset(
+                            x = gestureCenter.x + gesturePan.x - projectedWithoutPan.x,
+                            y = gestureCenter.y + gesturePan.y - projectedWithoutPan.y,
+                        ),
+                    )
                 }
             },
     ) {
@@ -1630,7 +1970,13 @@ private fun OfflineFarmMap(
             if (item.source.featureType == "paddock" && item.source.mobs.isNotEmpty()) {
                 centroid(item.polygons.firstOrNull()).let { center ->
                     item.source.mobs.take(4).forEachIndexed { index, mob ->
-                        val projected = projectMapPoint(center + Offset(index * 0.00003f, index * 0.00003f), bounds, canvasSize, zoom, pan)
+                        val projected = projectMapPoint(
+                            MapPoint(center.x + index * 0.00003, center.y + index * 0.00003),
+                            bounds,
+                            canvasSize,
+                            zoom,
+                            pan,
+                        )
                         drawCircle(Color(0xFF8A5B2E), radius = 9f, center = projected)
                         drawCircle(Color.White, radius = 4f, center = projected)
                     }
@@ -1644,9 +1990,9 @@ private fun parseMapDrawFeature(feature: MapFeatureSummary): MapDrawFeature? {
     val geometry = runCatching { JSONObject(feature.geometryJson) }.getOrNull() ?: return null
     val type = geometry.optString("type")
     val coordinates = geometry.optJSONArray("coordinates") ?: return null
-    val polygons = mutableListOf<List<Offset>>()
-    val lines = mutableListOf<List<Offset>>()
-    val points = mutableListOf<Offset>()
+    val polygons = mutableListOf<List<MapPoint>>()
+    val lines = mutableListOf<List<MapPoint>>()
+    val points = mutableListOf<MapPoint>()
     when (type) {
         "Polygon" -> parsePolygon(coordinates).firstOrNull()?.let { polygons.add(it) }
         "MultiPolygon" -> {
@@ -1666,20 +2012,20 @@ private fun parseMapDrawFeature(feature: MapFeatureSummary): MapDrawFeature? {
     return MapDrawFeature(feature, polygons, lines, points)
 }
 
-private fun parsePolygon(json: JSONArray): List<List<Offset>> = buildList {
+private fun parsePolygon(json: JSONArray): List<List<MapPoint>> = buildList {
     for (index in 0 until json.length()) {
         add(parseLine(json.getJSONArray(index)))
     }
 }
 
-private fun parseLine(json: JSONArray): List<Offset> = buildList {
+private fun parseLine(json: JSONArray): List<MapPoint> = buildList {
     for (index in 0 until json.length()) {
         add(parsePoint(json.getJSONArray(index)))
     }
 }
 
-private fun parsePoint(json: JSONArray): Offset =
-    Offset(json.optDouble(0).toFloat(), json.optDouble(1).toFloat())
+private fun parsePoint(json: JSONArray): MapPoint =
+    MapPoint(json.optDouble(0), json.optDouble(1))
 
 private fun mapBounds(features: List<MapDrawFeature>): MapBounds? {
     val paddockPoints = features
@@ -1695,18 +2041,55 @@ private fun mapBounds(features: List<MapDrawFeature>): MapBounds? {
     )
 }
 
-private fun projectMapPoint(point: Offset, bounds: MapBounds, size: IntSize, zoom: Float, pan: Offset): Offset {
-    val width = max(1f, bounds.maxX - bounds.minX)
-    val height = max(1f, bounds.maxY - bounds.minY)
-    val canvasWidth = max(1, size.width).toFloat()
-    val canvasHeight = max(1, size.height).toFloat()
-    val scale = min(canvasWidth / width, canvasHeight / height) * 0.97f * zoom
-    val left = (canvasWidth - width * scale) / 2f
-    val top = (canvasHeight - height * scale) / 2f
+private fun projectMapPoint(point: MapPoint, bounds: MapBounds, size: IntSize, zoom: Float, pan: Offset): Offset {
+    val projection = mapProjection(bounds, size, zoom)
     return Offset(
-        x = left + (point.x - bounds.minX) * scale + pan.x,
-        y = top + (bounds.maxY - point.y) * scale + pan.y,
+        x = (projection.left + (point.x - bounds.minX) * projection.scale + pan.x).toFloat(),
+        y = (projection.top + (bounds.maxY - point.y) * projection.scale + pan.y).toFloat(),
     )
+}
+
+private fun unprojectMapPoint(screen: Offset, bounds: MapBounds, size: IntSize, zoom: Float, pan: Offset): MapPoint {
+    val projection = mapProjection(bounds, size, zoom)
+    return MapPoint(
+        x = bounds.minX + (screen.x - pan.x - projection.left) / projection.scale,
+        y = bounds.maxY - (screen.y - pan.y - projection.top) / projection.scale,
+    )
+}
+
+private fun mapProjection(bounds: MapBounds, size: IntSize, zoom: Float): MapProjection {
+    val width = max(0.0000001, bounds.maxX - bounds.minX)
+    val height = max(0.0000001, bounds.maxY - bounds.minY)
+    val canvasWidth = max(1, size.width).toDouble()
+    val canvasHeight = max(1, size.height).toDouble()
+    val scale = min(canvasWidth / width, canvasHeight / height) * 0.97 * zoom
+    return MapProjection(
+        scale = scale,
+        left = (canvasWidth - width * scale) / 2.0,
+        top = (canvasHeight - height * scale) / 2.0,
+    )
+}
+
+private fun clampMapPan(bounds: MapBounds, size: IntSize, zoom: Float, pan: Offset): Offset {
+    val projection = mapProjection(bounds, size, zoom)
+    val canvasWidth = max(1, size.width).toDouble()
+    val canvasHeight = max(1, size.height).toDouble()
+    val contentWidth = (bounds.maxX - bounds.minX) * projection.scale
+    val contentHeight = (bounds.maxY - bounds.minY) * projection.scale
+    val xRange = panRange(canvasWidth, projection.left, contentWidth)
+    val yRange = panRange(canvasHeight, projection.top, contentHeight)
+    return Offset(
+        x = pan.x.coerceIn(xRange.first.toFloat(), xRange.second.toFloat()),
+        y = pan.y.coerceIn(yRange.first.toFloat(), yRange.second.toFloat()),
+    )
+}
+
+private fun panRange(canvasSize: Double, contentStart: Double, contentSize: Double): Pair<Double, Double> {
+    if (contentSize <= canvasSize) {
+        return -contentStart to canvasSize - contentStart - contentSize
+    }
+    val margin = min(canvasSize * 0.45, 160.0)
+    return margin - contentStart - contentSize to canvasSize - margin - contentStart
 }
 
 private fun findMapTap(
@@ -1717,6 +2100,15 @@ private fun findMapTap(
     pan: Offset,
     tap: Offset,
 ): MapSelection? {
+    features
+        .filter { it.source.featureType == "water_asset" && it.points.isNotEmpty() }
+        .firstOrNull { item ->
+            item.points.any { point ->
+                val projected = projectMapPoint(point, bounds, size, zoom, pan)
+                abs(projected.x - tap.x) < 32f && abs(projected.y - tap.y) < 32f
+            }
+        }?.let { return MapSelection(it.source) }
+
     val mobHit = features
         .filter { it.source.featureType == "paddock" && it.source.mobs.isNotEmpty() }
         .firstOrNull { item ->
@@ -1732,9 +2124,9 @@ private fun findMapTap(
         }?.let { MapSelection(it.source) }
 }
 
-private fun centroid(points: List<Offset>?): Offset {
-    if (points.isNullOrEmpty()) return Offset.Zero
-    return Offset(points.sumOf { it.x.toDouble() }.toFloat() / points.size, points.sumOf { it.y.toDouble() }.toFloat() / points.size)
+private fun centroid(points: List<MapPoint>?): MapPoint {
+    if (points.isNullOrEmpty()) return MapPoint(0.0, 0.0)
+    return MapPoint(points.sumOf { it.x } / points.size, points.sumOf { it.y } / points.size)
 }
 
 private fun paddockPressureColor(ratio: Double?): Color {
@@ -2486,6 +2878,7 @@ private fun PaddockDetailScreen(
     onBackToList: () -> Unit,
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
+    onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
     onEntityNoteChange: (String) -> Unit,
@@ -2521,10 +2914,13 @@ private fun PaddockDetailScreen(
                 Text("No linked water assets", color = Color(0xFF516052))
             }
             water.assets.forEach { asset ->
-                EntityCard(
+                ClickableEntityCard(
                     title = asset.name,
                     detail = "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevel ?: "unknown"}",
-                )
+                ) {
+                    onWaterAssetSelected(asset.id)
+                    onOpenScreen(AppScreen.WaterAssetDetail)
+                }
             }
         }
         SectionCard("Stock In Paddock") {
