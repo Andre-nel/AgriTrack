@@ -23,6 +23,12 @@
     data-cow-icon="{{ url_for('static', filename='cow.png') }}"
     data-sheep-icon="{{ url_for('static', filename='sheep.png') }}"
     data-goat-icon="{{ url_for('static', filename='goat.png') }}"
+    data-gate-open-icon="{{ url_for('static', filename='ranch_gate_open.svg') }}"
+    data-gate-closed-icon="{{ url_for('static', filename='ranch_gate_closed.svg') }}"
+    data-gate-create-url="{{ url_for('web.create_farm_gate_form', farm_id=farm.id) }}"
+    data-gate-detail-url-template="{{ url_for('web.farm_gate_detail', farm_id=farm.id, gate_id='__gate_id__') }}"
+    data-gate-state-url-template="{{ url_for('web.update_farm_gate_state_form', farm_id=farm.id, gate_id='__gate_id__') }}"
+    data-gate-location-url-template="{{ url_for('web.update_farm_gate_location', farm_id=farm.id, gate_id='__gate_id__') }}"
   ></div>
   <div class="map-legend map-legend-scale" aria-hidden="true">
     <span class="scale-label">Low</span>
@@ -45,6 +51,8 @@
     <span><i class="swatch water-asset-swatch"></i>Water Asset</span>
     <span><i class="swatch water-pumped-swatch"></i>Pumped Link</span>
     <span><i class="swatch water-gravity-swatch"></i>Gravity Link</span>
+    <span><i class="swatch gate-open-swatch"></i>Open Gate</span>
+    <span><i class="swatch gate-closed-swatch"></i>Closed Gate</span>
   </div>
   <p id="farm-map-status" class="muted">Loading map...</p>
 </section>
@@ -143,6 +151,16 @@
     {{ water_summary.review_asset_count }} asset(s) still need review.
   </p>
   <a class="btn" href="{{ url_for('web.farm_water_workspace', farm_id=farm.id) }}">Open Water Workspace</a>
+</section>
+
+<section class="card">
+  <div class="task-section-heading">
+    <div>
+      <h2>Paddock Gates</h2>
+      <p class="muted">{{ gate_count }} active gate(s). Manage gate placement, open/closed state, and camp connections on the gate page.</p>
+    </div>
+    <a class="btn" href="{{ url_for('web.farm_gates', farm_id=farm.id) }}">Manage Gates</a>
+  </div>
 </section>
 
 <section class="split">

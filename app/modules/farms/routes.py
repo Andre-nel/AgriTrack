@@ -1,13 +1,15 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
+import xml.etree.ElementTree as ET
 
-from flask import current_app, flash, redirect, render_template, request, url_for
+from flask import current_app, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, RainfallRecord
+from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, PaddockGate, RainfallRecord
 from app.modules.farms.forms import parse_mob_lines, parse_paddock_lines, parse_placements
 from app.services.farm_deletion_service import FarmDeletionService
+from app.services.gate_service import GateService
 from app.services.movement_service import MovementService
 from app.services.paddock_service import PaddockService
 from app.services.reporting_service import ReportingService
@@ -16,6 +18,54 @@ from app.services.water_network_service import WaterNetworkService
 
 def _active_mobs_for_farm(farm_id: str) -> list[Mob]:
     return Mob.query.filter_by(farm_id=farm_id, status="active").order_by(Mob.name).all()
+
+
+def _parse_gate_event_time(value: str | None) -> datetime | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _gate_closure_choices_from_form() -> list[dict]:
+    choices = []
+    for key, value in request.form.items():
+        if not key.startswith("closure_choice:"):
+            continue
+        mob_id = key.split(":", 1)[1].strip()
+        component_paddock_id = (value or "").strip()
+        if mob_id and component_paddock_id:
+            choices.append(
+                {
+                    "mob_id": mob_id,
+                    "component_paddock_id": component_paddock_id,
+                }
+            )
+    return choices
+
+
+def _gate_closure_choices_from_payload(payload) -> list[dict]:
+    if isinstance(payload, dict):
+        rows = payload.get("closure_choices") or []
+    else:
+        rows = []
+    choices = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        mob_id = str(row.get("mob_id") or "").strip()
+        component_paddock_id = str(row.get("component_paddock_id") or "").strip()
+        if mob_id and component_paddock_id:
+            choices.append({"mob_id": mob_id, "component_paddock_id": component_paddock_id})
+    return choices
+
+
+def _gate_paddock_options(farm_id: str) -> list[dict]:
+    paddocks = Paddock.query.filter_by(farm_id=farm_id, status="active").order_by(Paddock.name.asc()).all()
+    return [{"id": str(paddock.id), "name": paddock.name} for paddock in paddocks]
 
 
 def register_legacy_routes(bp) -> None:
@@ -215,6 +265,7 @@ def register_legacy_routes(bp) -> None:
             .all()
         )
         water_summary = WaterNetworkService.farm_summary(str(farm.id))
+        gate_count = len(GateService.gates_for_farm(str(farm.id)))
         return render_template(
             "farm_detail.html",
             farm=farm,
@@ -230,7 +281,176 @@ def register_legacy_routes(bp) -> None:
             farm_current_lsu=farm_current_lsu,
             mob_detail_labels=mob_detail_labels,
             water_summary=water_summary,
+            gate_count=gate_count,
         )
+
+    @bp.get("/farms/<farm_id>/gates")
+    def farm_gates(farm_id):
+        farm = Farm.query.get_or_404(farm_id)
+        gate_rows = GateService.gate_rows_for_template(str(farm.id))
+        return render_template(
+            "farm_gates.html",
+            farm=farm,
+            gate_rows=gate_rows,
+            gate_paddock_options=_gate_paddock_options(str(farm.id)),
+        )
+
+    @bp.post("/farms/<farm_id>/gates/sync")
+    def sync_farm_gates_form(farm_id):
+        farm = Farm.query.get_or_404(farm_id)
+        try:
+            result = GateService.sync_auto_gates_for_farm(farm, current_app.instance_path)
+            db.session.commit()
+            flash(
+                "Gate refresh complete: "
+                f"{result['created']} created, {result['updated']} updated, {result['retired']} retired.",
+                "success",
+            )
+        except (FileNotFoundError, ET.ParseError, ValueError) as exc:
+            db.session.rollback()
+            flash(f"Gate refresh failed: {exc}", "error")
+        return redirect(request.form.get("next") or url_for("web.farm_gates", farm_id=farm_id))
+
+    @bp.post("/farms/<farm_id>/gates")
+    def create_farm_gate_form(farm_id):
+        Farm.query.get_or_404(farm_id)
+        payload = request.get_json(silent=True) or request.form
+        wants_json = request.is_json or "application/json" in request.headers.get("Accept", "")
+        try:
+            gate = GateService.create_manual_gate(
+                farm_id=farm_id,
+                paddock_a_id=payload.get("paddock_a_id"),
+                paddock_b_id=payload.get("paddock_b_id"),
+                latitude=(payload.get("latitude") or None),
+                longitude=(payload.get("longitude") or None),
+            )
+            db.session.commit()
+        except (IntegrityError, ValueError) as exc:
+            db.session.rollback()
+            if wants_json:
+                return jsonify({"error": str(exc)}), 400
+            flash(f"Gate could not be added: {exc}", "error")
+            return redirect(request.form.get("next") or url_for("web.farm_gates", farm_id=farm_id))
+        if wants_json:
+            return jsonify({"gate": GateService.serialize_gate(gate)})
+        flash(f"Gate added between {gate.paddock_a.name} and {gate.paddock_b.name}", "success")
+        return redirect(request.form.get("next") or url_for("web.farm_gates", farm_id=farm_id))
+
+    @bp.get("/farms/<farm_id>/gates/<gate_id>")
+    def farm_gate_detail(farm_id, gate_id):
+        Farm.query.get_or_404(farm_id)
+        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        return jsonify(
+            {
+                "gate": GateService.serialize_gate(gate),
+                "close_requirements": GateService.close_requirements(gate),
+            }
+        )
+
+    @bp.get("/farms/<farm_id>/gates/<gate_id>/edit")
+    def edit_farm_gate(farm_id, gate_id):
+        farm = Farm.query.get_or_404(farm_id)
+        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        return render_template(
+            "farm_gate_detail.html",
+            farm=farm,
+            gate=gate,
+            gate_row={
+                **GateService.serialize_gate(gate),
+                "close_requirements": GateService.close_requirements(gate),
+            },
+            gate_paddock_options=_gate_paddock_options(str(farm.id)),
+        )
+
+    @bp.post("/farms/<farm_id>/gates/<gate_id>")
+    def update_farm_gate_form(farm_id, gate_id):
+        Farm.query.get_or_404(farm_id)
+        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        try:
+            GateService.update_gate_details(
+                gate,
+                paddock_a_id=request.form.get("paddock_a_id"),
+                paddock_b_id=request.form.get("paddock_b_id"),
+                latitude=request.form.get("latitude"),
+                longitude=request.form.get("longitude"),
+            )
+            db.session.commit()
+            flash("Gate details updated.", "success")
+        except (ValueError, IntegrityError) as exc:
+            db.session.rollback()
+            flash(f"Gate could not be updated: {exc}", "error")
+        return redirect(request.form.get("next") or url_for("web.edit_farm_gate", farm_id=farm_id, gate_id=gate_id))
+
+    @bp.post("/farms/<farm_id>/gates/<gate_id>/delete")
+    def delete_farm_gate_form(farm_id, gate_id):
+        Farm.query.get_or_404(farm_id)
+        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        try:
+            GateService.delete_gate(gate)
+            db.session.commit()
+            flash("Gate deleted.", "success")
+        except (ValueError, IntegrityError) as exc:
+            db.session.rollback()
+            flash(f"Gate could not be deleted: {exc}", "error")
+            return redirect(request.form.get("next") or url_for("web.edit_farm_gate", farm_id=farm_id, gate_id=gate_id))
+        return redirect(url_for("web.farm_gates", farm_id=farm_id))
+
+    @bp.post("/farms/<farm_id>/gates/<gate_id>/state")
+    def update_farm_gate_state_form(farm_id, gate_id):
+        Farm.query.get_or_404(farm_id)
+        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        payload = request.get_json(silent=True) or {}
+        wants_json = request.is_json or "application/json" in request.headers.get("Accept", "")
+        status = payload.get("status") if isinstance(payload, dict) else None
+        event_time_raw = payload.get("event_time") if isinstance(payload, dict) else None
+        closure_choices = _gate_closure_choices_from_payload(payload)
+        if not wants_json:
+            status = request.form.get("status")
+            event_time_raw = request.form.get("event_time")
+            closure_choices = _gate_closure_choices_from_form()
+        try:
+            result = GateService.set_gate_state(
+                gate,
+                status,
+                event_time=_parse_gate_event_time(event_time_raw),
+                closure_choices=closure_choices,
+            )
+            db.session.commit()
+            if wants_json:
+                return jsonify(
+                    {
+                        "gate": GateService.serialize_gate(result["gate"]),
+                        "moved_mob_count": result["moved_mob_count"],
+                        "close_requirements": GateService.close_requirements(result["gate"]),
+                    }
+                )
+            flash(
+                f"Gate set to {result['gate'].status}; redistributed {result['moved_mob_count']} mob(s).",
+                "success",
+            )
+        except (ValueError, IntegrityError) as exc:
+            db.session.rollback()
+            if wants_json:
+                return jsonify({"error": str(exc)}), 400
+            flash(f"Gate update failed: {exc}", "error")
+        return redirect(request.form.get("next") or url_for("web.farm_gates", farm_id=farm_id))
+
+    @bp.post("/farms/<farm_id>/gates/<gate_id>/location")
+    def update_farm_gate_location(farm_id, gate_id):
+        Farm.query.get_or_404(farm_id)
+        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        payload = request.get_json(silent=True) or request.form
+        try:
+            GateService.update_gate_location(
+                gate,
+                latitude=payload.get("latitude"),
+                longitude=payload.get("longitude"),
+            )
+            db.session.commit()
+        except (ValueError, IntegrityError) as exc:
+            db.session.rollback()
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"gate": GateService.serialize_gate(gate)})
 
     @bp.post("/farms/<farm_id>/stocking-rate")
     def update_farm_stocking_rate_form(farm_id):
@@ -330,4 +550,3 @@ def register_legacy_routes(bp) -> None:
             flash(str(exc), "error")
 
         return redirect(url_for("web.farm_detail", farm_id=farm_id))
-

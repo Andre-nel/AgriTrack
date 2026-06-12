@@ -23,6 +23,7 @@ from app.models import (
     NoteAttachment,
     Paddock,
     PaddockEvent,
+    PaddockGate,
     RainfallRecord,
     Task,
     TaskAttachment,
@@ -37,6 +38,7 @@ from app.models import (
 from app.models.stock_ledger import StockEventType
 from app.modules.farms.map_routes import _build_farm_map_feature_collection
 from app.services.calendar_service import CalendarService
+from app.services.gate_service import GateService
 from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
@@ -864,6 +866,7 @@ def bootstrap():
                     "task.status.update",
                     "task.comment.create",
                     "paddock.update",
+                    "gate.update",
                     "water_asset_status.update",
                 ],
                 "max_commands_per_request": MAX_COMMANDS_PER_REQUEST,
@@ -956,6 +959,11 @@ def farm_snapshot(farm_id):
         .order_by(WaterConnection.flow_type.asc(), WaterConnection.created_at.asc())
         .all()
     )
+    gates = (
+        PaddockGate.query.filter_by(farm_id=farm.id, active=True)
+        .order_by(PaddockGate.status.asc(), PaddockGate.created_at.asc())
+        .all()
+    )
     task_spaces = TaskSpace.query.filter_by(farm_id=farm.id).order_by(TaskSpace.key.asc()).all()
     tasks = (
         Task.query.join(TaskSpace)
@@ -1011,6 +1019,7 @@ def farm_snapshot(farm_id):
                 WaterNetworkService.serialize_connection(connection)
                 for connection in water_connections
             ],
+            "gates": [GateService.serialize_gate(gate) for gate in gates],
             "task_spaces": [_serialize_task_space(space) for space in task_spaces],
             "tasks": [_serialize_task(task, active_mob_ids=active_mob_ids) for task in tasks],
             "calendar_activities": [
@@ -1466,6 +1475,7 @@ def _dispatch_command(command_type: str, farm: Farm, payload) -> dict:
         "task.status.update": _handle_task_status_update,
         "task.comment.create": _handle_task_comment_create,
         "paddock.update": _handle_paddock_update,
+        "gate.update": _handle_gate_update,
         "water_asset_status.update": _handle_water_asset_status_update,
     }
     handler = handlers.get(command_type)
@@ -1803,6 +1813,29 @@ def _handle_paddock_update(farm: Farm, payload: dict) -> dict:
         paddock.tags_csv = TaskService.tags_to_csv(TaskService.parse_optional_tags(raw_tags))
     db.session.flush()
     return {"paddock": _serialize_paddock(paddock)}
+
+
+def _handle_gate_update(farm: Farm, payload: dict) -> dict:
+    gate_id = str(payload.get("gate_id") or "").strip()
+    gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm.id, active=True).first()
+    if gate is None:
+        raise MobileApiError("not_found", "Gate not found for this farm", 404)
+
+    closure_choices = payload.get("closure_choices") or []
+    if not isinstance(closure_choices, list):
+        raise ValueError("closure_choices must be a list")
+
+    result = GateService.set_gate_state(
+        gate,
+        payload.get("status"),
+        event_time=_parse_iso_datetime(payload.get("event_time"), "event_time"),
+        closure_choices=closure_choices,
+    )
+    db.session.flush()
+    return {
+        "gate": GateService.serialize_gate(result["gate"]),
+        "moved_mob_count": result["moved_mob_count"],
+    }
 
 
 def _handle_water_asset_status_update(farm: Farm, payload: dict) -> dict:

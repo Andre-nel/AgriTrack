@@ -19,6 +19,18 @@ class Paddock(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     events = db.relationship("PaddockEvent", back_populates="paddock", cascade="all, delete-orphan")
     water_assets = db.relationship("WaterAsset", back_populates="location_paddock")
     task_entity_links = db.relationship("TaskEntityLink", back_populates="paddock")
+    gates_as_a = db.relationship(
+        "PaddockGate",
+        foreign_keys="PaddockGate.paddock_a_id",
+        back_populates="paddock_a",
+        cascade="all, delete-orphan",
+    )
+    gates_as_b = db.relationship(
+        "PaddockGate",
+        foreign_keys="PaddockGate.paddock_b_id",
+        back_populates="paddock_b",
+        cascade="all, delete-orphan",
+    )
     served_water_links = db.relationship(
         "WaterAssetServedPaddock",
         back_populates="paddock",

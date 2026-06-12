@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}{{ gate_row.name }} | AgriTrack{% endblock %}
+{% block content %}
+<section class="paddock-page-header">
+  <div>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_gates', farm_id=farm.id) }}">Back To Gates</a>
+    <h1>{{ gate_row.name }}</h1>
+    <p class="muted">Status: {{ gate_row.status|capitalize }} | Source: {{ gate_row.source|capitalize }}</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">Farm Detail</a>
+</section>
+
+<section class="card">
+  <h2>Edit Gate</h2>
+  <form method="post" action="{{ url_for('web.update_farm_gate_form', farm_id=farm.id, gate_id=gate.id) }}" class="grid-form">
+    <input type="hidden" name="next" value="{{ url_for('web.edit_farm_gate', farm_id=farm.id, gate_id=gate.id) }}" />
+    <div class="grid-two">
+      <label>Camp A
+        <select name="paddock_a_id" required>
+          {% for paddock in gate_paddock_options %}
+          <option value="{{ paddock.id }}" {% if paddock.id == gate_row.paddock_a_id %}selected{% endif %}>{{ paddock.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Camp B
+        <select name="paddock_b_id" required>
+          {% for paddock in gate_paddock_options %}
+          <option value="{{ paddock.id }}" {% if paddock.id == gate_row.paddock_b_id %}selected{% endif %}>{{ paddock.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label>Latitude
+        <input type="number" step="0.00000001" name="latitude" value="{% if gate_row.latitude is not none %}{{ gate_row.latitude }}{% endif %}" placeholder="Optional" />
+      </label>
+      <label>Longitude
+        <input type="number" step="0.00000001" name="longitude" value="{% if gate_row.longitude is not none %}{{ gate_row.longitude }}{% endif %}" placeholder="Optional" />
+      </label>
+    </div>
+    {% if gate_row.status == "open" %}
+    <p class="muted">Close this gate before changing the connected camps. Coordinates can still be updated from the map by dragging the gate.</p>
+    {% endif %}
+    <button type="submit" class="btn">Save Gate</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Gate State</h2>
+  {% if gate_row.status == "closed" %}
+  <form method="post" action="{{ url_for('web.update_farm_gate_state_form', farm_id=farm.id, gate_id=gate.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('web.edit_farm_gate', farm_id=farm.id, gate_id=gate.id) }}" />
+    <input type="hidden" name="status" value="open" />
+    <button type="submit" class="btn">Open Gate</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('web.update_farm_gate_state_form', farm_id=farm.id, gate_id=gate.id) }}" class="grid-form gate-close-form">
+    <input type="hidden" name="next" value="{{ url_for('web.edit_farm_gate', farm_id=farm.id, gate_id=gate.id) }}" />
+    <input type="hidden" name="status" value="closed" />
+    {% if gate_row.close_requirements.requires_choices %}
+    {% for mob in gate_row.close_requirements.mobs %}
+    <label>{{ mob.mob_name }}
+      <select name="closure_choice:{{ mob.mob_id }}" required>
+        <option value="">Choose side</option>
+        {% for component in gate_row.close_requirements.components %}
+        <option value="{{ component.component_paddock_id }}">{{ component.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endfor %}
+    {% endif %}
+    <button type="submit" class="btn btn-secondary">Close Gate</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Gate Details</h2>
+  <table>
+    <tbody>
+      <tr><th>Connected Camps</th><td>{{ gate_row.paddock_names | join(" / ") }}</td></tr>
+      <tr><th>Status</th><td><span class="status-pill status-{{ gate_row.status }}">{{ gate_row.status|capitalize }}</span></td></tr>
+      <tr><th>Source</th><td>{{ gate_row.source|capitalize }}</td></tr>
+      <tr>
+        <th>Location</th>
+        <td>
+          {% if gate_row.latitude is not none and gate_row.longitude is not none %}
+          {{ "%.8f"|format(gate_row.latitude) }}, {{ "%.8f"|format(gate_row.longitude) }}
+          {% else %}
+          -
+          {% endif %}
+        </td>
+      </tr>
+      <tr><th>Shared Fence</th><td>{% if gate_row.shared_boundary_length_m is not none %}{{ "%.1f"|format(gate_row.shared_boundary_length_m) }} m{% else %}-{% endif %}</td></tr>
+      <tr><th>Last State Change</th><td>{{ gate_row.last_state_changed_at or "-" }}</td></tr>
+      <tr><th>Last Updated</th><td>{{ gate_row.updated_at or "-" }}</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Delete Gate</h2>
+  <p class="muted">Only closed gates can be deleted.</p>
+  <form method="post" action="{{ url_for('web.delete_farm_gate_form', farm_id=farm.id, gate_id=gate.id) }}" onsubmit="return confirm('Delete this gate?');">
+    <input type="hidden" name="next" value="{{ url_for('web.edit_farm_gate', farm_id=farm.id, gate_id=gate.id) }}" />
+    <button type="submit" class="btn btn-danger" {% if gate_row.status == "open" %}disabled{% endif %}>Delete Gate</button>
+  </form>
+</section>
+{% endblock %}

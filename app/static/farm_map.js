@@ -13,6 +13,10 @@
     .trim()
     .toLowerCase();
   const showStockFloats = mapElement.dataset.showStockFloats !== "0";
+  const gateCreateUrl = mapElement.dataset.gateCreateUrl || "";
+  const gateDetailUrlTemplate = mapElement.dataset.gateDetailUrlTemplate || "";
+  const gateStateUrlTemplate = mapElement.dataset.gateStateUrlTemplate || "";
+  const gateLocationUrlTemplate = mapElement.dataset.gateLocationUrlTemplate || "";
   const hasWaterAssetFilter = mapElement.dataset.waterAssetFilter !== undefined;
   const selectedWaterAssetTypes = hasWaterAssetFilter
     ? new Set(
@@ -26,6 +30,10 @@
     cattle: mapElement.dataset.cowIcon || "/static/cow.png",
     sheep: mapElement.dataset.sheepIcon || "/static/sheep.png",
     goat: mapElement.dataset.goatIcon || "/static/goat.png",
+  };
+  const gateIconUrls = {
+    open: mapElement.dataset.gateOpenIcon || "/static/ranch_gate_open.svg",
+    closed: mapElement.dataset.gateClosedIcon || "/static/ranch_gate_closed.svg",
   };
   const pressureColors = [
     "#274e13",
@@ -75,6 +83,7 @@
   const waterDropPath = "M16 9c-3.4 4-5 6.7-5 9.1a5 5 0 0 0 10 0c0-2.4-1.6-5.1-5-9.1Z";
   const waterAssetFontFamily = "'Segoe UI', 'Trebuchet MS', sans-serif";
   let waterAssetMarkerSequence = 0;
+  const gateMarkersById = new Map();
   if (!dataUrl) {
     if (statusElement) {
       statusElement.textContent = "Map data URL is missing.";
@@ -86,6 +95,131 @@
     if (statusElement) {
       statusElement.textContent = message;
     }
+  }
+
+  function gateLocationUrl(gateId) {
+    if (!gateLocationUrlTemplate || !gateId) {
+      return "";
+    }
+    return gateLocationUrlTemplate.replace("__gate_id__", encodeURIComponent(gateId));
+  }
+
+  function gateDetailUrl(gateId) {
+    if (!gateDetailUrlTemplate || !gateId) {
+      return "";
+    }
+    return gateDetailUrlTemplate.replace("__gate_id__", encodeURIComponent(gateId));
+  }
+
+  function gateStateUrl(gateId) {
+    if (!gateStateUrlTemplate || !gateId) {
+      return "";
+    }
+    return gateStateUrlTemplate.replace("__gate_id__", encodeURIComponent(gateId));
+  }
+
+  function fetchGateDetail(gateId) {
+    const url = gateDetailUrl(gateId);
+    if (!url) {
+      return Promise.reject(new Error("Gate details are not available."));
+    }
+    return fetch(url, { headers: { Accept: "application/json" } }).then((response) =>
+      response.json().then((payload) => {
+        if (!response.ok) {
+          throw new Error(payload.error || "Gate details could not be loaded.");
+        }
+        return payload;
+      })
+    );
+  }
+
+  function postGateState(gateId, status, closureChoices) {
+    const url = gateStateUrl(gateId);
+    if (!url) {
+      return Promise.reject(new Error("Gate state updates are not available."));
+    }
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        status: status,
+        closure_choices: closureChoices || [],
+      }),
+    }).then((response) =>
+      response.json().then((payload) => {
+        if (!response.ok) {
+          throw new Error(payload.error || "Gate state could not be saved.");
+        }
+        return payload;
+      })
+    );
+  }
+
+  function postGateLocation(gateId, latlng) {
+    const url = gateLocationUrl(gateId);
+    if (!url) {
+      return Promise.reject(new Error("Gate location updates are not available."));
+    }
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        latitude: latlng.lat,
+        longitude: latlng.lng,
+      }),
+    }).then((response) =>
+      response.json().then((payload) => {
+        if (!response.ok) {
+          throw new Error(payload.error || "Gate location could not be saved.");
+        }
+        return payload;
+      })
+    );
+  }
+
+  function postGateCreate(payload) {
+    if (!gateCreateUrl) {
+      return Promise.reject(new Error("Gate creation is not available."));
+    }
+    return fetch(gateCreateUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }).then((response) =>
+      response.json().then((body) => {
+        if (!response.ok) {
+          throw new Error(body.error || "Gate could not be created.");
+        }
+        return body;
+      })
+    );
+  }
+
+  function gateFeatureFromGate(gate) {
+    const latitude = Number(gate && gate.latitude);
+    const longitude = Number(gate && gate.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return null;
+    }
+    return {
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [longitude, latitude],
+      },
+      properties: Object.assign({}, gate, {
+        feature_type: "gate",
+      }),
+    };
   }
 
   function escapeHtml(value) {
@@ -262,6 +396,96 @@
         iconAnchor: [16, 37],
       }),
     });
+  }
+
+  function gateIcon(props) {
+    const status = normalizeKey(props.status) === "open" ? "open" : "closed";
+    const label = (props.name || "Gate") + " " + status;
+    return L.divIcon({
+      className: "gate-marker-wrap",
+      html:
+        '<span class="gate-marker gate-marker-' +
+        status +
+        '" title="' +
+        escapeHtml(label) +
+        '"><span class="gate-marker-post"></span><img class="gate-marker-img" src="' +
+        escapeHtml(gateIconUrls[status]) +
+        '" alt="' +
+        escapeHtml(label) +
+        '" /></span>',
+      iconSize: [32, 24],
+      iconAnchor: [16, 12],
+    });
+  }
+
+  function gateMarker(feature, latlng) {
+    const props = (feature && feature.properties) || {};
+    const gateId = props.gate_id || props.id;
+    const marker = L.marker(latlng, {
+      pane: "gatePane",
+      draggable: Boolean(gateId && gateLocationUrlTemplate),
+      autoPan: true,
+      icon: gateIcon(props),
+    });
+    marker._agriGateProps = props;
+    if (gateId && gateLocationUrlTemplate) {
+      let previousLatLng = latlng;
+      marker.on("dragstart", function () {
+        previousLatLng = marker.getLatLng();
+        marker.closePopup();
+        setStatus("Move the gate, then release to save its location.");
+      });
+      marker.on("dragend", function () {
+        const nextLatLng = marker.getLatLng();
+        setStatus("Saving gate location...");
+        postGateLocation(gateId, nextLatLng)
+          .then((payload) => {
+            const gate = (payload && payload.gate) || {};
+            props.latitude = gate.latitude;
+            props.longitude = gate.longitude;
+            props.source = gate.source || props.source;
+            if (feature && feature.geometry && Array.isArray(feature.geometry.coordinates)) {
+              feature.geometry.coordinates = [nextLatLng.lng, nextLatLng.lat];
+            }
+            marker.bindPopup(popupHtml(props), { maxWidth: 360 });
+            setStatus("Gate location saved.");
+          })
+          .catch((error) => {
+            marker.setLatLng(previousLatLng);
+            setStatus(error.message || "Gate location could not be saved.");
+          });
+      });
+    }
+    if (gateId) {
+      gateMarkersById.set(String(gateId), marker);
+    }
+    return marker;
+  }
+
+  function addOrUpdateGateFeature(gate, featureLayer) {
+    const feature = gateFeatureFromGate(gate);
+    if (!feature) {
+      return null;
+    }
+    const gateId = String(feature.properties.gate_id || feature.properties.id || "");
+    const latlng = L.latLng(feature.geometry.coordinates[1], feature.geometry.coordinates[0]);
+    const existingMarker = gateMarkersById.get(gateId);
+    if (existingMarker) {
+      const existingProps = existingMarker._agriGateProps || {};
+      Object.assign(existingProps, feature.properties);
+      existingMarker._agriGateProps = existingProps;
+      existingMarker.setLatLng(latlng);
+      existingMarker.setIcon(gateIcon(existingProps));
+      existingMarker.bindPopup(popupHtml(existingProps), { maxWidth: 360 });
+      updateGateToggleButton();
+      return existingMarker;
+    }
+    if (featureLayer) {
+      featureLayer.addData(feature);
+      updateGateToggleButton();
+      return gateMarkersById.get(gateId) || null;
+    }
+    return null;
   }
 
   function normalizeAssetType(value) {
@@ -483,6 +707,46 @@
     const farmLine = farmText ? '<div class="map-popup-farm">' + farmText + "</div>" : "";
 
     if (props.feature_type !== "paddock") {
+      if (props.feature_type === "gate") {
+        const paddockNames = Array.isArray(props.paddock_names) ? props.paddock_names : [];
+        const connectedText = paddockNames.length
+          ? paddockNames.map((item) => escapeHtml(item)).join(" / ")
+          : escapeHtml(props.name || "Gate");
+        const gateId = props.gate_id || props.id || "";
+        const status = normalizeKey(props.status) === "open" ? "open" : "closed";
+        const statusText = status === "open" ? "Open" : "Closed";
+        const nextStatus = status === "open" ? "closed" : "open";
+        const actionText = status === "open" ? "Close Gate" : "Open Gate";
+        const actionHtml = gateId
+          ? [
+              '<form class="map-gate-state-form" data-gate-id="',
+              escapeHtml(gateId),
+              '" data-target-status="',
+              nextStatus,
+              '">',
+              '<div class="map-gate-state-choice" data-gate-state-choice></div>',
+              '<div class="map-gate-state-error" data-gate-state-error role="alert"></div>',
+              '<div class="map-popup-actions">',
+              '<button type="submit" class="btn">',
+              actionText,
+              "</button>",
+              "</div>",
+              "</form>",
+            ].join("")
+          : "";
+        return [
+          farmLine,
+          "<strong>" + name + "</strong>",
+          '<div class="map-popup-farm">' + connectedText + "</div>",
+          '<table class="map-popup-table">',
+          "<tr><td>Status</td><td>" + statusText + "</td></tr>",
+          "<tr><td>Source</td><td>" + escapeHtml(props.source || "-") + "</td></tr>",
+          "<tr><td>Shared Fence</td><td>" + formatNumber(props.shared_boundary_length_m, 1) + " m</td></tr>",
+          "</table>",
+          actionHtml,
+        ].join("");
+      }
+
       if (props.feature_type === "water_asset") {
         const servedPaddocks = Array.isArray(props.served_paddocks) ? props.served_paddocks : [];
         const servedText = servedPaddocks.length
@@ -647,6 +911,8 @@
   map.createPane("stockFloatPane");
   map.getPane("stockFloatPane").style.zIndex = "650";
   map.getPane("stockFloatPane").style.pointerEvents = "none";
+  map.createPane("gatePane");
+  map.getPane("gatePane").style.zIndex = "670";
 
   const baseLayer =
     baseLayerMode === "satellite"
@@ -668,8 +934,347 @@
 
   let fullscreenButton = null;
   let labelToggleButton = null;
+  let gateToggleButton = null;
+  let addGateButton = null;
   let paddockLabelLayer = null;
+  let mapFeatureLayer = null;
+  let gateLayer = null;
+  let paddockOptions = [];
   let labelsVisible = true;
+  let gatesVisible = false;
+  let gateAddMode = false;
+  let suppressNextMapCreateClick = false;
+
+  function paddockOptionsFromFeatures(features) {
+    const seen = new Set();
+    const rows = [];
+    features.forEach((feature) => {
+      const props = (feature && feature.properties) || {};
+      const paddockId = props.paddock_id;
+      if (props.feature_type !== "paddock" || !paddockId || seen.has(paddockId)) {
+        return;
+      }
+      seen.add(paddockId);
+      rows.push({
+        id: paddockId,
+        name: props.name || "Unnamed Camp",
+      });
+    });
+    return rows.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  function updateAddGateButton() {
+    if (!addGateButton) {
+      return;
+    }
+    const canCreate = Boolean(gateCreateUrl && paddockOptions.length >= 2);
+    addGateButton.disabled = !canCreate;
+    addGateButton.textContent = gateAddMode ? "Cancel Gate" : "Add Gate";
+    addGateButton.setAttribute("aria-pressed", gateAddMode ? "true" : "false");
+    addGateButton.setAttribute("aria-label", gateAddMode ? "Cancel gate creation" : "Add a gate on the map");
+    addGateButton.title = canCreate ? "Add a gate on the map" : "At least two mapped paddocks are required";
+  }
+
+  function updateGateToggleButton() {
+    if (!gateToggleButton) {
+      return;
+    }
+    const hasGates = gateMarkersById.size > 0;
+    gateToggleButton.disabled = !hasGates;
+    gateToggleButton.textContent = gatesVisible ? "Gates Off" : "Gates On";
+    gateToggleButton.setAttribute("aria-pressed", gatesVisible ? "true" : "false");
+    gateToggleButton.setAttribute("aria-label", gatesVisible ? "Hide gates on the map" : "Show gates on the map");
+    gateToggleButton.title = hasGates
+      ? gatesVisible
+        ? "Hide gates"
+        : "Show gates"
+      : "No gates are mapped yet";
+  }
+
+  function syncGateVisibility() {
+    if (!gateLayer) {
+      updateGateToggleButton();
+      return;
+    }
+    if (gatesVisible) {
+      if (!map.hasLayer(gateLayer)) {
+        gateLayer.addTo(map);
+      }
+    } else if (map.hasLayer(gateLayer)) {
+      map.removeLayer(gateLayer);
+    }
+    updateGateToggleButton();
+  }
+
+  function toggleGateVisibility() {
+    if (!gateLayer || gateMarkersById.size === 0) {
+      return;
+    }
+    gatesVisible = !gatesVisible;
+    syncGateVisibility();
+    setStatus(gatesVisible ? "Gates shown." : "Gates hidden.");
+  }
+
+  function setGateAddMode(enabled) {
+    const nextMode = Boolean(enabled && gateCreateUrl && paddockOptions.length >= 2);
+    gateAddMode = nextMode;
+    mapElement.classList.toggle("map-gate-add-mode", gateAddMode);
+    if (gateAddMode) {
+      setStatus("Click the map where the gate should sit.");
+    } else {
+      map.closePopup();
+    }
+    updateAddGateButton();
+  }
+
+  function paddockSelectOptions(selectedId) {
+    return paddockOptions
+      .map((paddock) => {
+        const selected = paddock.id === selectedId ? " selected" : "";
+        return '<option value="' + escapeHtml(paddock.id) + '"' + selected + ">" + escapeHtml(paddock.name) + "</option>";
+      })
+      .join("");
+  }
+
+  function showGateCreateError(form, message) {
+    const error = form.querySelector("[data-gate-create-error]");
+    if (error) {
+      error.textContent = message || "";
+    }
+  }
+
+  function showGateStateError(form, message) {
+    const error = form.querySelector("[data-gate-state-error]");
+    if (error) {
+      error.textContent = message || "";
+    }
+  }
+
+  function renderGateCloseChoices(form, requirements) {
+    const container = form.querySelector("[data-gate-state-choice]");
+    if (!container) {
+      return;
+    }
+    const mobs = Array.isArray(requirements && requirements.mobs) ? requirements.mobs : [];
+    const components = Array.isArray(requirements && requirements.components) ? requirements.components : [];
+    if (!mobs.length || !components.length) {
+      container.innerHTML = "";
+      form.dataset.choicesLoaded = "1";
+      return;
+    }
+    const componentOptions = components
+      .map(
+        (component) =>
+          '<option value="' +
+          escapeHtml(component.component_paddock_id || "") +
+          '">' +
+          escapeHtml(component.label || "Camp") +
+          "</option>"
+      )
+      .join("");
+    container.innerHTML = mobs
+      .map(
+        (mob) =>
+          '<label class="map-gate-state-choice-row">' +
+          escapeHtml(mob.mob_name || "Mob") +
+          '<select name="closure_choice:' +
+          escapeHtml(mob.mob_id || "") +
+          '" required><option value="">Choose side</option>' +
+          componentOptions +
+          "</select></label>"
+      )
+      .join("");
+    form.dataset.choicesLoaded = "1";
+  }
+
+  function gateClosureChoicesFromForm(form) {
+    const choices = [];
+    Array.from(form.elements).forEach((element) => {
+      if (!element.name || !element.name.startsWith("closure_choice:")) {
+        return;
+      }
+      const mobId = element.name.split(":")[1];
+      if (mobId && element.value) {
+        choices.push({
+          mob_id: mobId,
+          component_paddock_id: element.value,
+        });
+      }
+    });
+    return choices;
+  }
+
+  function updateGateMarkerAfterState(gate) {
+    const marker = addOrUpdateGateFeature(gate, gateLayer);
+    if (marker && marker.openPopup) {
+      marker.openPopup();
+    }
+    return marker;
+  }
+
+  function bindGateStateForm(popup) {
+    const element = popup.getElement();
+    const form = element ? element.querySelector(".map-gate-state-form") : null;
+    if (!form || form.dataset.bound === "1") {
+      return;
+    }
+    form.dataset.bound = "1";
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      showGateStateError(form, "");
+      const gateId = form.dataset.gateId;
+      const targetStatus = form.dataset.targetStatus;
+      const submitButton = form.querySelector('button[type="submit"]');
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+      const restoreSubmit = () => {
+        if (submitButton) {
+          submitButton.disabled = false;
+        }
+      };
+      const postState = () => {
+        setStatus(targetStatus === "open" ? "Opening gate..." : "Closing gate...");
+        postGateState(gateId, targetStatus, gateClosureChoicesFromForm(form))
+          .then((payload) => {
+            const movedCount = Number(payload.moved_mob_count || 0);
+            updateGateMarkerAfterState((payload && payload.gate) || {});
+            setStatus(
+              "Gate " +
+                (targetStatus === "open" ? "opened" : "closed") +
+                "; redistributed " +
+                movedCount +
+                " mob(s)."
+            );
+          })
+          .catch((error) => {
+            restoreSubmit();
+            const message = error.message || "Gate state could not be saved.";
+            showGateStateError(form, message);
+            setStatus(message);
+          });
+      };
+
+      if (targetStatus === "closed" && form.dataset.choicesLoaded !== "1") {
+        setStatus("Checking gate close requirements...");
+        fetchGateDetail(gateId)
+          .then((payload) => {
+            const requirements = (payload && payload.close_requirements) || {};
+            if (requirements.requires_choices) {
+              renderGateCloseChoices(form, requirements);
+              restoreSubmit();
+              setStatus("Choose where spread mobs should be placed before closing the gate.");
+              if (submitButton) {
+                submitButton.textContent = "Confirm Close";
+              }
+              return;
+            }
+            form.dataset.choicesLoaded = "1";
+            postState();
+          })
+          .catch((error) => {
+            restoreSubmit();
+            const message = error.message || "Gate close requirements could not be loaded.";
+            showGateStateError(form, message);
+            setStatus(message);
+          });
+        return;
+      }
+      postState();
+    });
+  }
+
+  function openGateCreatePopup(latlng, suggestedPaddockId) {
+    if (!gateCreateUrl || paddockOptions.length < 2) {
+      setStatus("At least two mapped paddocks are required before a gate can be added.");
+      return;
+    }
+    const firstId = suggestedPaddockId || paddockOptions[0].id;
+    const second = paddockOptions.find((paddock) => paddock.id !== firstId) || paddockOptions[1];
+    const secondId = second ? second.id : "";
+    const popup = L.popup({
+      maxWidth: 320,
+      closeOnClick: false,
+    })
+      .setLatLng(latlng)
+      .setContent(
+        [
+          '<form class="map-gate-create-form">',
+          "<strong>Add Gate</strong>",
+          '<input type="hidden" name="latitude" value="' + escapeHtml(latlng.lat.toFixed(8)) + '" />',
+          '<input type="hidden" name="longitude" value="' + escapeHtml(latlng.lng.toFixed(8)) + '" />',
+          '<label>Camp A<select name="paddock_a_id" required>',
+          paddockSelectOptions(firstId),
+          "</select></label>",
+          '<label>Camp B<select name="paddock_b_id" required>',
+          paddockSelectOptions(secondId),
+          "</select></label>",
+          '<div class="map-gate-create-error" data-gate-create-error role="alert"></div>',
+          '<div class="map-popup-actions">',
+          '<button type="submit" class="btn">Save Gate</button>',
+          '<button type="button" class="btn btn-secondary" data-gate-create-cancel>Cancel</button>',
+          "</div>",
+          "</form>",
+        ].join("")
+      );
+    map.once("popupopen", function (event) {
+      if (event.popup !== popup) {
+        return;
+      }
+      const element = popup.getElement();
+      const form = element ? element.querySelector(".map-gate-create-form") : null;
+      if (!form) {
+        return;
+      }
+      const cancelButton = form.querySelector("[data-gate-create-cancel]");
+      if (cancelButton) {
+        cancelButton.addEventListener("click", function () {
+          setGateAddMode(false);
+        });
+      }
+      form.addEventListener("submit", function (submitEvent) {
+        submitEvent.preventDefault();
+        showGateCreateError(form, "");
+        const paddockAId = form.elements.paddock_a_id.value;
+        const paddockBId = form.elements.paddock_b_id.value;
+        if (!paddockAId || !paddockBId || paddockAId === paddockBId) {
+          showGateCreateError(form, "Choose two different camps.");
+          return;
+        }
+        const submitButton = form.querySelector('button[type="submit"]');
+        if (submitButton) {
+          submitButton.disabled = true;
+        }
+        setStatus("Saving gate...");
+        postGateCreate({
+          paddock_a_id: paddockAId,
+          paddock_b_id: paddockBId,
+          latitude: form.elements.latitude.value,
+          longitude: form.elements.longitude.value,
+        })
+          .then((payload) => {
+            const marker = addOrUpdateGateFeature((payload && payload.gate) || {}, gateLayer);
+            gatesVisible = true;
+            syncGateVisibility();
+            setGateAddMode(false);
+            setStatus("Gate added. Drag it to adjust the location.");
+            if (marker && marker.openPopup) {
+              marker.openPopup();
+            }
+          })
+          .catch((error) => {
+            if (submitButton) {
+              submitButton.disabled = false;
+            }
+            const message = error.message || "Gate could not be created.";
+            showGateCreateError(form, message);
+            setStatus(message);
+          });
+      });
+    });
+    popup.openOn(map);
+    setStatus("Choose the two camps for this gate.");
+  }
 
   function isMapFullscreen() {
     return getFullscreenElement() === mapElement;
@@ -743,6 +1348,24 @@
     },
   });
 
+  const GateToggleControl = L.Control.extend({
+    options: {
+      position: "topright",
+    },
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar map-gate-toggle-control");
+      gateToggleButton = L.DomUtil.create("button", "map-control-button map-gate-toggle", container);
+      gateToggleButton.type = "button";
+      updateGateToggleButton();
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(gateToggleButton, "click", function (event) {
+        L.DomEvent.stop(event);
+        toggleGateVisibility();
+      });
+      return container;
+    },
+  });
+
   const FullscreenControl = L.Control.extend({
     options: {
       position: "topright",
@@ -764,8 +1387,42 @@
     },
   });
 
+  const AddGateControl = L.Control.extend({
+    options: {
+      position: "topright",
+    },
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar map-add-gate-control");
+      addGateButton = L.DomUtil.create("button", "map-control-button map-add-gate", container);
+      addGateButton.type = "button";
+      updateAddGateButton();
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(addGateButton, "click", function (event) {
+        L.DomEvent.stop(event);
+        setGateAddMode(!gateAddMode);
+      });
+      return container;
+    },
+  });
+
   map.addControl(new LabelToggleControl());
+  map.addControl(new GateToggleControl());
+  map.addControl(new AddGateControl());
   map.addControl(new FullscreenControl());
+
+  map.on("click", function (event) {
+    if (!gateAddMode) {
+      return;
+    }
+    if (suppressNextMapCreateClick) {
+      suppressNextMapCreateClick = false;
+      return;
+    }
+    openGateCreatePopup(event.latlng);
+  });
+  map.on("popupopen", function (event) {
+    bindGateStateForm(event.popup);
+  });
 
   document.addEventListener("fullscreenchange", function () {
     updateFullscreenButton();
@@ -784,7 +1441,16 @@
     })
     .then((payload) => {
       const allFeatures = Array.isArray(payload.features) ? payload.features : [];
-      const features = allFeatures.filter(isFeatureVisible);
+      paddockOptions = paddockOptionsFromFeatures(allFeatures);
+      updateAddGateButton();
+      const gateFeatures = allFeatures.filter((feature) => {
+        const props = (feature && feature.properties) || {};
+        return props.feature_type === "gate";
+      });
+      const features = allFeatures.filter((feature) => {
+        const props = (feature && feature.properties) || {};
+        return props.feature_type !== "gate" && isFeatureVisible(feature);
+      });
       const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
       const missingKmlFarms = Array.isArray(payload.missing_kml_farms)
         ? payload.missing_kml_farms.length
@@ -823,19 +1489,52 @@
         style: styleForFeature,
         pointToLayer: function (feature, latlng) {
           const props = (feature && feature.properties) || {};
+          if (props.feature_type === "gate") {
+            return gateMarker(feature, latlng);
+          }
           if (props.feature_type === "water_asset") {
             return waterAssetMarker(feature, latlng);
           }
           return L.marker(latlng);
         },
         onEachFeature: function (feature, geoLayer) {
+          const props = (feature && feature.properties) || {};
           geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
           bindWaterAlertTooltip(feature, geoLayer);
           addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
           addStockFloatMarker(feature, geoLayer, stockFloatLayer);
+          if (props.feature_type === "paddock") {
+            geoLayer.on("click", function (event) {
+              if (!gateAddMode) {
+                return;
+              }
+              suppressNextMapCreateClick = true;
+              openGateCreatePopup(event.latlng, props.paddock_id);
+            });
+          }
         },
-        filter: isFeatureVisible,
+        filter: function (feature) {
+          const props = (feature && feature.properties) || {};
+          return props.feature_type !== "gate" && isFeatureVisible(feature);
+        },
       }).addTo(map);
+      mapFeatureLayer = layer;
+      gateMarkersById.clear();
+      gateLayer = L.geoJSON(
+        {
+          type: "FeatureCollection",
+          features: gateFeatures,
+        },
+        {
+          pointToLayer: function (feature, latlng) {
+            return gateMarker(feature, latlng);
+          },
+          onEachFeature: function (feature, geoLayer) {
+            geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
+          },
+        }
+      );
+      syncGateVisibility();
       syncPaddockLabelVisibility();
       updateLabelToggleButton();
 

@@ -16,6 +16,7 @@ from app.models import (
     WaterAsset,
 )
 from app.services.paddock_service import PaddockService
+from app.services.gate_service import GateService
 from app.services.water_network_service import WaterNetworkService
 
 KML_NAMESPACE = "http://www.opengis.net/kml/2.2"
@@ -1180,6 +1181,10 @@ class FarmImportService:
             paddock_payload["db_paddock"] = existing_paddock
 
         db.session.flush()
+        gate_sync_result = GateService.sync_auto_gates_for_import(
+            str(farm.id),
+            parsed["paddocks"],
+        )
 
         allocation_transfer_map: dict[str, list[dict]] = {}
         allocations_to_delete: list[GrazingAllocation] = []
@@ -1427,5 +1432,8 @@ class FarmImportService:
             "water_created_count": water_created_count,
             "water_updated_count": water_updated_count,
             "water_archived_count": water_archived_count,
+            "gate_created_count": gate_sync_result["created"],
+            "gate_updated_count": gate_sync_result["updated"],
+            "gate_retired_count": gate_sync_result["retired"],
             "map_path": str(map_path),
         }

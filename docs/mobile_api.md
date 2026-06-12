@@ -187,6 +187,7 @@ Important response fields:
       "task.status.update",
       "task.comment.create",
       "paddock.update",
+      "gate.update",
       "water_asset_status.update"
     ],
     "max_commands_per_request": 100
@@ -228,6 +229,7 @@ Response groups:
   "water_asset_state_history": [],
   "water_assets": [],
   "water_connections": [],
+  "gates": [],
   "task_spaces": [],
   "tasks": [],
   "calendar_activities": [],
@@ -254,6 +256,12 @@ grazing that paddock.
 (`baseline`, `created`, or `updated`), `changed_at`, previous `active` /
 `status` / `water_level`, and the current `active` / `status` / `water_level`
 snapshot after the change.
+
+`gates` contains active paddock gates with `id`, `paddock_a_id`,
+`paddock_b_id`, paddock names, `status` (`open` or `closed`), `source`,
+optional coordinates, shared boundary length, and `last_state_changed_at`.
+`map_features` also includes gate point features with `feature_type: "gate"`
+when coordinates are available.
 
 ### Mobile Map Data
 
@@ -378,6 +386,7 @@ Supported command types:
 - `task.status.update`: `task_id`, `status`, optional `note`, optional `changed_at`; `note` is required when `status` is `closed`.
 - `task.comment.create`: `task_id`, `body`.
 - `paddock.update`: `paddock_id`, optional `status`, optional `notes`, optional `tags`.
+- `gate.update`: `gate_id`, `status` (`open` or `closed`), optional `event_time`, and optional `closure_choices` rows shaped as `{ "mob_id": "...", "component_paddock_id": "..." }` when closing a gate that splits a mob across disconnected camp groups.
 - `water_asset_status.update`: `water_asset_id`, and at least one of `active`, `status`, `water_level`.
 
 Android should keep these commands in a durable outbox until the backend returns

@@ -92,6 +92,31 @@ class OptimisticSnapshotTest {
         )
     }
 
+    @Test
+    fun pendingGateUpdateRedistributesGrazingAndUpdatesMapStatus() {
+        val base = fieldSnapshot()
+        val commands = JSONArray()
+            .put(
+                MobileCommand.gateUpdate(
+                    farmId = "farm-1",
+                    gateId = "gate-1",
+                    status = "open",
+                    eventTime = "2026-06-12T10:00:00Z",
+                ).toJson()
+            )
+
+        val optimistic = base.withOptimisticCommands(commands)
+
+        assertEquals("open", optimistic.gates.first { it.id == "gate-1" }.status)
+        assertEquals("open", optimistic.mapFeatures.first { it.gateId == "gate-1" }.gateStatus)
+        val allocations = optimistic.activeGrazing.first { it.mobId == "mob-1" }.allocations
+            .associate { it.paddockId to it.allocationFraction }
+        assertEquals(0.25, allocations["paddock-1"] ?: 0.0, 0.0)
+        assertEquals(0.75, allocations["paddock-2"] ?: 0.0, 0.0)
+        assertEquals(2.5, paddockGrazing(optimistic, "paddock-1")?.totalHead ?: 0.0, 0.0)
+        assertEquals(7.5, paddockGrazing(optimistic, "paddock-2")?.totalHead ?: 0.0, 0.0)
+    }
+
     private fun fieldSnapshot(): FarmSnapshot =
         FarmSnapshot.fromJson(
             JSONObject()
@@ -99,8 +124,22 @@ class OptimisticSnapshotTest {
                 .put(
                     "paddocks",
                     JSONArray()
-                        .put(JSONObject().put("id", "paddock-1").put("name", "North Camp").put("status", "active"))
-                        .put(JSONObject().put("id", "paddock-2").put("name", "South Camp").put("status", "active")),
+                        .put(
+                            JSONObject()
+                                .put("id", "paddock-1")
+                                .put("name", "North Camp")
+                                .put("status", "active")
+                                .put("area_ha", 10.0)
+                                .put("grazeable_area_ha", 10.0),
+                        )
+                        .put(
+                            JSONObject()
+                                .put("id", "paddock-2")
+                                .put("name", "South Camp")
+                                .put("status", "active")
+                                .put("area_ha", 30.0)
+                                .put("grazeable_area_ha", 30.0),
+                        ),
                 )
                 .put(
                     "mobs",
@@ -143,6 +182,23 @@ class OptimisticSnapshotTest {
                                 "mobs",
                                 JSONArray().put(JSONObject().put("mob_id", "mob-1").put("mob_name", "Main Mob").put("allocation_pct", 100.0)),
                             ),
+                    ),
+                )
+                .put(
+                    "gates",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("id", "gate-1")
+                            .put("gate_id", "gate-1")
+                            .put("farm_id", "farm-1")
+                            .put("paddock_a_id", "paddock-1")
+                            .put("paddock_a_name", "North Camp")
+                            .put("paddock_b_id", "paddock-2")
+                            .put("paddock_b_name", "South Camp")
+                            .put("name", "North Camp / South Camp Gate")
+                            .put("status", "closed")
+                            .put("active", true)
+                            .put("source", "manual"),
                     ),
                 )
                 .put(
@@ -193,7 +249,22 @@ class OptimisticSnapshotTest {
                 .put("rainfall", JSONArray())
                 .put("mob_events", JSONArray())
                 .put("paddock_events", JSONArray())
-                .put("map_features", JSONArray()),
+                .put(
+                    "map_features",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("type", "Feature")
+                            .put("geometry", JSONObject().put("type", "Point").put("coordinates", JSONArray().put(25.0).put(-32.0)))
+                            .put(
+                                "properties",
+                                JSONObject()
+                                    .put("feature_type", "gate")
+                                    .put("gate_id", "gate-1")
+                                    .put("name", "North Camp / South Camp Gate")
+                                    .put("status", "closed"),
+                            ),
+                    ),
+                ),
         )
 
     private fun balance(id: String, mobId: String, groupId: String, headCount: Int): JSONObject =

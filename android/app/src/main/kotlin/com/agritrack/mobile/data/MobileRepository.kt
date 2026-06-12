@@ -166,6 +166,10 @@ class MobileRepository(
         fieldStore.enqueue(MobileCommand.paddockUpdate(farmId, paddockId, status, notes, tags))
     }
 
+    fun queueGateUpdate(farmId: String, gateId: String, status: String) {
+        fieldStore.enqueue(MobileCommand.gateUpdate(farmId, gateId, status))
+    }
+
     fun queueTaskCreate(
         farmId: String,
         heading: String,

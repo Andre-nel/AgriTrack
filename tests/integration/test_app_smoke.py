@@ -16,11 +16,14 @@ from app.models import (
     MovementEvent,
     MovementEventMob,
     Paddock,
+    PaddockGate,
     RainfallRecord,
     StockLedgerEntry,
 )
 from app.models.movement import MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
+from app.services.gate_service import GateService
+from app.services.movement_service import MovementService
 
 
 def _write_farm_kml(app, farm_name: str, placemark_name: str):
@@ -288,6 +291,286 @@ def test_import_farm_creates_farm_paddocks_and_map_file(client, app, tmp_path):
 
     response = client.get(f"/farms/{farm_id}/map-data")
     assert response.status_code == 200
+
+
+def test_import_farm_creates_closed_auto_gate_and_preserves_status_on_reimport(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    file_bytes = _kml_bytes(
+        _placemark_polygon_xml("North Camp", [{"outer": _square_ring(0.000, 0.000, 0.001)}]),
+        _placemark_polygon_xml("South Camp", [{"outer": _square_ring(0.001, 0.000, 0.001)}]),
+    )
+
+    response = _post_import_farm(client, filename="Gate Import Ranch.kml", file_bytes=file_bytes)
+    assert response.status_code == 302
+
+    with app.app_context():
+        farm = Farm.query.filter_by(name="Gate Import Ranch").one()
+        gate = PaddockGate.query.filter_by(farm_id=farm.id).one()
+        assert gate.source == "auto"
+        assert gate.status == "closed"
+        assert gate.active is True
+        assert float(gate.shared_boundary_length_m) > 100
+        gate.status = "open"
+        db.session.commit()
+        farm_id = str(farm.id)
+        gate_id = str(gate.id)
+
+    response = _post_import_farm(client, filename="Gate Import Ranch.kml", file_bytes=file_bytes)
+    assert response.status_code == 302
+
+    with app.app_context():
+        gate = db.session.get(PaddockGate, gate_id)
+        assert gate.status == "open"
+        assert gate.active is True
+
+    response = client.get(f"/farms/{farm_id}/map-data")
+    assert response.status_code == 200
+    payload = response.get_json()
+    gate_features = [
+        feature for feature in payload["features"]
+        if feature["properties"].get("feature_type") == "gate"
+    ]
+    assert len(gate_features) == 1
+    assert gate_features[0]["properties"]["status"] == "open"
+
+
+def test_web_gate_state_route_updates_active_grazing_allocations(client, app):
+    with app.app_context():
+        farm, (north, south) = _farm_with_two_paddocks_for_gate_route()
+        mob = Mob(farm_id=farm.id, name="Route Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+        MovementService.move_mob(
+            mob=mob,
+            allocations=[{"paddock_id": north.id, "allocation_fraction": "1.0"}],
+            destination_farm_id=str(farm.id),
+            when=datetime(2026, 6, 12, 7, 0, tzinfo=timezone.utc),
+        )
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(north.id),
+            paddock_b_id=str(south.id),
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        gate_id = str(gate.id)
+        north_id = str(north.id)
+        south_id = str(south.id)
+        mob_id = str(mob.id)
+
+    response = client.post(
+        f"/farms/{farm_id}/gates/{gate_id}/state",
+        data={"status": "open", "event_time": "2026-06-12T10:00:00+00:00"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        gate = db.session.get(PaddockGate, gate_id)
+        assert gate.status == "open"
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {
+            str(row.paddock_id): float(row.allocation_fraction)
+            for row in session.allocations
+        }
+        assert allocations == {north_id: 0.25, south_id: 0.75}
+
+
+def test_web_gate_state_route_accepts_map_json_open_and_close(client, app):
+    with app.app_context():
+        farm, (north, south) = _farm_with_two_paddocks_for_gate_route()
+        mob = Mob(farm_id=farm.id, name="Map Route Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+        MovementService.move_mob(
+            mob=mob,
+            allocations=[{"paddock_id": north.id, "allocation_fraction": "1.0"}],
+            destination_farm_id=str(farm.id),
+            when=datetime(2026, 6, 12, 7, 0, tzinfo=timezone.utc),
+        )
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(north.id),
+            paddock_b_id=str(south.id),
+            latitude="-32.00000000",
+            longitude="25.00000000",
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        gate_id = str(gate.id)
+        north_id = str(north.id)
+        mob_id = str(mob.id)
+
+    response = client.post(f"/farms/{farm_id}/gates/{gate_id}/state", json={"status": "open"})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["gate"]["status"] == "open"
+    assert payload["moved_mob_count"] == 1
+
+    response = client.get(f"/farms/{farm_id}/gates/{gate_id}", headers={"Accept": "application/json"})
+    close_requirements = response.get_json()["close_requirements"]
+    assert close_requirements["requires_choices"] is True
+
+    response = client.post(
+        f"/farms/{farm_id}/gates/{gate_id}/state",
+        json={
+            "status": "closed",
+            "closure_choices": [
+                {"mob_id": mob_id, "component_paddock_id": north_id},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert response.get_json()["gate"]["status"] == "closed"
+
+    with app.app_context():
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {
+            str(row.paddock_id): float(row.allocation_fraction)
+            for row in session.allocations
+        }
+        assert allocations == {north_id: 1.0}
+
+
+def test_web_gate_location_route_moves_gate_and_map_feature(client, app):
+    with app.app_context():
+        farm, (north, south) = _farm_with_two_paddocks_for_gate_route()
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(north.id),
+            paddock_b_id=str(south.id),
+            latitude="-32.00000000",
+            longitude="25.00000000",
+        )
+        gate.source = PaddockGate.SOURCE_AUTO
+        db.session.commit()
+        farm_id = str(farm.id)
+        gate_id = str(gate.id)
+
+    response = client.post(
+        f"/farms/{farm_id}/gates/{gate_id}/location",
+        json={"latitude": -32.123456789, "longitude": 25.987654321},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["gate"]["latitude"] == -32.12345679
+    assert payload["gate"]["longitude"] == 25.98765432
+    assert payload["gate"]["source"] == "manual"
+
+    with app.app_context():
+        gate = db.session.get(PaddockGate, gate_id)
+        assert float(gate.latitude) == -32.12345679
+        assert float(gate.longitude) == 25.98765432
+        assert gate.source == PaddockGate.SOURCE_MANUAL
+
+    response = client.get(f"/farms/{farm_id}/map-data")
+    assert response.status_code == 200
+    gate_features = [
+        feature for feature in response.get_json()["features"]
+        if feature["properties"].get("feature_type") == "gate"
+    ]
+    assert len(gate_features) == 1
+    assert gate_features[0]["geometry"]["coordinates"] == [25.98765432, -32.12345679]
+
+
+def test_web_gate_create_route_accepts_map_json_and_returns_feature(client, app):
+    with app.app_context():
+        farm, (north, south) = _farm_with_two_paddocks_for_gate_route()
+        db.session.commit()
+        farm_id = str(farm.id)
+        north_id = str(north.id)
+        south_id = str(south.id)
+
+    response = client.post(
+        f"/farms/{farm_id}/gates",
+        json={
+            "paddock_a_id": north_id,
+            "paddock_b_id": south_id,
+            "latitude": -32.22222222,
+            "longitude": 25.33333333,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["gate"]["status"] == "closed"
+    assert payload["gate"]["source"] == "manual"
+    assert payload["gate"]["latitude"] == -32.22222222
+    assert payload["gate"]["longitude"] == 25.33333333
+
+    response = client.get(f"/farms/{farm_id}/map-data")
+    assert response.status_code == 200
+    gate_features = [
+        feature for feature in response.get_json()["features"]
+        if feature["properties"].get("feature_type") == "gate"
+    ]
+    assert len(gate_features) == 1
+    assert gate_features[0]["properties"]["gate_id"] == payload["gate"]["id"]
+    assert gate_features[0]["geometry"]["coordinates"] == [25.33333333, -32.22222222]
+
+
+def test_farm_gates_page_supports_update_delete_and_json_detail(client, app):
+    with app.app_context():
+        farm, (north, south) = _farm_with_two_paddocks_for_gate_route()
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(north.id),
+            paddock_b_id=str(south.id),
+            latitude="-32.10000000",
+            longitude="25.10000000",
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        gate_id = str(gate.id)
+        north_id = str(north.id)
+        south_id = str(south.id)
+
+    response = client.get(f"/farms/{farm_id}/gates")
+    assert response.status_code == 200
+    assert b"Gate Register" in response.data
+
+    response = client.get(f"/farms/{farm_id}/gates/{gate_id}", headers={"Accept": "application/json"})
+    assert response.status_code == 200
+    assert response.get_json()["gate"]["id"] == gate_id
+
+    response = client.get(f"/farms/{farm_id}/gates/{gate_id}/edit")
+    assert response.status_code == 200
+    assert b"Edit Gate" in response.data
+
+    response = client.post(
+        f"/farms/{farm_id}/gates/{gate_id}",
+        data={
+            "paddock_a_id": north_id,
+            "paddock_b_id": south_id,
+            "latitude": "-32.76543210",
+            "longitude": "25.12345678",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        gate = db.session.get(PaddockGate, gate_id)
+        assert float(gate.latitude) == -32.76543210
+        assert float(gate.longitude) == 25.12345678
+
+    response = client.post(
+        f"/farms/{farm_id}/gates/{gate_id}/delete",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    with app.app_context():
+        assert db.session.get(PaddockGate, gate_id) is None
+
+
+def _farm_with_two_paddocks_for_gate_route():
+    farm = Farm(name="Gate Route Farm", timezone="UTC", active=True)
+    db.session.add(farm)
+    db.session.flush()
+    north = Paddock(farm_id=farm.id, name="North", area_ha=10, grazeable_area_ha=10)
+    south = Paddock(farm_id=farm.id, name="South", area_ha=30, grazeable_area_ha=30)
+    db.session.add_all([north, south])
+    db.session.flush()
+    return farm, (north, south)
 
 
 def test_import_farm_skips_boundary_placemark_matching_farm_name(client, app, tmp_path):

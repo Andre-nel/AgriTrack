@@ -17,6 +17,7 @@ from app.models import (
     NoteAttachment,
     Paddock,
     PaddockEvent,
+    PaddockGate,
     RainfallRecord,
     StockLedgerEntry,
     Task,
@@ -33,6 +34,8 @@ from app.models import (
     WaterAssetServedPaddock,
     WaterConnection,
 )
+from app.services.gate_service import GateService
+from app.services.movement_service import MovementService
 from app.services.task_service import TaskService
 
 
@@ -1099,6 +1102,91 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
     assert history_payload[0]["water_asset_id"] == tank_id
     assert history_payload[0]["previous_water_level"] == "low"
     assert history_payload[0]["water_level"] == "full"
+
+
+def test_mobile_snapshot_includes_gates_and_gate_update_command(client, app):
+    with app.app_context():
+        farm = Farm(name="Mobile Gate Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        north = Paddock(farm_id=farm.id, name="North", area_ha=10, grazeable_area_ha=10)
+        south = Paddock(farm_id=farm.id, name="South", area_ha=30, grazeable_area_ha=30)
+        mob = Mob(farm_id=farm.id, name="Gate Mob", status="active")
+        db.session.add_all([north, south, mob])
+        db.session.flush()
+        MovementService.move_mob(
+            mob=mob,
+            allocations=[{"paddock_id": north.id, "allocation_fraction": "1.0"}],
+            destination_farm_id=str(farm.id),
+            when=datetime(2026, 6, 12, 7, 0, tzinfo=timezone.utc),
+        )
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(north.id),
+            paddock_b_id=str(south.id),
+            latitude="-32.00000000",
+            longitude="25.00000000",
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        gate_id = str(gate.id)
+        north_id = str(north.id)
+        south_id = str(south.id)
+        mob_id = str(mob.id)
+
+    token = _login(client)
+    snapshot = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+    assert snapshot.status_code == 200
+    snapshot_payload = snapshot.get_json()
+    assert snapshot_payload["gates"][0]["id"] == gate_id
+    assert snapshot_payload["gates"][0]["status"] == "closed"
+    gate_features = [
+        feature for feature in snapshot_payload["map_features"]
+        if feature["properties"].get("feature_type") == "gate"
+    ]
+    assert len(gate_features) == 1
+    assert gate_features[0]["properties"]["gate_id"] == gate_id
+
+    command = {
+        "client_command_id": "gate-open-1",
+        "type": "gate.update",
+        "farm_id": farm_id,
+        "payload": {
+            "gate_id": gate_id,
+            "status": "open",
+            "event_time": "2026-06-12T10:00:00+00:00",
+            "closure_choices": [],
+        },
+    }
+    response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={"commands": [command]},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    result = response.get_json()["results"][0]
+    assert result["status"] == "applied"
+    assert result["response"]["gate"]["status"] == "open"
+    assert result["response"]["moved_mob_count"] == 1
+
+    duplicate = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={"commands": [command]},
+        headers=_auth(token),
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.get_json()["results"][0]["duplicate"] is True
+
+    with app.app_context():
+        assert db.session.get(PaddockGate, gate_id).status == "open"
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {str(row.paddock_id): float(row.allocation_fraction) for row in session.allocations}
+        assert allocations == {north_id: 0.25, south_id: 0.75}
+
+    refreshed = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+    assert refreshed.status_code == 200
+    assert refreshed.get_json()["gates"][0]["status"] == "open"
 
 
 def test_mobile_stock_count_can_create_animal_group_from_payload(client, app):

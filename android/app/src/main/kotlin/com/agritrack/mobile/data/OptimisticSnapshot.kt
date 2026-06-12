@@ -2,6 +2,8 @@ package com.agritrack.mobile.data
 
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.round
 
 internal fun FarmSnapshot.withOptimisticCommands(commands: JSONArray): FarmSnapshot {
@@ -42,6 +44,12 @@ internal fun FarmSnapshot.withOptimisticCommands(commands: JSONArray): FarmSnaps
                 }
             }
             "paddock.update" -> changed = applyPaddockUpdate(json, payload) || changed
+            "gate.update" -> {
+                if (applyGateUpdate(json, command, payload)) {
+                    changed = true
+                    rebuildGrazing = true
+                }
+            }
             "water_asset_status.update" -> changed = applyWaterAssetStatus(json, payload) || changed
             "task.create" -> changed = applyTaskCreate(json, command, payload) || changed
             "task.status.update" -> changed = applyTaskStatus(json, command, payload) || changed
@@ -284,6 +292,368 @@ private fun applyPaddockUpdate(json: JSONObject, payload: JSONObject): Boolean {
     }
     paddock.put("pending_sync", true)
     return true
+}
+
+private fun applyGateUpdate(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val gateId = payload.optString("gate_id")
+    val status = payload.optString("status").trim().lowercase()
+    if (gateId.isBlank() || status !in setOf("open", "closed")) {
+        return false
+    }
+
+    val gate = findObjectById(json.optJSONArray("gates"), gateId)
+    var changed = false
+    if (gate != null) {
+        changed = redistributeGateAllocations(json, gate, status, payload) || changed
+        gate.put("status", status)
+        gate.putOptional("last_state_changed_at", payload.optionalString("event_time"))
+        gate.put("pending_sync", true)
+        changed = true
+    }
+
+    val mapFeatures = json.optJSONArray("map_features") ?: JSONArray()
+    for (index in 0 until mapFeatures.length()) {
+        val feature = mapFeatures.optJSONObject(index) ?: continue
+        val properties = feature.optJSONObject("properties") ?: continue
+        val featureGateId = properties.optString("gate_id", properties.optString("id"))
+        if (properties.optString("feature_type") != "gate" || featureGateId != gateId) {
+            continue
+        }
+        properties.put("status", status)
+        properties.put("pending_sync", true)
+        changed = true
+    }
+    if (changed && gate == null) {
+        prependObject(
+            json,
+            "gates",
+            JSONObject()
+                .put("id", gateId)
+                .put("gate_id", gateId)
+                .put("farm_id", command.optString("farm_id"))
+                .put("status", status)
+                .put("active", true)
+                .put("source", "manual")
+                .put("name", "Gate")
+                .put("pending_sync", true),
+        )
+    }
+    return changed
+}
+
+private fun redistributeGateAllocations(json: JSONObject, gate: JSONObject, targetStatus: String, payload: JSONObject): Boolean {
+    val currentStatus = gate.optString("status", "closed").lowercase()
+    if (currentStatus == targetStatus) {
+        return false
+    }
+    return when (targetStatus) {
+        "open" -> redistributeForGateOpen(json, gate, payload)
+        "closed" -> redistributeForGateClose(json, gate, payload)
+        else -> false
+    }
+}
+
+private fun redistributeForGateOpen(json: JSONObject, gate: JSONObject, payload: JSONObject): Boolean {
+    val (left, _) = gatePaddockPair(gate) ?: return false
+    val allPaddockIds = activePaddockIds(json)
+    if (allPaddockIds.isEmpty()) {
+        return false
+    }
+    val component = componentContaining(
+        components(allPaddockIds, openGateEdges(json, gate.optString("id"), "open")),
+        left,
+    )
+    if (component.isEmpty()) {
+        return false
+    }
+    var changed = false
+    val activeGrazing = json.optJSONArray("active_grazing") ?: JSONArray()
+    for (index in 0 until activeGrazing.length()) {
+        val session = activeGrazing.optJSONObject(index) ?: continue
+        val current = allocationMap(session)
+        val totalInComponent = current
+            .filterKeys { it in component }
+            .values
+            .sum()
+        if (totalInComponent <= 0.0) {
+            continue
+        }
+        val target = current
+            .filterKeys { it !in component }
+            .toMutableMap()
+        target.putAll(areaWeightedAllocations(json, component, totalInComponent))
+        changed = replaceSessionAllocations(session, target, payload.optionalString("event_time")) || changed
+    }
+    return changed
+}
+
+private fun redistributeForGateClose(json: JSONObject, gate: JSONObject, payload: JSONObject): Boolean {
+    val (left, _) = gatePaddockPair(gate) ?: return false
+    val allPaddockIds = activePaddockIds(json)
+    if (allPaddockIds.isEmpty()) {
+        return false
+    }
+    val beforeComponent = componentContaining(components(allPaddockIds, openGateEdges(json)), left)
+    val afterComponents = components(
+        beforeComponent,
+        openGateEdges(json, gate.optString("id"), "closed"),
+    )
+    if (afterComponents.size <= 1) {
+        return false
+    }
+    val componentIndexByPaddock = mutableMapOf<String, Int>()
+    afterComponents.forEachIndexed { index, component ->
+        component.forEach { paddockId -> componentIndexByPaddock[paddockId] = index }
+    }
+    val choices = gateClosureChoiceMap(payload.optJSONArray("closure_choices"))
+    var changed = false
+    val activeGrazing = json.optJSONArray("active_grazing") ?: JSONArray()
+    for (index in 0 until activeGrazing.length()) {
+        val session = activeGrazing.optJSONObject(index) ?: continue
+        val current = allocationMap(session)
+        val totalInPrevious = current
+            .filterKeys { it in beforeComponent }
+            .values
+            .sum()
+        if (totalInPrevious <= 0.0) {
+            continue
+        }
+        val componentIndexes = current
+            .filter { (paddockId, fraction) -> fraction > 0.0 && paddockId in componentIndexByPaddock }
+            .mapNotNull { (paddockId, _) -> componentIndexByPaddock[paddockId] }
+            .toSet()
+        val targetComponent = when {
+            componentIndexes.size > 1 -> {
+                val selectedPaddockId = choices[session.optString("mob_id")]
+                val selectedIndex = componentIndexByPaddock[selectedPaddockId]
+                if (selectedIndex == null) continue
+                afterComponents[selectedIndex]
+            }
+            componentIndexes.isNotEmpty() -> afterComponents[componentIndexes.first()]
+            else -> afterComponents.first()
+        }
+        val target = current
+            .filterKeys { it !in beforeComponent }
+            .toMutableMap()
+        target.putAll(areaWeightedAllocations(json, targetComponent, totalInPrevious))
+        changed = replaceSessionAllocations(session, target, payload.optionalString("event_time")) || changed
+    }
+    return changed
+}
+
+private fun activePaddockIds(json: JSONObject): Set<String> {
+    val paddocks = json.optJSONArray("paddocks") ?: JSONArray()
+    val ids = mutableSetOf<String>()
+    for (index in 0 until paddocks.length()) {
+        val paddock = paddocks.optJSONObject(index) ?: continue
+        if (paddock.optString("status", "active") == "active") {
+            paddock.optString("id").takeIf { it.isNotBlank() }?.let(ids::add)
+        }
+    }
+    return ids
+}
+
+private fun gatePaddockPair(gate: JSONObject): Pair<String, String>? {
+    val left = gate.optString("paddock_a_id")
+    val right = gate.optString("paddock_b_id")
+    if (left.isBlank() || right.isBlank()) {
+        return null
+    }
+    return left to right
+}
+
+private fun openGateEdges(
+    json: JSONObject,
+    overrideGateId: String? = null,
+    overrideStatus: String? = null,
+): List<Pair<String, String>> {
+    val gates = json.optJSONArray("gates") ?: JSONArray()
+    val edges = mutableListOf<Pair<String, String>>()
+    for (index in 0 until gates.length()) {
+        val gate = gates.optJSONObject(index) ?: continue
+        if (!gate.optBoolean("active", true)) {
+            continue
+        }
+        val gateId = gate.optString("id", gate.optString("gate_id"))
+        val status = if (overrideGateId != null && gateId == overrideGateId) {
+            overrideStatus ?: gate.optString("status")
+        } else {
+            gate.optString("status")
+        }
+        if (status != "open") {
+            continue
+        }
+        gatePaddockPair(gate)?.let(edges::add)
+    }
+    return edges
+}
+
+private fun components(paddockIds: Set<String>, edges: List<Pair<String, String>>): List<Set<String>> {
+    val adjacency = paddockIds.associateWith { mutableSetOf<String>() }
+    edges.forEach { (left, right) ->
+        if (left in adjacency && right in adjacency) {
+            adjacency[left]?.add(right)
+            adjacency[right]?.add(left)
+        }
+    }
+    val seen = mutableSetOf<String>()
+    val result = mutableListOf<Set<String>>()
+    paddockIds.sorted().forEach { paddockId ->
+        if (!seen.add(paddockId)) {
+            return@forEach
+        }
+        val stack = mutableListOf(paddockId)
+        val component = mutableSetOf<String>()
+        while (stack.isNotEmpty()) {
+            val current = stack.removeAt(stack.lastIndex)
+            component.add(current)
+            adjacency[current].orEmpty().forEach { neighbor ->
+                if (seen.add(neighbor)) {
+                    stack.add(neighbor)
+                }
+            }
+        }
+        result.add(component)
+    }
+    return result
+}
+
+private fun componentContaining(components: List<Set<String>>, paddockId: String): Set<String> =
+    components.firstOrNull { paddockId in it } ?: setOf(paddockId)
+
+private fun areaWeightedAllocations(json: JSONObject, paddockIds: Set<String>, totalFraction: Double): Map<String, Double> {
+    val paddocks = json.optJSONArray("paddocks") ?: JSONArray()
+    val rows = mutableListOf<JSONObject>()
+    for (index in 0 until paddocks.length()) {
+        val paddock = paddocks.optJSONObject(index) ?: continue
+        if (paddock.optString("id") in paddockIds) {
+            rows.add(paddock)
+        }
+    }
+    val sorted = rows.sortedBy { it.optString("name").lowercase() }
+    val splits = splitFractionByRatios(
+        totalFraction = totalFraction,
+        ratios = sorted.map { paddock ->
+            val grazeable = paddock.optDouble("grazeable_area_ha", 0.0)
+            if (grazeable > 0.0) grazeable else paddock.optDouble("area_ha", 0.0).coerceAtLeast(0.0)
+        },
+    )
+    return sorted
+        .zip(splits)
+        .filter { (_, fraction) -> fraction > 0.0 }
+        .associate { (paddock, fraction) -> paddock.optString("id") to fraction }
+}
+
+private fun splitFractionByRatios(totalFraction: Double, ratios: List<Double>): List<Double> {
+    if (totalFraction <= 0.0 || ratios.isEmpty()) {
+        return ratios.map { 0.0 }
+    }
+    var positiveRatios = ratios.map { it.coerceAtLeast(0.0) }
+    var positiveTotal = positiveRatios.sum()
+    if (positiveTotal <= 0.0) {
+        positiveRatios = ratios.map { 1.0 }
+        positiveTotal = positiveRatios.sum()
+    }
+    val totalUnits = round(totalFraction * 10000.0).toInt()
+    val units = MutableList(ratios.size) { 0 }
+    val remainders = mutableListOf<Pair<Double, Int>>()
+    var assigned = 0
+    positiveRatios.forEachIndexed { index, ratio ->
+        val rawUnits = totalUnits * (ratio / positiveTotal)
+        val floorUnits = floor(rawUnits).toInt()
+        units[index] = floorUnits
+        assigned += floorUnits
+        remainders.add((rawUnits - floorUnits) to index)
+    }
+    var remaining = totalUnits - assigned
+    remainders.sortedWith(compareBy<Pair<Double, Int>> { -it.first }.thenBy { it.second }).forEach { (_, index) ->
+        if (remaining <= 0) {
+            return@forEach
+        }
+        if (positiveRatios[index] <= 0.0) {
+            return@forEach
+        }
+        units[index] += 1
+        remaining -= 1
+    }
+    return units.map { it / 10000.0 }
+}
+
+private fun allocationMap(session: JSONObject): Map<String, Double> {
+    val allocations = session.optJSONArray("allocations") ?: JSONArray()
+    val result = linkedMapOf<String, Double>()
+    for (index in 0 until allocations.length()) {
+        val allocation = allocations.optJSONObject(index) ?: continue
+        val paddockId = allocation.optString("paddock_id")
+        if (paddockId.isNotBlank()) {
+            result[paddockId] = allocation.optDouble("allocation_fraction", 0.0)
+        }
+    }
+    return result
+}
+
+private fun replaceSessionAllocations(
+    session: JSONObject,
+    target: Map<String, Double>,
+    eventTime: String?,
+): Boolean {
+    val normalized = normalizeAllocationMap(target)
+    if (allocationMapsEqual(allocationMap(session), normalized)) {
+        return false
+    }
+    session.put(
+        "allocations",
+        JSONArray().apply {
+            normalized.toSortedMap().forEach { (paddockId, fraction) ->
+                if (fraction > 0.0) {
+                    put(JSONObject().put("paddock_id", paddockId).put("allocation_fraction", fraction))
+                }
+            }
+        },
+    )
+    eventTime?.let { session.put("start_at", it) }
+    session.put("pending_sync", true)
+    return true
+}
+
+private fun normalizeAllocationMap(target: Map<String, Double>): Map<String, Double> {
+    val positive = target
+        .filter { (_, fraction) -> fraction > 0.0 }
+        .mapValues { (_, fraction) -> round(fraction * 10000.0) / 10000.0 }
+        .toMutableMap()
+    if (positive.isEmpty()) {
+        return positive
+    }
+    val sum = positive.values.sum()
+    val diff = round((1.0 - sum) * 10000.0) / 10000.0
+    if (abs(diff) > 0.0) {
+        val firstKey = positive.keys.sorted().first()
+        positive[firstKey] = round(((positive[firstKey] ?: 0.0) + diff) * 10000.0) / 10000.0
+    }
+    return positive
+}
+
+private fun allocationMapsEqual(left: Map<String, Double>, right: Map<String, Double>): Boolean {
+    if (left.keys != right.keys) {
+        return false
+    }
+    return left.all { (key, value) -> abs(value - (right[key] ?: 0.0)) < 0.00005 }
+}
+
+private fun gateClosureChoiceMap(choices: JSONArray?): Map<String, String> {
+    if (choices == null) {
+        return emptyMap()
+    }
+    val result = mutableMapOf<String, String>()
+    for (index in 0 until choices.length()) {
+        val choice = choices.optJSONObject(index) ?: continue
+        val mobId = choice.optString("mob_id")
+        val componentPaddockId = choice.optString("component_paddock_id")
+        if (mobId.isNotBlank() && componentPaddockId.isNotBlank()) {
+            result[mobId] = componentPaddockId
+        }
+    }
+    return result
 }
 
 private fun applyWaterAssetStatus(json: JSONObject, payload: JSONObject): Boolean {

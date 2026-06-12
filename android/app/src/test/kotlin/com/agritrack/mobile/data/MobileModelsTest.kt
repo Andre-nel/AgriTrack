@@ -59,6 +59,25 @@ class MobileModelsTest {
                 )
                 .put("water_assets", JSONArray().put(JSONObject().put("id", "tank-1")))
                 .put(
+                    "gates",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "gate-1")
+                                .put("farm_id", "farm-1")
+                                .put("paddock_a_id", "paddock-1")
+                                .put("paddock_a_name", "North Camp")
+                                .put("paddock_b_id", "paddock-2")
+                                .put("paddock_b_name", "South Camp")
+                                .put("name", "North Camp / South Camp Gate")
+                                .put("status", "closed")
+                                .put("active", true)
+                                .put("source", "auto")
+                                .put("latitude", -34.0)
+                                .put("longitude", 18.0)
+                        )
+                )
+                .put(
                     "active_grazing_by_paddock",
                     JSONArray()
                         .put(
@@ -260,6 +279,24 @@ class MobileModelsTest {
                                         .put("grazing_pressure_ratio", 0.42)
                                 )
                         )
+                        .put(
+                            JSONObject()
+                                .put("type", "Feature")
+                                .put(
+                                    "geometry",
+                                    JSONObject()
+                                        .put("type", "Point")
+                                        .put("coordinates", JSONArray().put(18.001).put(-34.001))
+                                )
+                                .put(
+                                    "properties",
+                                    JSONObject()
+                                        .put("feature_type", "gate")
+                                        .put("gate_id", "gate-1")
+                                        .put("name", "North Camp / South Camp Gate")
+                                        .put("status", "closed")
+                                )
+                        )
                 )
         )
 
@@ -267,6 +304,7 @@ class MobileModelsTest {
         assertEquals(1, snapshot.paddockCount)
         assertEquals(1, snapshot.mobCount)
         assertEquals(1, snapshot.waterAssetCount)
+        assertEquals("closed", snapshot.gates.first().status)
         assertEquals(1, snapshot.mobEventCount)
         assertEquals(1, snapshot.paddockEventCount)
         assertEquals(1, snapshot.waterAssetEventCount)
@@ -296,6 +334,8 @@ class MobileModelsTest {
         assertEquals(1, snapshot.tasks.first().attachmentCount)
         assertEquals("trough.jpg", snapshot.tasks.first().attachments.first().originalFilename)
         assertEquals(0.42, snapshot.mapFeatures.first().grazingPressureRatio ?: 0.0, 0.0)
+        assertEquals("gate-1", snapshot.mapFeatures.last().gateId)
+        assertEquals("closed", snapshot.mapFeatures.last().gateStatus)
         assertEquals(1, snapshot.calendarItemCount)
         assertEquals("task-1", snapshot.calendarItems.first().taskId)
         assertEquals("Confirm level", snapshot.calendarItems.first().description)

@@ -166,6 +166,23 @@ data class WaterAssetSummary(
     val networkWarning: String?,
 )
 
+data class GateSummary(
+    val id: String,
+    val farmId: String,
+    val paddockAId: String,
+    val paddockAName: String?,
+    val paddockBId: String,
+    val paddockBName: String?,
+    val name: String,
+    val status: String,
+    val active: Boolean,
+    val source: String,
+    val latitude: Double?,
+    val longitude: Double?,
+    val sharedBoundaryLengthM: Double?,
+    val lastStateChangedAt: String?,
+)
+
 data class RainfallSummary(
     val id: String,
     val recordedOn: String,
@@ -316,6 +333,8 @@ data class MapFeatureSummary(
     val farmName: String?,
     val paddockId: String?,
     val waterAssetId: String?,
+    val gateId: String? = null,
+    val gateStatus: String? = null,
     val waterAlertLevel: String?,
     val waterAlertMessage: String?,
     val grazingPressureRatio: Double?,
@@ -345,6 +364,7 @@ data class FarmSnapshot(
     val activeGrazing: List<ActiveGrazingSummary>,
     val grazingByPaddock: List<PaddockGrazingSummary>,
     val waterAssets: List<WaterAssetSummary>,
+    val gates: List<GateSummary> = emptyList(),
     val rainfall: List<RainfallSummary>,
     val mobEvents: List<MobEventSummary>,
     val paddockEvents: List<PaddockEventSummary>,
@@ -365,6 +385,7 @@ data class FarmSnapshot(
             val activeGrazing = parseActiveGrazing(json.optJSONArray("active_grazing") ?: JSONArray())
             val grazingByPaddock = parseGrazingByPaddock(json.optJSONArray("active_grazing_by_paddock") ?: JSONArray())
             val waterAssets = parseWaterAssets(json.optJSONArray("water_assets") ?: JSONArray())
+            val gates = parseGates(json.optJSONArray("gates") ?: JSONArray())
             val rainfall = parseRainfall(json.optJSONArray("rainfall") ?: JSONArray())
             val mobEvents = parseMobEvents(json.optJSONArray("mob_events") ?: JSONArray())
             val paddockEvents = parsePaddockEvents(json.optJSONArray("paddock_events") ?: JSONArray())
@@ -397,6 +418,7 @@ data class FarmSnapshot(
                 activeGrazing = activeGrazing,
                 grazingByPaddock = grazingByPaddock,
                 waterAssets = waterAssets,
+                gates = gates,
                 rainfall = rainfall,
                 mobEvents = mobEvents,
                 paddockEvents = paddockEvents,
@@ -553,6 +575,30 @@ data class FarmSnapshot(
                         locationPaddockName = asset.optNullableString("location_paddock_name"),
                         servedPaddockIds = asset.optJSONArray("served_paddock_ids").strings(),
                         networkWarning = asset.optNullableString("network_warning"),
+                    )
+                )
+            }
+        }
+
+        private fun parseGates(json: JSONArray): List<GateSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val gate = json.getJSONObject(index)
+                add(
+                    GateSummary(
+                        id = gate.optString("id", gate.optString("gate_id")),
+                        farmId = gate.optString("farm_id"),
+                        paddockAId = gate.optString("paddock_a_id"),
+                        paddockAName = gate.optNullableString("paddock_a_name"),
+                        paddockBId = gate.optString("paddock_b_id"),
+                        paddockBName = gate.optNullableString("paddock_b_name"),
+                        name = gate.optString("name", "Gate"),
+                        status = gate.optString("status", "closed"),
+                        active = gate.optBoolean("active", true),
+                        source = gate.optString("source", "manual"),
+                        latitude = gate.optNullableDouble("latitude"),
+                        longitude = gate.optNullableDouble("longitude"),
+                        sharedBoundaryLengthM = gate.optNullableDouble("shared_boundary_length_m"),
+                        lastStateChangedAt = gate.optNullableString("last_state_changed_at"),
                     )
                 )
             }
@@ -792,14 +838,17 @@ data class FarmSnapshot(
                 val properties = feature.optJSONObject("properties") ?: JSONObject()
                 val geometry = feature.optJSONObject("geometry") ?: JSONObject()
                 val mobsJson = properties.optJSONArray("mobs") ?: JSONArray()
+                val featureType = properties.optString("feature_type", "feature")
                 add(
                     MapFeatureSummary(
-                        featureType = properties.optString("feature_type", "feature"),
+                        featureType = featureType,
                         name = properties.optString("name", "Map feature"),
                         farmId = properties.optNullableString("farm_id"),
                         farmName = properties.optNullableString("farm_name"),
                         paddockId = properties.optNullableString("paddock_id"),
-                        waterAssetId = properties.optNullableString("id"),
+                        waterAssetId = if (featureType == "water_asset") properties.optNullableString("id") else null,
+                        gateId = if (featureType == "gate") properties.optNullableString("gate_id") else null,
+                        gateStatus = if (featureType == "gate") properties.optNullableString("status") else null,
                         waterAlertLevel = properties.optNullableString("water_alert_level"),
                         waterAlertMessage = properties.optNullableString("water_alert_message"),
                         grazingPressureRatio = properties.optNullableDouble("grazing_pressure_ratio"),

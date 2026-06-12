@@ -256,6 +256,29 @@ class OfflineCommandQueueTest {
     }
 
     @Test
+    fun gateUpdateCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.gateUpdate(
+            farmId = "farm-1",
+            gateId = "gate-1",
+            status = "open",
+            closureChoices = listOf("mob-1" to "paddock-1"),
+            eventTime = "2026-06-12T10:00:00Z",
+        )
+
+        val json = command.toJson()
+        val payload = json.getJSONObject("payload")
+        val choice = payload.getJSONArray("closure_choices").getJSONObject(0)
+
+        assertEquals("gate.update", json.getString("type"))
+        assertEquals("farm-1", json.getString("farm_id"))
+        assertEquals("gate-1", payload.getString("gate_id"))
+        assertEquals("open", payload.getString("status"))
+        assertEquals("2026-06-12T10:00:00Z", payload.getString("event_time"))
+        assertEquals("mob-1", choice.getString("mob_id"))
+        assertEquals("paddock-1", choice.getString("component_paddock_id"))
+    }
+
+    @Test
     fun mobTransferCommandShapesSupportedSyncPayload() {
         val command = MobileCommand.mobTransfer(
             farmId = "farm-1",

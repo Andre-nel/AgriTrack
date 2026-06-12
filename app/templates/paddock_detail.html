@@ -40,6 +40,51 @@
 </dialog>
 
 <section class="card">
+  <h2>Adjacent Gates</h2>
+  <table>
+    <thead><tr><th>Gate</th><th>Status</th><th>Source</th><th>Action</th></tr></thead>
+    <tbody>
+      {% for row in adjacent_gate_rows %}
+      <tr>
+        <td><a href="{{ url_for('web.edit_farm_gate', farm_id=paddock.farm_id, gate_id=row.id) }}">{{ row.paddock_names | join(" / ") }}</a></td>
+        <td><span class="status-pill status-{{ row.status }}">{{ row.status|capitalize }}</span></td>
+        <td>{{ row.source|capitalize }}</td>
+        <td>
+          {% if row.status == "closed" %}
+          <form method="post" action="{{ url_for('web.update_farm_gate_state_form', farm_id=paddock.farm_id, gate_id=row.id) }}">
+            <input type="hidden" name="status" value="open" />
+            <input type="hidden" name="next" value="{{ url_for('web.paddock_detail', paddock_id=paddock.id) }}" />
+            <button type="submit" class="btn">Open Gate</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('web.update_farm_gate_state_form', farm_id=paddock.farm_id, gate_id=row.id) }}" class="grid-form gate-close-form">
+            <input type="hidden" name="status" value="closed" />
+            <input type="hidden" name="next" value="{{ url_for('web.paddock_detail', paddock_id=paddock.id) }}" />
+            {% if row.close_requirements.requires_choices %}
+            {% for mob in row.close_requirements.mobs %}
+            <label>{{ mob.mob_name }}
+              <select name="closure_choice:{{ mob.mob_id }}" required>
+                <option value="">Choose side</option>
+                {% for component in row.close_requirements.components %}
+                <option value="{{ component.component_paddock_id }}">{{ component.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            {% endfor %}
+            {% endif %}
+            <button type="submit" class="btn btn-secondary">Close Gate</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No gates connect to this paddock yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
   <div class="task-section-heading">
     <h2>Linked Tasks</h2>
     <a class="btn btn-secondary" href="{{ url_for('tasks.new_task_page', paddock_id=paddock.id) }}">Create Task For Paddock</a>

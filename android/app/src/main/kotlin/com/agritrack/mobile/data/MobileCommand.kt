@@ -262,6 +262,39 @@ data class MobileCommand(
             )
         }
 
+        fun gateUpdate(
+            farmId: String,
+            gateId: String,
+            status: String,
+            closureChoices: List<Pair<String, String>> = emptyList(),
+            eventTime: String? = null,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("gate_id", gateId)
+                .put("status", status.trim())
+                .put(
+                    "closure_choices",
+                    JSONArray().apply {
+                        closureChoices.forEach { (mobId, componentPaddockId) ->
+                            put(
+                                JSONObject()
+                                    .put("mob_id", mobId)
+                                    .put("component_paddock_id", componentPaddockId)
+                            )
+                        }
+                    }
+                )
+            if (!eventTime.isNullOrBlank()) {
+                payload.put("event_time", eventTime.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "gate.update",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
         fun taskCreate(
             farmId: String,
             heading: String,

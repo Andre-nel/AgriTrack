@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 240" role="img" aria-labelledby="title desc">
+  <title id="title">Open ranch gate</title>
+  <desc id="desc">A black outlined ranch gate swung open from a hinge post, with horizontal rails, stiles, and diagonal braces.</desc>
+  <defs>
+    <style>
+      .gate-stroke { fill: none; stroke: #1f1f1f; stroke-linecap: square; stroke-linejoin: miter; vector-effect: non-scaling-stroke; }
+      .post { fill: #1f1f1f; }
+      .shadow { fill: none; stroke: #1f1f1f; stroke-width: 4; opacity: .18; stroke-linecap: round; }
+    </style>
+  </defs>
+  <path class="shadow" d="M88 178C185 220 345 204 432 132"/>
+  <rect class="post" x="54" y="42" width="18" height="150" rx="1"/>
+  <rect class="post" x="448" y="58" width="18" height="138" rx="1" opacity=".95"/>
+  <rect class="post" x="70" y="68" width="25" height="9" rx="1"/>
+  <rect class="post" x="70" y="152" width="25" height="9" rx="1"/>
+  <path class="gate-stroke" d="M92 60L420 28L420 126L92 170Z" stroke-width="10"/>
+  <path class="gate-stroke" d="M92 96L420 62 M92 133L420 95" stroke-width="8"/>
+  <path class="gate-stroke" d="M256 44V148 M420 28V126" stroke-width="8"/>
+  <path class="gate-stroke" d="M100 162L256 48 M412 120L256 48" stroke-width="8"/>
+  <path class="gate-stroke" d="M100 66L256 145 M412 34L256 145" stroke-width="5" opacity="0.95"/>
+</svg>

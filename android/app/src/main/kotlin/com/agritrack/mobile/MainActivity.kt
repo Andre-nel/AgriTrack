@@ -66,7 +66,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -518,6 +520,9 @@ class MainActivity : ComponentActivity() {
                     onQueuePaddockNote = { queueAndMaybeSync(queuePaddockNote(uiState, repository())) },
                     onQueueWaterNote = { queueAndMaybeSync(queueWaterAssetNote(uiState, repository())) },
                     onQueueWaterUpdate = { queueAndMaybeSync(queueWaterUpdate(uiState, repository())) },
+                    onQueueGateUpdate = { gateId, status ->
+                        queueAndMaybeSync(queueGateUpdate(uiState, repository(), gateId, status))
+                    },
                     onQueueTaskCreate = { queueAndMaybeSync(queueTaskCreate(uiState, repository())) },
                     onQueueTaskStatus = { task, status ->
                         queueAndMaybeSync(queueTaskStatus(uiState, repository(), task, status))
@@ -899,6 +904,7 @@ private fun AgriTrackApp(
     onQueuePaddockNote: () -> Unit,
     onQueueWaterNote: () -> Unit,
     onQueueWaterUpdate: () -> Unit,
+    onQueueGateUpdate: (String, String) -> Unit,
     onQueueTaskCreate: () -> Unit,
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
     onQueueTaskComment: (TaskSummary) -> Unit,
@@ -946,6 +952,7 @@ private fun AgriTrackApp(
                     onMobSelected,
                     onWaterAssetSelected,
                     onOpenScreen,
+                    onQueueGateUpdate,
                 )
                 AppScreen.FarmMapFullscreen -> FarmMapFullscreenScreen(
                     state,
@@ -955,6 +962,7 @@ private fun AgriTrackApp(
                     onMobSelected,
                     onWaterAssetSelected,
                     onOpenScreen,
+                    onQueueGateUpdate,
                 )
                 AppScreen.Calendar -> CalendarScreen(
                     state,
@@ -1415,6 +1423,7 @@ private fun FarmMapScreen(
     onMobSelected: (String) -> Unit,
     onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
+    onQueueGateUpdate: (String, String) -> Unit,
 ) {
     FormScaffold("Farm Map", onBackHome) {
         val snapshot = state.snapshot ?: return@FormScaffold
@@ -1428,6 +1437,7 @@ private fun FarmMapScreen(
             onMobSelected = onMobSelected,
             onWaterAssetSelected = onWaterAssetSelected,
             onOpenScreen = onOpenScreen,
+            onQueueGateUpdate = onQueueGateUpdate,
         )
     }
 }
@@ -1441,6 +1451,7 @@ private fun FarmMapFullscreenScreen(
     onMobSelected: (String) -> Unit,
     onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
+    onQueueGateUpdate: (String, String) -> Unit,
 ) {
     val snapshot = state.snapshot ?: return
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1460,6 +1471,7 @@ private fun FarmMapFullscreenScreen(
             onMobSelected = onMobSelected,
             onWaterAssetSelected = onWaterAssetSelected,
             onOpenScreen = onOpenScreen,
+            onQueueGateUpdate = onQueueGateUpdate,
         )
     }
 }
@@ -1475,6 +1487,7 @@ private fun FarmMapContent(
     onMobSelected: (String) -> Unit,
     onWaterAssetSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
+    onQueueGateUpdate: (String, String) -> Unit,
 ) {
     var selectedMapItem by remember(snapshot.farm.id, fullscreen) { mutableStateOf<MapSelection?>(null) }
     var satelliteUnavailable by remember(snapshot.farm.id, fullscreen) { mutableStateOf(false) }
@@ -1507,6 +1520,7 @@ private fun FarmMapContent(
     selectedMapItem?.let { selection ->
         MapSelectionPanel(
             selection = selection,
+            onGateUpdate = onQueueGateUpdate,
             onOpen = {
                 val mob = selection.mob
                 if (mob != null) {
@@ -1531,7 +1545,7 @@ private fun FarmMapContent(
     }
     if (!fullscreen) {
         snapshot.mapFeatures
-            .filter { it.featureType == "paddock" || it.featureType == "water_asset" }
+            .filter { it.featureType == "paddock" || it.featureType == "water_asset" || it.featureType == "gate" }
             .take(12)
             .forEach { feature ->
                 EntityCard(
@@ -1543,7 +1557,11 @@ private fun FarmMapContent(
 }
 
 @Composable
-private fun MapSelectionPanel(selection: MapSelection, onOpen: () -> Unit) {
+private fun MapSelectionPanel(
+    selection: MapSelection,
+    onGateUpdate: (String, String) -> Unit,
+    onOpen: () -> Unit,
+) {
     val feature = selection.feature
     val title = selection.mob?.mobName ?: feature.name
     val detail = if (selection.mob != null) {
@@ -1553,8 +1571,20 @@ private fun MapSelectionPanel(selection: MapSelection, onOpen: () -> Unit) {
     }
     SectionCard(title) {
         Text(detail.ifBlank { feature.featureType }, color = Color(0xFF516052))
-        Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
-            Text("Open")
+        if (feature.featureType == "gate") {
+            val gateId = feature.gateId
+            val nextStatus = if (feature.gateStatus == "open") "closed" else "open"
+            Button(
+                onClick = { if (gateId != null) onGateUpdate(gateId, nextStatus) },
+                enabled = !gateId.isNullOrBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (nextStatus == "open") "Open Gate" else "Close Gate")
+            }
+        } else {
+            Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+                Text("Open")
+            }
         }
     }
 }
@@ -1562,6 +1592,7 @@ private fun MapSelectionPanel(selection: MapSelection, onOpen: () -> Unit) {
 private fun mapFeatureDetail(feature: MapFeatureSummary): String =
     listOf(
         feature.featureType,
+        feature.gateStatus?.let { "status $it" },
         feature.grazingPressureRatio?.let { "pressure ${(it * 100).toInt()}%" },
         feature.currentLsu?.let { "LSU $it" },
         feature.waterAlertLevel,
@@ -1691,10 +1722,13 @@ private fun parseSatelliteMapSelection(payload: String, features: List<MapFeatur
     val featureType = json.optString("feature_type")
     val paddockId = json.optString("paddock_id")
     val waterAssetId = json.optString("water_asset_id")
+    val gateId = json.optString("gate_id")
     val name = json.optString("name")
     val feature = when {
         featureType == "water_asset" && waterAssetId.isNotBlank() ->
             features.firstOrNull { it.featureType == "water_asset" && it.waterAssetId == waterAssetId }
+        featureType == "gate" && gateId.isNotBlank() ->
+            features.firstOrNull { it.featureType == "gate" && it.gateId == gateId }
         paddockId.isNotBlank() ->
             features.firstOrNull { it.paddockId == paddockId }
         else ->
@@ -1720,6 +1754,37 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
             html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; }
             body { background: #111816; }
             .leaflet-container { background: #111816; font-family: system-ui, sans-serif; }
+            .gate-map-marker-wrap { background: transparent; border: 0; }
+            .gate-map-marker {
+              position: relative;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              width: 32px;
+              height: 24px;
+              background: transparent;
+              opacity: .76;
+              color: #2E7D32;
+            }
+            .gate-map-marker::after {
+              content: "";
+              position: absolute;
+              right: 0;
+              bottom: 1px;
+              width: 6px;
+              height: 6px;
+              border-radius: 999px;
+              border: 1px solid rgba(255, 255, 255, .74);
+            }
+            .gate-map-marker-open { color: #F4C542; }
+            .gate-map-marker-closed { color: #2E7D32; }
+            .gate-map-marker-open::after { background: rgba(244, 197, 66, .88); }
+            .gate-map-marker-closed::after { background: rgba(46, 125, 50, .86); }
+            .gate-map-marker svg {
+              display: block;
+              width: 30px;
+              height: 16px;
+            }
           </style>
         </head>
         <body>
@@ -1779,6 +1844,7 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
                   feature_type: props.feature_type || "",
                   paddock_id: props.paddock_id || "",
                   water_asset_id: props.feature_type === "water_asset" ? (props.id || "") : "",
+                  gate_id: props.feature_type === "gate" ? (props.gate_id || props.id || "") : "",
                   name: props.name || "",
                   mob_id: mob ? (mob.mob_id || "") : ""
                 }));
@@ -1798,6 +1864,36 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
                 };
               }
 
+              function gateSvg(status) {
+                if (status === "open") {
+                  return [
+                    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 240" aria-hidden="true">',
+                    '<path d="M88 178C185 220 345 204 432 132" fill="none" stroke="currentColor" stroke-width="4" opacity=".18" stroke-linecap="round"></path>',
+                    '<rect x="54" y="42" width="18" height="150" rx="1" fill="currentColor"></rect>',
+                    '<rect x="448" y="58" width="18" height="138" rx="1" fill="currentColor" opacity=".95"></rect>',
+                    '<rect x="70" y="68" width="25" height="9" rx="1" fill="currentColor"></rect>',
+                    '<rect x="70" y="152" width="25" height="9" rx="1" fill="currentColor"></rect>',
+                    '<path d="M92 60L420 28L420 126L92 170Z" fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                    '<path d="M92 96L420 62 M92 133L420 95" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                    '<path d="M256 44V148 M420 28V126" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                    '<path d="M100 162L256 48 M412 120L256 48" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                    '<path d="M100 66L256 145 M412 34L256 145" fill="none" stroke="currentColor" stroke-width="5" opacity=".95" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                    '</svg>'
+                  ].join("");
+                }
+                return [
+                  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 220" aria-hidden="true">',
+                  '<rect x="38" y="40" width="18" height="140" rx="1" fill="currentColor"></rect>',
+                  '<rect x="456" y="40" width="18" height="140" rx="1" fill="currentColor"></rect>',
+                  '<rect x="56" y="52" width="400" height="116" fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="square" stroke-linejoin="miter"></rect>',
+                  '<path d="M56 91H456 M56 129H456" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                  '<path d="M256 52V168" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                  '<path d="M64 160L256 60 M448 160L256 60" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                  '<path d="M64 60L256 160 M448 60L256 160" fill="none" stroke="currentColor" stroke-width="5" opacity=".95" stroke-linecap="square" stroke-linejoin="miter"></path>',
+                  '</svg>'
+                ].join("");
+              }
+
               function pointToLayer(feature, latlng) {
                 const props = feature.properties || {};
                 if (props.feature_type === "water_asset") {
@@ -1807,6 +1903,18 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
                     weight: 2,
                     fillColor: "#2563EB",
                     fillOpacity: 1
+                  });
+                }
+                if (props.feature_type === "gate") {
+                  const status = props.status === "open" ? "open" : "closed";
+                  return L.marker(latlng, {
+                    zIndexOffset: 1000,
+                    icon: L.divIcon({
+                      className: "gate-map-marker-wrap",
+                      html: '<span class="gate-map-marker gate-map-marker-' + status + '">' + gateSvg(status) + '</span>',
+                      iconSize: [32, 24],
+                      iconAnchor: [16, 12]
+                    })
                   });
                 }
                 return L.circleMarker(latlng, {
@@ -1827,7 +1935,7 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
                   if (props.name && layer.bindTooltip) {
                     layer.bindTooltip(props.name, { sticky: true });
                   }
-                  if (props.feature_type === "paddock" || props.feature_type === "water_asset") {
+                  if (props.feature_type === "paddock" || props.feature_type === "water_asset" || props.feature_type === "gate") {
                     layer.on("click", function () { selectFeature(props, null); });
                   }
                   if (props.feature_type === "paddock" && Array.isArray(props.mobs) && props.mobs.length && layer.getBounds) {
@@ -1964,8 +2072,29 @@ private fun OfflineFarmMap(
             }
             item.points.forEach { point ->
                 val projected = projectMapPoint(point, bounds, canvasSize, zoom, pan)
-                drawCircle(Color(0xFF2563EB), radius = 8f, center = projected)
-                drawCircle(Color.White, radius = 3f, center = projected)
+                if (item.source.featureType == "gate") {
+                    val isOpen = item.source.gateStatus == "open"
+                    val gateColor = if (isOpen) Color(0xFFF4C542) else Color(0xFF2E7D32)
+                    val rail = gateColor.copy(alpha = 0.86f)
+                    val topLeft = Offset(projected.x - 16f, projected.y - 10f)
+                    drawRoundRect(
+                        color = gateColor.copy(alpha = 0.55f),
+                        topLeft = topLeft,
+                        size = Size(32f, 20f),
+                        cornerRadius = CornerRadius(4f, 4f),
+                        style = Stroke(width = 2f),
+                    )
+                    drawLine(rail, Offset(projected.x - 11f, projected.y - 7f), Offset(projected.x - 11f, projected.y + 7f), strokeWidth = 2f)
+                    drawLine(rail, Offset(projected.x + 11f, projected.y - 7f), Offset(projected.x + 11f, projected.y + 7f), strokeWidth = 2f)
+                    drawLine(rail, Offset(projected.x - 10f, projected.y - 4f), Offset(projected.x + 10f, projected.y - 4f), strokeWidth = 2f)
+                    drawLine(rail, Offset(projected.x - 10f, projected.y + 4f), Offset(projected.x + 10f, projected.y + 4f), strokeWidth = 2f)
+                    val braceEnd = if (isOpen) Offset(projected.x + 10f, projected.y - 7f) else Offset(projected.x + 10f, projected.y - 4f)
+                    drawLine(rail, Offset(projected.x - 10f, projected.y + 6f), braceEnd, strokeWidth = 2f)
+                    drawCircle(gateColor.copy(alpha = 0.82f), radius = 3f, center = Offset(projected.x + 13f, projected.y + 7f))
+                } else {
+                    drawCircle(Color(0xFF2563EB), radius = 8f, center = projected)
+                    drawCircle(Color.White, radius = 3f, center = projected)
+                }
             }
             if (item.source.featureType == "paddock" && item.source.mobs.isNotEmpty()) {
                 centroid(item.polygons.firstOrNull()).let { center ->
@@ -2102,6 +2231,15 @@ private fun findMapTap(
 ): MapSelection? {
     features
         .filter { it.source.featureType == "water_asset" && it.points.isNotEmpty() }
+        .firstOrNull { item ->
+            item.points.any { point ->
+                val projected = projectMapPoint(point, bounds, size, zoom, pan)
+                abs(projected.x - tap.x) < 32f && abs(projected.y - tap.y) < 32f
+            }
+        }?.let { return MapSelection(it.source) }
+
+    features
+        .filter { it.source.featureType == "gate" && it.points.isNotEmpty() }
         .firstOrNull { item ->
             item.points.any { point ->
                 val projected = projectMapPoint(point, bounds, size, zoom, pan)
@@ -4368,6 +4506,22 @@ private fun queueWaterUpdate(state: FieldUiState, repo: MobileRepository): Field
     val waterLevel = if (asset?.assetType in state.formOptions.waterLevelAssetTypes) state.waterLevel else ""
     repo.queueWaterStatus(farm.id, state.selectedWaterAssetId, state.waterStatus, waterLevel, state.waterActive)
     return state.copy(currentScreen = AppScreen.Home, statusMessage = "Queued water update.")
+}
+
+private fun queueGateUpdate(
+    state: FieldUiState,
+    repo: MobileRepository,
+    gateId: String,
+    status: String,
+): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before updating a gate.")
+    val gate = state.snapshot?.gates?.firstOrNull { it.id == gateId }
+    if (gate == null) {
+        return state.copy(statusMessage = "Gate is not in the cached snapshot.")
+    }
+    repo.queueGateUpdate(farm.id, gateId, status)
+    val action = if (status == "open") "open" else "close"
+    return state.copy(statusMessage = "Queued gate $action for ${gate.name}.")
 }
 
 private fun queueTaskCreate(state: FieldUiState, repo: MobileRepository): FieldUiState {

@@ -25,6 +25,11 @@ class Farm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         back_populates="farm",
         cascade="all, delete-orphan",
     )
+    paddock_gates = db.relationship(
+        "PaddockGate",
+        back_populates="farm",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         db.CheckConstraint(

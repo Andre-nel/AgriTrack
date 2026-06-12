@@ -22,6 +22,7 @@ from app.models import (
     NoteAttachment,
     Paddock,
     PaddockEvent,
+    PaddockGate,
     RainfallRecord,
     StockLedgerEntry,
     Task,
@@ -207,6 +208,12 @@ class FarmDeletionService:
             PaddockEvent,
             PaddockEvent.farm_id == farm_id,
             cls._in_if_any(PaddockEvent.paddock_id, paddock_ids),
+        )
+        cls._delete_where(
+            PaddockGate,
+            PaddockGate.farm_id == farm_id,
+            cls._in_if_any(PaddockGate.paddock_a_id, paddock_ids),
+            cls._in_if_any(PaddockGate.paddock_b_id, paddock_ids),
         )
         cls._delete_where(DailyStockSnapshot, DailyStockSnapshot.farm_id == farm_id)
         cls._delete_where(DailyStockSnapshot, cls._in_if_any(DailyStockSnapshot.paddock_id, paddock_ids))
