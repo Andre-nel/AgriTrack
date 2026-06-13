@@ -125,6 +125,13 @@
         {% endfor %}
       </select>
     </label>
+    <label>Fence Sections
+      <select name="fence_section_ids" multiple size="5">
+        {% for section in entity_options.fence_sections %}
+        <option value="{{ section.id }}" {% if section.id|string in form_values.fence_section_ids %}selected{% endif %}>{{ section.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     {% else %}
     <p class="muted">Farm entity linking is unavailable until database migrations are up to date.</p>
     {% endif %}

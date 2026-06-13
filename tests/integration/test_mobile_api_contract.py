@@ -52,6 +52,7 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
         "mob_event.create",
         "paddock_event.create",
         "water_asset_event.create",
+        "fence_event.create",
         "stock_count.record",
         "mob.move",
         "mob.transfer",
@@ -61,6 +62,7 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
         "paddock.update",
         "gate.update",
         "water_asset_status.update",
+        "fence_section.update",
     ]
     for command_type in command_types:
         assert command_type in docs

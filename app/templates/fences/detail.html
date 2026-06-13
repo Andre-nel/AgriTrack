@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+{% block title %}{{ section.name }} | Fences | AgriTrack{% endblock %}
+{% block content %}
+<section class="paddock-page-header">
+  <div>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_fences', farm_id=farm.id) }}">Back To Fences</a>
+    <h1>{{ section.name }}</h1>
+    <p class="muted">{{ section_row.section_type_label }} | {{ section_row.paddock_names | join(" / ") }}</p>
+  </div>
+  <a class="btn" href="{{ url_for('tasks.new_task_page', fence_section_id=section.id) }}">Create Task</a>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Edit Fence Section</h2>
+    <form method="post" action="{{ url_for('web.update_farm_fence_form', farm_id=farm.id, fence_section_id=section.id) }}" class="grid-form">
+      <label>Name
+        <input name="name" value="{{ section.name }}" required />
+      </label>
+      <div class="grid-two">
+        <label>Condition
+          <select name="condition">
+            {% for option in options.conditions %}
+            <option value="{{ option.value }}" {% if option.value == section.condition %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Height
+          <select name="height_profile">
+            {% for option in options.height_profiles %}
+            <option value="{{ option.value }}" {% if option.value == section.height_profile %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Construction
+          <select name="construction_type">
+            {% for option in options.construction_types %}
+            <option value="{{ option.value }}" {% if option.value == section.construction_type %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Wire
+          <select name="wire_type">
+            {% for option in options.wire_types %}
+            <option value="{{ option.value }}" {% if option.value == section.wire_type %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Posts
+          <select name="post_type">
+            {% for option in options.post_types %}
+            <option value="{{ option.value }}" {% if option.value == section.post_type %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Droppers
+          <select name="dropper_type">
+            {% for option in options.dropper_types %}
+            <option value="{{ option.value }}" {% if option.value == section.dropper_type %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Mesh
+        <select name="mesh_type">
+          {% for option in options.mesh_types %}
+          <option value="{{ option.value }}" {% if option.value == section.mesh_type %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" name="electric_wire" value="1" {% if section.electric_wire %}checked{% endif %} />
+        Electric wire
+      </label>
+      <label>Electric Wire Type
+        <input name="electric_wire_type" value="{{ section.electric_wire_type or '' }}" />
+      </label>
+      <div class="grid-two">
+        <label>Holds Cattle
+          <select name="holds_cattle">
+            {% for option in options.suitability_values %}
+            <option value="{{ option.value }}" {% if option.value == section.holds_cattle %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Holds Sheep
+          <select name="holds_sheep">
+            {% for option in options.suitability_values %}
+            <option value="{{ option.value }}" {% if option.value == section.holds_sheep %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Holds Goats
+          <select name="holds_goats">
+            {% for option in options.suitability_values %}
+            <option value="{{ option.value }}" {% if option.value == section.holds_goats %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Excludes Jackal
+          <select name="excludes_jackal">
+            {% for option in options.suitability_values %}
+            <option value="{{ option.value }}" {% if option.value == section.excludes_jackal %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Excludes Predators
+        <select name="excludes_predators">
+          {% for option in options.suitability_values %}
+          <option value="{{ option.value }}" {% if option.value == section.excludes_predators %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Tags
+        <input name="tags" value="{{ section.tags_csv }}" placeholder="jackal, boundary, repair" />
+      </label>
+      <label>Notes
+        <textarea name="notes" rows="4">{{ section.notes or '' }}</textarea>
+      </label>
+      <button type="submit" class="btn">Save Fence</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Section Details</h2>
+    <table>
+      <tbody>
+        <tr><th>Condition</th><td>{{ section_row.condition_label }}</td></tr>
+        <tr><th>Length</th><td>{% if section_row.length_m is not none %}{{ "%.1f"|format(section_row.length_m) }} m{% else %}-{% endif %}</td></tr>
+        <tr><th>Source</th><td>{{ section.source|capitalize }}</td></tr>
+        <tr><th>Build</th><td>{{ section_row.height_profile_label }} / {{ section_row.construction_type_label }}</td></tr>
+        <tr><th>Posts / Droppers</th><td>{{ section.post_type|replace("_", " ")|title }} / {{ section.dropper_type|replace("_", " ")|title }}</td></tr>
+        <tr><th>Wire / Mesh</th><td>{{ section.wire_type|replace("_", " ")|title }} / {{ section.mesh_type|replace("_", " ")|title }}</td></tr>
+        <tr><th>Electric</th><td>{{ "Yes" if section.electric_wire else "No" }}</td></tr>
+        <tr>
+          <th>Tags</th>
+          <td>
+            {% for tag in section_row.tags %}
+            <span class="tag-pill">{{ tag }}</span>
+            {% else %}
+            <span class="muted">-</span>
+            {% endfor %}
+          </td>
+        </tr>
+        <tr><th>Notes</th><td>{{ section.notes or "-" }}</td></tr>
+        <tr><th>Last Updated</th><td>{{ section_row.updated_at or "-" }}</td></tr>
+      </tbody>
+    </table>
+  </article>
+</section>
+
+<section class="card">
+  <div class="task-section-heading">
+    <h2>Linked Tasks</h2>
+    <a class="btn btn-secondary" href="{{ url_for('tasks.new_task_page', fence_section_id=section.id) }}">Create Task For Fence</a>
+  </div>
+  <ul class="link-list-clean">
+    {% for task in linked_task_rows %}
+    <li class="link-card">
+      <div class="task-card-topline">
+        <a class="task-key" href="{{ task.url }}">{{ task.display_key }}</a>
+        <span class="status-pill status-{{ task.status }}">{{ task.status_label }}</span>
+      </div>
+      <p class="text-body"><strong>{{ task.heading }}</strong></p>
+      <div class="task-chip-row">
+        <span class="priority-pill priority-{{ task.priority }}">{{ task.priority_label }}</span>
+        {% if task.due_date %}<span class="tag-pill">Due {{ task.due_date }}</span>{% endif %}
+        {% if task.is_overdue %}<span class="priority-pill priority-high">Overdue</span>{% endif %}
+      </div>
+    </li>
+    {% else %}
+    <li class="task-empty-state">No tasks linked to this fence yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card" data-fence-event-card>
+  <div class="task-section-heading">
+    <div>
+      <h2>Fence Events</h2>
+      <p class="muted">Record inspections, notes, repairs, and replaced materials for this fence section.</p>
+    </div>
+    <button type="button" class="btn" data-fence-event-toggle aria-expanded="false">Record Fence Event</button>
+  </div>
+  <div data-fence-event-panel hidden>
+    <form method="post" action="{{ url_for('web.create_farm_fence_event_form', farm_id=farm.id, fence_section_id=section.id) }}" class="grid-form" enctype="multipart/form-data">
+      <div class="grid-two">
+        <label>Type
+          <select name="event_type">
+            {% for option in options.event_types %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Condition After
+          <select name="condition_after">
+            <option value="">No change</option>
+            {% for option in options.conditions %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Tags
+        <input name="event_tags" placeholder="inspection, maintenance, predator" />
+      </label>
+      <label>Description
+        <textarea name="description" rows="4" required></textarea>
+      </label>
+      <div class="material-grid">
+        <div class="task-section-heading">
+          <h3>Material Lines</h3>
+          <button type="button" class="btn btn-secondary" data-add-material-line>Add Material Line</button>
+        </div>
+        <div data-material-lines>
+          <div class="grid-form material-line-row">
+            <div class="grid-two">
+              <label>Action
+                <select name="material_action">
+                  <option value="">-</option>
+                  {% for option in options.material_actions %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>Material
+                <select name="material_type">
+                  <option value="">-</option>
+                  {% for option in options.material_types %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+            <div class="grid-two">
+              <label>Detail<input name="material_detail" placeholder="e.g. 8-strand wire" /></label>
+              <label>Quantity<input type="number" step="0.01" min="0" name="material_quantity" /></label>
+            </div>
+            <div class="grid-two">
+              <label>Unit
+                <select name="material_unit">
+                  <option value="">-</option>
+                  {% for option in options.material_units %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>Line Notes<input name="material_notes" /></label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <label>Images
+        <input type="file" name="event_images" accept="image/*" multiple />
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn">Record Event</button>
+        <button type="button" class="btn btn-secondary" data-fence-event-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+  <template data-material-line-template>
+    <div class="grid-form material-line-row">
+      <div class="grid-two">
+        <label>Action
+          <select name="material_action">
+            <option value="">-</option>
+            {% for option in options.material_actions %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Material
+          <select name="material_type">
+            <option value="">-</option>
+            {% for option in options.material_types %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Detail<input name="material_detail" placeholder="e.g. 8-strand wire" /></label>
+        <label>Quantity<input type="number" step="0.01" min="0" name="material_quantity" /></label>
+      </div>
+      <div class="grid-two">
+        <label>Unit
+          <select name="material_unit">
+            <option value="">-</option>
+            {% for option in options.material_units %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Line Notes<input name="material_notes" /></label>
+      </div>
+      <button type="button" class="btn btn-secondary btn-small" data-remove-material-line>Remove Line</button>
+    </div>
+  </template>
+</section>
+
+<section class="card">
+  <h2>Fence History</h2>
+  <table>
+    <thead><tr><th>Recorded At</th><th>Type</th><th>Condition</th><th>Note</th><th>Materials</th><th>Images</th></tr></thead>
+    <tbody>
+      {% for row in event_rows %}
+      <tr>
+        <td>{{ row.event_at }}</td>
+        <td>{{ row.event_type_label }}</td>
+        <td>{{ row.condition_after_label or "-" }}</td>
+        <td>{{ row.description }}</td>
+        <td>
+          {% for material in row.materials %}
+          <div>{{ material.action_label }} {{ material.material_type_label }}{% if material.quantity is not none %} - {{ "%.2f"|format(material.quantity) }} {{ material.unit or "" }}{% endif %}</div>
+          {% else %}
+          <span class="muted">None</span>
+          {% endfor %}
+        </td>
+        <td>
+          {% if row.attachments %}
+          <div class="note-attachment-grid">
+            {% for attachment in row.attachments %}
+            <a class="note-attachment-card" href="{{ url_for('web.note_attachment_file', attachment_id=attachment.id) }}" target="_blank" rel="noopener">
+              <img src="{{ url_for('web.note_attachment_file', attachment_id=attachment.id) }}" alt="{{ attachment.caption or attachment.original_filename }}" />
+              <span>{{ attachment.original_filename }}</span>
+            </a>
+            {% endfor %}
+          </div>
+          {% else %}
+          <span class="muted">None</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">No fence events recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    const toggleButton = document.querySelector("[data-fence-event-toggle]");
+    const closeButton = document.querySelector("[data-fence-event-close]");
+    const panel = document.querySelector("[data-fence-event-panel]");
+    const materialLines = document.querySelector("[data-material-lines]");
+    const materialTemplate = document.querySelector("[data-material-line-template]");
+    const addMaterialButton = document.querySelector("[data-add-material-line]");
+
+    function setEventPanelVisible(visible) {
+      if (!panel || !toggleButton) {
+        return;
+      }
+      panel.hidden = !visible;
+      toggleButton.setAttribute("aria-expanded", visible ? "true" : "false");
+      toggleButton.textContent = visible ? "Close Event Form" : "Record Fence Event";
+      if (visible) {
+        const firstField = panel.querySelector("select, input, textarea, button");
+        if (firstField) {
+          firstField.focus();
+        }
+      }
+    }
+
+    if (toggleButton && panel) {
+      toggleButton.addEventListener("click", function () {
+        setEventPanelVisible(panel.hidden);
+      });
+    }
+
+    if (closeButton) {
+      closeButton.addEventListener("click", function () {
+        setEventPanelVisible(false);
+      });
+    }
+
+    if (addMaterialButton && materialLines && materialTemplate) {
+      addMaterialButton.addEventListener("click", function () {
+        const fragment = materialTemplate.content.cloneNode(true);
+        materialLines.appendChild(fragment);
+      });
+    }
+
+    if (materialLines) {
+      materialLines.addEventListener("click", function (event) {
+        const removeButton = event.target.closest("[data-remove-material-line]");
+        if (!removeButton) {
+          return;
+        }
+        const row = removeButton.closest(".material-line-row");
+        if (row) {
+          row.remove();
+        }
+      });
+    }
+  })();
+</script>
+{% endblock %}

@@ -10,6 +10,9 @@ from app.models import (
     CashTransaction,
     DailyStockSnapshot,
     Farm,
+    FenceEvent,
+    FenceEventMaterial,
+    FenceSection,
     GrazingAllocation,
     GrazingAllocationLsuHistory,
     GrazingSession,
@@ -79,6 +82,8 @@ class FarmDeletionService:
         farm_id = str(farm.id)
         mob_ids = cls._ids_for(Mob, Mob.farm_id, farm_id)
         paddock_ids = cls._ids_for(Paddock, Paddock.farm_id, farm_id)
+        fence_section_ids = cls._ids_for(FenceSection, FenceSection.farm_id, farm_id)
+        fence_event_ids = cls._ids_for(FenceEvent, FenceEvent.farm_id, farm_id)
         movement_event_ids = cls._ids_for(MovementEvent, MovementEvent.farm_id, farm_id)
         grazing_session_ids = [
             row[0]
@@ -128,6 +133,7 @@ class FarmDeletionService:
             cls._in_if_any(TaskEntityLink.paddock_id, paddock_ids),
             cls._in_if_any(TaskEntityLink.water_asset_id, water_asset_ids),
             cls._in_if_any(TaskEntityLink.mob_id, mob_ids),
+            cls._in_if_any(TaskEntityLink.fence_section_id, fence_section_ids),
         )
         cls._delete_where(
             TaskLink,
@@ -143,6 +149,18 @@ class FarmDeletionService:
         cls._delete_where(TaskSpace, cls._in_if_any(TaskSpace.id, task_space_ids))
 
         cls._delete_where(NoteAttachment, NoteAttachment.farm_id == farm_id)
+        cls._delete_where(FenceEventMaterial, cls._in_if_any(FenceEventMaterial.event_id, fence_event_ids))
+        cls._delete_where(
+            FenceEvent,
+            FenceEvent.farm_id == farm_id,
+            cls._in_if_any(FenceEvent.fence_section_id, fence_section_ids),
+        )
+        cls._delete_where(
+            FenceSection,
+            FenceSection.farm_id == farm_id,
+            cls._in_if_any(FenceSection.paddock_a_id, paddock_ids),
+            cls._in_if_any(FenceSection.paddock_b_id, paddock_ids),
+        )
         cls._delete_where(
             WaterAssetEvent,
             WaterAssetEvent.farm_id == farm_id,

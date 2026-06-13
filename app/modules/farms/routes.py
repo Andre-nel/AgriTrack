@@ -9,6 +9,7 @@ from app.extensions import db
 from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, PaddockGate, RainfallRecord
 from app.modules.farms.forms import parse_mob_lines, parse_paddock_lines, parse_placements
 from app.services.farm_deletion_service import FarmDeletionService
+from app.services.fence_service import FenceService
 from app.services.gate_service import GateService
 from app.services.movement_service import MovementService
 from app.services.paddock_service import PaddockService
@@ -266,6 +267,7 @@ def register_legacy_routes(bp) -> None:
         )
         water_summary = WaterNetworkService.farm_summary(str(farm.id))
         gate_count = len(GateService.gates_for_farm(str(farm.id)))
+        fence_count = len(FenceService.sections_for_farm(str(farm.id)))
         return render_template(
             "farm_detail.html",
             farm=farm,
@@ -282,6 +284,7 @@ def register_legacy_routes(bp) -> None:
             mob_detail_labels=mob_detail_labels,
             water_summary=water_summary,
             gate_count=gate_count,
+            fence_count=fence_count,
         )
 
     @bp.get("/farms/<farm_id>/gates")

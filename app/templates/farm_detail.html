@@ -12,6 +12,7 @@
   <article class="card stat"><h2>Mobs</h2><p>{{ mobs|length }}</p></article>
   <article class="card stat"><h2>Rainfall Logs</h2><p>{{ rainfall|length }}</p></article>
   <article class="card stat"><h2>Water Assets</h2><p>{{ water_summary.active_asset_count }}</p></article>
+  <article class="card stat"><h2>Fences</h2><p>{{ fence_count }}</p></article>
 </div>
 
 <section class="card">
@@ -53,6 +54,7 @@
     <span><i class="swatch water-gravity-swatch"></i>Gravity Link</span>
     <span><i class="swatch gate-open-swatch"></i>Open Gate</span>
     <span><i class="swatch gate-closed-swatch"></i>Closed Gate</span>
+    <span><i class="swatch fence-swatch"></i>Fence Section</span>
   </div>
   <p id="farm-map-status" class="muted">Loading map...</p>
 </section>
@@ -160,6 +162,16 @@
       <p class="muted">{{ gate_count }} active gate(s). Manage gate placement, open/closed state, and camp connections on the gate page.</p>
     </div>
     <a class="btn" href="{{ url_for('web.farm_gates', farm_id=farm.id) }}">Manage Gates</a>
+  </div>
+</section>
+
+<section class="card">
+  <div class="task-section-heading">
+    <div>
+      <h2>Fence Sections</h2>
+      <p class="muted">{{ fence_count }} active section(s). Track condition, suitability, notes, and maintenance from the fence register.</p>
+    </div>
+    <a class="btn" href="{{ url_for('web.farm_fences', farm_id=farm.id) }}">Manage Fences</a>
   </div>
 </section>
 

@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block title %}{{ farm.name }} Fences | AgriTrack{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+{% endblock %}
+{% block content %}
+<section class="paddock-page-header">
+  <div>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=farm.id) }}">Back To Farm</a>
+    <h1>{{ farm.name }} Fences</h1>
+    <p class="muted">
+      {{ section_rows|length }} of {{ total_section_count }} active section(s){% if has_active_filters %} shown{% endif %}
+    </p>
+  </div>
+  <div class="row-actions">
+    <a class="btn" href="{{ url_for('web.farm_fence_statistics', farm_id=farm.id) }}">Fence Statistics</a>
+    <form method="post" action="{{ url_for('web.sync_farm_fences_form', farm_id=farm.id) }}">
+      <button type="submit" class="btn btn-secondary">Refresh Fences From Map</button>
+    </form>
+  </div>
+</section>
+
+<section class="fence-map-workspace" data-map-fullscreen-root>
+  <div class="card fence-map-card">
+    <div class="task-section-heading">
+      <div>
+        <h2>Fence Map</h2>
+        <p class="muted">Select or draw a fence section, then adjust points and core details from the panel.</p>
+      </div>
+      <div class="row-actions">
+        <button type="button" class="btn" data-fence-map-new>Draw Fence</button>
+        <button type="button" class="btn btn-secondary" data-fence-map-edit disabled>Edit Points</button>
+      </div>
+    </div>
+    <div
+      id="farm-map"
+      class="fence-focused-map"
+      data-url="{{ url_for('web.farm_map_data', farm_id=farm.id) }}"
+      data-map-focus="fences"
+      data-show-stock-floats="0"
+      data-paddock-fill="outline"
+      data-fence-create-url="{{ url_for('fences.create_fence') }}"
+      data-fence-update-url-template="{{ url_for('fences.update_fence', fence_section_id='__fence_id__') }}"
+      data-fence-delete-url-template="{{ url_for('fences.delete_fence', fence_section_id='__fence_id__') }}"
+    ></div>
+    <div class="map-legend fence-construction-legend" aria-hidden="true">
+      <span><i class="fence-line-swatch fence-line-high-strung"></i>High Strung Wire</span>
+      <span><i class="fence-line-swatch fence-line-barbed"></i>Barbed Wire</span>
+      <span><i class="fence-line-swatch fence-line-mesh"></i>Mesh</span>
+      <span><i class="fence-line-swatch fence-line-mixed"></i>Mixed</span>
+      <span><i class="fence-line-swatch fence-line-other"></i>Other</span>
+    </div>
+    <p id="farm-map-status" class="muted">Loading fence map...</p>
+  </div>
+
+  <aside class="card fence-map-panel" data-fence-map-panel>
+    <h2 data-fence-panel-title>Fence Editor</h2>
+    <p class="muted" data-fence-panel-status>Select a fence section or draw a new one.</p>
+    <form class="grid-form" data-fence-map-form>
+      <input type="hidden" name="fence_section_id" />
+      <input type="hidden" name="farm_id" value="{{ farm.id }}" />
+      <label>Name
+        <input name="name" required />
+      </label>
+      <div class="grid-two">
+        <label>Type
+          <select name="section_type" required>
+            <option value="boundary">Boundary</option>
+            <option value="internal">Internal</option>
+          </select>
+        </label>
+        <label>Condition
+          <select name="condition">
+            {% for option in options.conditions %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Paddock A
+          <select name="paddock_a_id" required>
+            <option value="">Choose paddock</option>
+            {% for paddock in paddock_options %}
+            <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Paddock B
+          <select name="paddock_b_id">
+            <option value="">Boundary fence</option>
+            {% for paddock in paddock_options %}
+            <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Height
+          <select name="height_profile">
+            {% for option in options.height_profiles %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Construction
+          <select name="construction_type">
+            {% for option in options.construction_types %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label class="checkbox-row">
+        <input type="checkbox" name="electric_wire" value="1" />
+        Electric wire
+      </label>
+      <label>Electric Wire Type
+        <input name="electric_wire_type" />
+      </label>
+      <label>Tags
+        <input name="tags" placeholder="jackal, boundary, repair" />
+      </label>
+      <label>Notes
+        <textarea name="notes" rows="3"></textarea>
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn" data-fence-map-save disabled>Save Fence</button>
+        <button type="button" class="btn btn-secondary" data-fence-map-cancel disabled>Cancel</button>
+        <button type="button" class="btn btn-danger" data-fence-map-archive disabled>Archive</button>
+      </div>
+      <a data-fence-map-detail-link class="btn btn-secondary" href="#" hidden>Open Detail Page</a>
+    </form>
+  </aside>
+</section>
+
+<section class="card">
+  <div class="task-section-heading">
+    <div>
+      <h2>Fence Register</h2>
+      {% if has_active_filters %}
+      <p class="muted">Filtered results are shown below. The map still shows all active fence sections.</p>
+      {% endif %}
+    </div>
+    {% if has_active_filters %}
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_fences', farm_id=farm.id) }}">Clear Filters</a>
+    {% endif %}
+  </div>
+  <form method="get" class="grid-form fence-filter-form">
+    <div class="grid-two">
+      <label>Search
+        <input name="q" value="{{ filter_state.q }}" placeholder="name, paddock, notes, tags" />
+      </label>
+      <label>Tag
+        <input name="tag" value="{{ filter_state.tag }}" list="fence-tag-options" placeholder="e.g. jackal" />
+      </label>
+    </div>
+    <datalist id="fence-tag-options">
+      {% for tag in available_tags %}
+      <option value="{{ tag }}"></option>
+      {% endfor %}
+    </datalist>
+    <div class="grid-two">
+      <label>Condition
+        <select name="condition">
+          <option value="">Any condition</option>
+          {% for option in options.conditions %}
+          <option value="{{ option.value }}" {% if option.value == filter_state.condition %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Construction
+        <select name="construction_type">
+          <option value="">Any construction</option>
+          {% for option in options.construction_types %}
+          <option value="{{ option.value }}" {% if option.value == filter_state.construction_type %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label>Type
+        <select name="section_type">
+          <option value="">Any type</option>
+          <option value="boundary" {% if filter_state.section_type == "boundary" %}selected{% endif %}>Boundary</option>
+          <option value="internal" {% if filter_state.section_type == "internal" %}selected{% endif %}>Internal</option>
+        </select>
+      </label>
+      <label>Electric
+        <select name="electric_wire">
+          <option value="">Any electric status</option>
+          <option value="yes" {% if filter_state.electric_wire == "yes" %}selected{% endif %}>Has electric wire</option>
+          <option value="no" {% if filter_state.electric_wire == "no" %}selected{% endif %}>No electric wire</option>
+        </select>
+      </label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply Filters</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.farm_fences', farm_id=farm.id) }}">Reset</a>
+    </div>
+  </form>
+  <table>
+    <thead>
+      <tr>
+        <th>Section</th>
+        <th>Type</th>
+        <th>Condition</th>
+        <th>Build</th>
+        <th>Length</th>
+        <th>Electric</th>
+        <th>Tags</th>
+        <th>Tasks</th>
+      </tr>
+    </thead>
+    <tbody data-fence-register-body>
+      {% for row in section_rows %}
+      <tr data-fence-register-row data-fence-section-id="{{ row.id }}" data-task-count="{{ row.task_count }}">
+        <td>
+          <a href="{{ url_for('web.farm_fence_detail', farm_id=farm.id, fence_section_id=row.id) }}">{{ row.name }}</a>
+          <div class="muted">{{ row.paddock_names | join(" / ") }}</div>
+        </td>
+        <td>{{ row.section_type_label }}</td>
+        <td><span class="status-pill status-{{ row.condition }}">{{ row.condition_label }}</span></td>
+        <td>{{ row.height_profile_label }} / {{ row.construction_type_label }}</td>
+        <td>{% if row.length_m is not none %}{{ "%.1f"|format(row.length_m) }} m{% else %}-{% endif %}</td>
+        <td>{{ "Yes" if row.electric_wire else "No" }}</td>
+        <td>
+          {% for tag in row.tags %}
+          <span class="tag-pill">{{ tag }}</span>
+          {% else %}
+          <span class="muted">-</span>
+          {% endfor %}
+        </td>
+        <td>
+          {{ row.task_count }}
+          <button type="button" class="btn btn-secondary btn-small" data-fence-map-select="{{ row.id }}">Map</button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8">No fence sections match the current filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="{{ url_for('static', filename='farm_map.js') }}"></script>
+{% endblock %}

@@ -638,8 +638,12 @@ class CalendarService:
                                 else "water_asset"
                                 if link.water_asset_id
                                 else "mob"
+                                if link.mob_id
+                                else "fence_section"
+                                if link.fence_section_id
+                                else "unknown"
                             ),
-                            "entity_id": str(link.paddock_id or link.water_asset_id or link.mob_id),
+                            "entity_id": str(link.paddock_id or link.water_asset_id or link.mob_id or link.fence_section_id),
                             "entity_name": (
                                 link.paddock.name
                                 if link.paddock
@@ -647,6 +651,8 @@ class CalendarService:
                                 if link.water_asset
                                 else link.mob.name
                                 if link.mob
+                                else link.fence_section.name
+                                if link.fence_section
                                 else None
                             ),
                         }

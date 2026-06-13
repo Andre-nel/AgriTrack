@@ -177,6 +177,28 @@ class OfflineCommandQueueTest {
     }
 
     @Test
+    fun fenceNoteCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.fenceNote(
+            farmId = "farm-1",
+            fenceSectionId = "fence-1",
+            description = "Found a hole under the mesh",
+            tags = listOf("inspection", "jackal"),
+            eventType = "inspection",
+            conditionAfter = "bad",
+        )
+
+        val json = command.toJson()
+        val payload = json.getJSONObject("payload")
+
+        assertEquals("fence_event.create", json.getString("type"))
+        assertEquals("farm-1", json.getString("farm_id"))
+        assertEquals("fence-1", payload.getString("fence_section_id"))
+        assertEquals("inspection", payload.getString("event_type"))
+        assertEquals("bad", payload.getString("condition_after"))
+        assertEquals("jackal", payload.getJSONArray("tags").getString(1))
+    }
+
+    @Test
     fun stockCountCommandShapesSupportedSyncPayload() {
         val command = MobileCommand.stockCount(
             farmId = "farm-1",
@@ -245,6 +267,13 @@ class OfflineCommandQueueTest {
             status = "in_progress",
             note = "Started",
         ).toJson()
+        val fence = MobileCommand.fenceUpdate(
+            farmId = "farm-1",
+            fenceSectionId = "fence-1",
+            condition = "fair",
+            notes = "Hotwire working again",
+            electricWire = true,
+        ).toJson()
 
         assertEquals("water_asset_status.update", water.getString("type"))
         assertEquals("full", water.getJSONObject("payload").getString("water_level"))
@@ -253,6 +282,26 @@ class OfflineCommandQueueTest {
         assertEquals("gate", paddock.getJSONObject("payload").getJSONArray("tags").getString(0))
         assertEquals("task.status.update", task.getString("type"))
         assertEquals("in_progress", task.getJSONObject("payload").getString("status"))
+        assertEquals("fence_section.update", fence.getString("type"))
+        assertEquals("fence-1", fence.getJSONObject("payload").getString("fence_section_id"))
+        assertEquals(true, fence.getJSONObject("payload").getBoolean("electric_wire"))
+    }
+
+    @Test
+    fun taskCreateCanTargetFenceSection() {
+        val command = MobileCommand.taskCreate(
+            farmId = "farm-1",
+            heading = "Repair boundary fence",
+            description = "Replace droppers",
+            dueDate = "2026-06-15",
+            entityType = "fence_section",
+            entityId = "fence-1",
+        )
+
+        val payload = command.toJson().getJSONObject("payload")
+
+        assertEquals("task.create", command.toJson().getString("type"))
+        assertEquals("fence-1", payload.getString("fence_section_id"))
     }
 
     @Test

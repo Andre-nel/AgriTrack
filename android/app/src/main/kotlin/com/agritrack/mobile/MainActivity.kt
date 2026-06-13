@@ -87,6 +87,7 @@ import com.agritrack.mobile.data.DecisionItemSummary
 import com.agritrack.mobile.data.FarmSnapshot
 import com.agritrack.mobile.data.FarmSummary
 import com.agritrack.mobile.data.FarmLoadResult
+import com.agritrack.mobile.data.FenceSectionSummary
 import com.agritrack.mobile.data.LocalFieldStore
 import com.agritrack.mobile.data.LogoutResult
 import com.agritrack.mobile.data.MapFeatureSummary
@@ -468,6 +469,7 @@ class MainActivity : ComponentActivity() {
                     onMobSelected = { uiState = selectMob(uiState, it) },
                     onPaddockSelected = { uiState = selectPaddock(uiState, it) },
                     onWaterAssetSelected = { uiState = selectWaterAsset(uiState, it) },
+                    onFenceSectionSelected = { uiState = selectFenceSection(uiState, it) },
                     onAnimalGroupSelected = { uiState = selectAnimalGroup(uiState, it) },
                     onMoveNoteChange = { uiState = uiState.copy(moveNote = it) },
                     onStockQuantityChange = { uiState = uiState.copy(stockQuantity = it) },
@@ -481,6 +483,9 @@ class MainActivity : ComponentActivity() {
                     onWaterStatusChange = { uiState = uiState.copy(waterStatus = it) },
                     onWaterLevelChange = { uiState = uiState.copy(waterLevel = it) },
                     onWaterActiveChange = { uiState = uiState.copy(waterActive = it) },
+                    onFenceConditionChange = { uiState = uiState.copy(fenceCondition = it) },
+                    onFenceNotesChange = { uiState = uiState.copy(fenceNotes = it) },
+                    onFenceElectricWireChange = { uiState = uiState.copy(fenceElectricWire = it) },
                     onTaskHeadingChange = { uiState = uiState.copy(taskHeading = it) },
                     onTaskDescriptionChange = { uiState = uiState.copy(taskDescription = it) },
                     onTaskDueDateChange = { uiState = uiState.copy(taskDueDate = it) },
@@ -520,6 +525,8 @@ class MainActivity : ComponentActivity() {
                     onQueuePaddockNote = { queueAndMaybeSync(queuePaddockNote(uiState, repository())) },
                     onQueueWaterNote = { queueAndMaybeSync(queueWaterAssetNote(uiState, repository())) },
                     onQueueWaterUpdate = { queueAndMaybeSync(queueWaterUpdate(uiState, repository())) },
+                    onQueueFenceNote = { queueAndMaybeSync(queueFenceNote(uiState, repository())) },
+                    onQueueFenceUpdate = { queueAndMaybeSync(queueFenceUpdate(uiState, repository())) },
                     onQueueGateUpdate = { gateId, status ->
                         queueAndMaybeSync(queueGateUpdate(uiState, repository(), gateId, status))
                     },
@@ -678,6 +685,7 @@ private data class FieldUiState(
     val selectedMobId: String = "",
     val selectedPaddockId: String = "",
     val selectedWaterAssetId: String = "",
+    val selectedFenceSectionId: String = "",
     val selectedAnimalGroupTypeId: String = "",
     val moveNote: String = "",
     val stockQuantity: String = "",
@@ -691,6 +699,9 @@ private data class FieldUiState(
     val waterStatus: String = "",
     val waterLevel: String = "",
     val waterActive: Boolean = true,
+    val fenceCondition: String = "",
+    val fenceNotes: String = "",
+    val fenceElectricWire: Boolean = false,
     val taskEntityType: String = "farm",
     val taskEntityId: String = "",
     val taskHeading: String = "",
@@ -716,6 +727,7 @@ private data class FieldUiState(
             val firstMob = snapshot?.mobs?.firstOrNull()
             val firstPaddock = snapshot?.paddocks?.firstOrNull()
             val firstWater = snapshot?.waterAssets?.firstOrNull()
+            val firstFence = snapshot?.fenceSections?.firstOrNull()
             val firstBalance = firstMob?.balances?.firstOrNull()
             val selectedFarm = activeFarm ?: snapshot?.let { farmWithRole(it.farm, availableFarms) }
             val cachedSnapshots = mergeFarmSnapshots(emptyMap(), farmSnapshots, snapshot)
@@ -734,6 +746,7 @@ private data class FieldUiState(
                 selectedMobId = firstMob?.id.orEmpty(),
                 selectedPaddockId = firstPaddock?.id.orEmpty(),
                 selectedWaterAssetId = firstWater?.id.orEmpty(),
+                selectedFenceSectionId = firstFence?.id.orEmpty(),
                 selectedAnimalGroupTypeId = firstBalance?.animalGroupTypeId.orEmpty(),
                 stockQuantity = firstBalance?.headCount?.toString().orEmpty(),
                 transferDestinationMobId = snapshot?.mobs?.drop(1)?.firstOrNull()?.id.orEmpty(),
@@ -743,6 +756,9 @@ private data class FieldUiState(
                 waterStatus = firstWater?.status.orEmpty(),
                 waterLevel = firstWater?.waterLevel.orEmpty(),
                 waterActive = firstWater?.active ?: true,
+                fenceCondition = firstFence?.condition.orEmpty(),
+                fenceNotes = firstFence?.notes.orEmpty(),
+                fenceElectricWire = firstFence?.electricWire ?: false,
                 selectedTaskId = snapshot?.tasks?.firstOrNull()?.id.orEmpty(),
                 selectedCalendarItemSourceId = snapshot?.calendarItems?.firstOrNull()?.sourceId.orEmpty(),
                 selectedCalendarItemDate = snapshot?.calendarItems?.firstOrNull()?.date.orEmpty(),
@@ -819,12 +835,15 @@ private enum class AppScreen {
     PaddockDetail,
     WaterAssets,
     WaterAssetDetail,
+    Fences,
+    FenceDetail,
     Rainfall,
     MoveMob,
     StockCount,
     TransferMob,
     PaddockEdit,
     WaterEdit,
+    FenceEdit,
     TaskCreate,
     Sync,
 }
@@ -869,6 +888,7 @@ private fun AgriTrackApp(
     onMobSelected: (String) -> Unit,
     onPaddockSelected: (String) -> Unit,
     onWaterAssetSelected: (String) -> Unit,
+    onFenceSectionSelected: (String) -> Unit,
     onAnimalGroupSelected: (String) -> Unit,
     onMoveNoteChange: (String) -> Unit,
     onStockQuantityChange: (String) -> Unit,
@@ -882,6 +902,9 @@ private fun AgriTrackApp(
     onWaterStatusChange: (String) -> Unit,
     onWaterLevelChange: (String) -> Unit,
     onWaterActiveChange: (Boolean) -> Unit,
+    onFenceConditionChange: (String) -> Unit,
+    onFenceNotesChange: (String) -> Unit,
+    onFenceElectricWireChange: (Boolean) -> Unit,
     onTaskHeadingChange: (String) -> Unit,
     onTaskDescriptionChange: (String) -> Unit,
     onTaskDueDateChange: (String) -> Unit,
@@ -904,6 +927,8 @@ private fun AgriTrackApp(
     onQueuePaddockNote: () -> Unit,
     onQueueWaterNote: () -> Unit,
     onQueueWaterUpdate: () -> Unit,
+    onQueueFenceNote: () -> Unit,
+    onQueueFenceUpdate: () -> Unit,
     onQueueGateUpdate: (String, String) -> Unit,
     onQueueTaskCreate: () -> Unit,
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
@@ -951,6 +976,7 @@ private fun AgriTrackApp(
                     onPaddockSelected,
                     onMobSelected,
                     onWaterAssetSelected,
+                    onFenceSectionSelected,
                     onOpenScreen,
                     onQueueGateUpdate,
                 )
@@ -961,6 +987,7 @@ private fun AgriTrackApp(
                     onPaddockSelected,
                     onMobSelected,
                     onWaterAssetSelected,
+                    onFenceSectionSelected,
                     onOpenScreen,
                     onQueueGateUpdate,
                 )
@@ -1053,6 +1080,22 @@ private fun AgriTrackApp(
                     onEntityNoteTagsChange,
                     onQueueWaterNote,
                 )
+                AppScreen.Fences -> FencesScreen(
+                    state,
+                    onBackHome,
+                    onFenceSectionSelected,
+                    onOpenScreen,
+                )
+                AppScreen.FenceDetail -> FenceDetailScreen(
+                    state,
+                    { onOpenScreen(AppScreen.Fences) },
+                    onFenceSectionSelected,
+                    onOpenScreen,
+                    onStartTaskForEntity,
+                    onEntityNoteChange,
+                    onEntityNoteTagsChange,
+                    onQueueFenceNote,
+                )
                 AppScreen.Rainfall -> RainfallScreen(
                     state,
                     onBackHome,
@@ -1101,6 +1144,14 @@ private fun AgriTrackApp(
                     onWaterLevelChange,
                     onWaterActiveChange,
                     onQueueWaterUpdate,
+                )
+                AppScreen.FenceEdit -> FenceEditScreen(
+                    state,
+                    onBackHome,
+                    onFenceConditionChange,
+                    onFenceNotesChange,
+                    onFenceElectricWireChange,
+                    onQueueFenceUpdate,
                 )
                 AppScreen.TaskCreate -> TaskCreateScreen(
                     state,
@@ -1260,6 +1311,7 @@ private fun FarmSummaryPanel(
                 MetricAction("Paddocks", snapshot.paddockCount.toString(), AppScreen.Paddocks),
                 MetricAction("Mobs", snapshot.mobCount.toString(), AppScreen.Mobs),
                 MetricAction("Water", snapshot.waterAssetCount.toString(), AppScreen.WaterAssets),
+                MetricAction("Fences", snapshot.fenceSectionCount.toString(), AppScreen.Fences),
                 MetricAction("Calendar", snapshot.calendarItemCount.toString(), AppScreen.Calendar),
                 MetricAction("Decisions", state.allFarmDecisionFeed.size.toString(), AppScreen.Decisions),
             )
@@ -1323,6 +1375,9 @@ private fun DashboardMenu(state: FieldUiState, onOpenScreen: (AppScreen) -> Unit
         }
         DashboardButton("Water Assets", "Update status and water levels", state.snapshot?.waterAssets?.isNotEmpty() == true) {
             onOpenScreen(AppScreen.WaterAssets)
+        }
+        DashboardButton("Fences", "Inspect condition, notes, and linked tasks", state.snapshot?.fenceSections?.isNotEmpty() == true) {
+            onOpenScreen(AppScreen.Fences)
         }
         DashboardButton("Rainfall", "View recent rain and record a reading", state.snapshot != null) {
             onOpenScreen(AppScreen.Rainfall)
@@ -1406,6 +1461,7 @@ private fun FarmScreen(state: FieldUiState, onBackHome: () -> Unit) {
                 "Paddocks" to snapshot.paddockCount.toString(),
                 "Mobs" to snapshot.mobCount.toString(),
                 "Water assets" to snapshot.waterAssetCount.toString(),
+                "Fence sections" to snapshot.fenceSectionCount.toString(),
                 "Open tasks" to snapshot.taskCount.toString(),
                 "Map features" to snapshot.mapFeatures.size.toString(),
                 "Recent rain" to snapshot.rainfallCount.toString(),
@@ -1422,6 +1478,7 @@ private fun FarmMapScreen(
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
     onWaterAssetSelected: (String) -> Unit,
+    onFenceSectionSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onQueueGateUpdate: (String, String) -> Unit,
 ) {
@@ -1436,6 +1493,7 @@ private fun FarmMapScreen(
             onPaddockSelected = onPaddockSelected,
             onMobSelected = onMobSelected,
             onWaterAssetSelected = onWaterAssetSelected,
+            onFenceSectionSelected = onFenceSectionSelected,
             onOpenScreen = onOpenScreen,
             onQueueGateUpdate = onQueueGateUpdate,
         )
@@ -1450,6 +1508,7 @@ private fun FarmMapFullscreenScreen(
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
     onWaterAssetSelected: (String) -> Unit,
+    onFenceSectionSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onQueueGateUpdate: (String, String) -> Unit,
 ) {
@@ -1470,6 +1529,7 @@ private fun FarmMapFullscreenScreen(
             onPaddockSelected = onPaddockSelected,
             onMobSelected = onMobSelected,
             onWaterAssetSelected = onWaterAssetSelected,
+            onFenceSectionSelected = onFenceSectionSelected,
             onOpenScreen = onOpenScreen,
             onQueueGateUpdate = onQueueGateUpdate,
         )
@@ -1486,6 +1546,7 @@ private fun FarmMapContent(
     onPaddockSelected: (String) -> Unit,
     onMobSelected: (String) -> Unit,
     onWaterAssetSelected: (String) -> Unit,
+    onFenceSectionSelected: (String) -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
     onQueueGateUpdate: (String, String) -> Unit,
 ) {
@@ -1528,11 +1589,16 @@ private fun FarmMapContent(
                     onOpenScreen(AppScreen.MobDetail)
                 } else {
                     val waterAssetId = selection.feature.waterAssetId
+                    val fenceSectionId = selection.feature.fenceSectionId
                     val paddockId = selection.feature.paddockId
                     when {
                         waterAssetId != null -> {
                             onWaterAssetSelected(waterAssetId)
                             onOpenScreen(AppScreen.WaterAssetDetail)
+                        }
+                        fenceSectionId != null -> {
+                            onFenceSectionSelected(fenceSectionId)
+                            onOpenScreen(AppScreen.FenceDetail)
                         }
                         paddockId != null -> {
                             onPaddockSelected(paddockId)
@@ -1545,7 +1611,8 @@ private fun FarmMapContent(
     }
     if (!fullscreen) {
         snapshot.mapFeatures
-            .filter { it.featureType == "paddock" || it.featureType == "water_asset" || it.featureType == "gate" }
+            .filter { it.featureType == "paddock" || it.featureType == "water_asset" || it.featureType == "gate" || it.featureType == "fence_section" }
+            .filter { it.featureType != "fence_section" || it.fenceSectionId != null }
             .take(12)
             .forEach { feature ->
                 EntityCard(
@@ -1593,6 +1660,7 @@ private fun mapFeatureDetail(feature: MapFeatureSummary): String =
     listOf(
         feature.featureType,
         feature.gateStatus?.let { "status $it" },
+        feature.fenceCondition?.let { "condition $it" },
         feature.grazingPressureRatio?.let { "pressure ${(it * 100).toInt()}%" },
         feature.currentLsu?.let { "LSU $it" },
         feature.waterAlertLevel,
@@ -1601,6 +1669,12 @@ private fun mapFeatureDetail(feature: MapFeatureSummary): String =
 
 private fun formatHeadCount(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else "%.2f".format(value)
+
+private fun formatFenceLength(value: Double?): String =
+    value?.let { "${formatHeadCount(it)} m" } ?: "length unknown"
+
+private fun labelFromValue(value: String): String =
+    value.replace("_", " ").replaceFirstChar(Char::titlecase)
 
 private fun formatHectares(value: Double): String = "${formatHeadCount(value)} ha"
 
@@ -1723,12 +1797,15 @@ private fun parseSatelliteMapSelection(payload: String, features: List<MapFeatur
     val paddockId = json.optString("paddock_id")
     val waterAssetId = json.optString("water_asset_id")
     val gateId = json.optString("gate_id")
+    val fenceSectionId = json.optString("fence_section_id")
     val name = json.optString("name")
     val feature = when {
         featureType == "water_asset" && waterAssetId.isNotBlank() ->
             features.firstOrNull { it.featureType == "water_asset" && it.waterAssetId == waterAssetId }
         featureType == "gate" && gateId.isNotBlank() ->
             features.firstOrNull { it.featureType == "gate" && it.gateId == gateId }
+        featureType == "fence_section" && fenceSectionId.isNotBlank() ->
+            features.firstOrNull { it.featureType == "fence_section" && it.fenceSectionId == fenceSectionId }
         paddockId.isNotBlank() ->
             features.firstOrNull { it.paddockId == paddockId }
         else ->
@@ -1845,6 +1922,7 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
                   paddock_id: props.paddock_id || "",
                   water_asset_id: props.feature_type === "water_asset" ? (props.id || "") : "",
                   gate_id: props.feature_type === "gate" ? (props.gate_id || props.id || "") : "",
+                  fence_section_id: props.feature_type === "fence_section" ? (props.fence_section_id || props.id || "") : "",
                   name: props.name || "",
                   mob_id: mob ? (mob.mob_id || "") : ""
                 }));
@@ -1854,6 +1932,17 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
                 const props = feature.properties || {};
                 if (props.feature_type === "water_connection") {
                   return { color: "#2C7FB8", weight: 4, opacity: 0.9 };
+                }
+                if (props.feature_type === "fence_section") {
+                  const conditionColors = { unknown: "#64748B", good: "#16A34A", fair: "#CA8A04", bad: "#EA580C", critical: "#DC2626" };
+                  const condition = String(props.condition || "unknown").toLowerCase();
+                  return {
+                    color: conditionColors[condition] || conditionColors.unknown,
+                    weight: condition === "critical" ? 5 : 4,
+                    opacity: 0.96,
+                    fill: false,
+                    dashArray: props.section_type === "boundary" ? null : "8 5"
+                  };
                 }
                 return {
                   color: "#44514D",
@@ -1935,7 +2024,7 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
                   if (props.name && layer.bindTooltip) {
                     layer.bindTooltip(props.name, { sticky: true });
                   }
-                  if (props.feature_type === "paddock" || props.feature_type === "water_asset" || props.feature_type === "gate") {
+                  if (props.feature_type === "paddock" || props.feature_type === "water_asset" || props.feature_type === "gate" || props.feature_type === "fence_section") {
                     layer.on("click", function () { selectFeature(props, null); });
                   }
                   if (props.feature_type === "paddock" && Array.isArray(props.mobs) && props.mobs.length && layer.getBounds) {
@@ -2048,6 +2137,17 @@ private fun OfflineFarmMap(
     ) {
         drawFeatures.forEach { item ->
             val stroke = Stroke(width = if (item.source.featureType == "water_connection") 4f else 2f)
+            val lineStroke = Stroke(
+                width = when (item.source.featureType) {
+                    "water_connection" -> 4f
+                    "fence_section" -> if (item.source.fenceCondition == "critical") 5f else 3.5f
+                    else -> 2f
+                }
+            )
+            val lineColor = when (item.source.featureType) {
+                "fence_section" -> fenceConditionColor(item.source.fenceCondition)
+                else -> Color(0xFF2C7FB8)
+            }
             item.polygons.forEach { ring ->
                 val path = Path()
                 ring.forEachIndexed { index, point ->
@@ -2068,7 +2168,7 @@ private fun OfflineFarmMap(
                     val projected = projectMapPoint(point, bounds, canvasSize, zoom, pan)
                     if (index == 0) path.moveTo(projected.x, projected.y) else path.lineTo(projected.x, projected.y)
                 }
-                drawPath(path, color = Color(0xFF2C7FB8), style = stroke)
+                drawPath(path, color = lineColor, style = lineStroke)
             }
             item.points.forEach { point ->
                 val projected = projectMapPoint(point, bounds, canvasSize, zoom, pan)
@@ -2254,12 +2354,37 @@ private fun findMapTap(
             abs(center.x - tap.x) < 28f && abs(center.y - tap.y) < 28f
         }
     if (mobHit != null) return MapSelection(mobHit.source, mobHit.source.mobs.firstOrNull())
+
+    features
+        .filter { it.source.featureType == "fence_section" && it.lines.isNotEmpty() }
+        .firstOrNull { item ->
+            item.lines.any { line ->
+                line.windowed(2).any { segment ->
+                    val start = projectMapPoint(segment[0], bounds, size, zoom, pan)
+                    val end = projectMapPoint(segment[1], bounds, size, zoom, pan)
+                    distanceToSegment(tap, start, end) < 18f
+                }
+            }
+        }?.let { return MapSelection(it.source) }
+
     return features
         .filter { it.source.featureType == "paddock" }
         .firstOrNull { item ->
             val center = projectMapPoint(centroid(item.polygons.firstOrNull()), bounds, size, zoom, pan)
             abs(center.x - tap.x) < 60f && abs(center.y - tap.y) < 60f
         }?.let { MapSelection(it.source) }
+}
+
+private fun distanceToSegment(point: Offset, start: Offset, end: Offset): Float {
+    val dx = end.x - start.x
+    val dy = end.y - start.y
+    if (dx == 0f && dy == 0f) {
+        return kotlin.math.hypot(point.x - start.x, point.y - start.y)
+    }
+    val t = (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / ((dx * dx) + (dy * dy))
+    val clamped = t.coerceIn(0f, 1f)
+    val nearest = Offset(start.x + clamped * dx, start.y + clamped * dy)
+    return kotlin.math.hypot(point.x - nearest.x, point.y - nearest.y)
 }
 
 private fun centroid(points: List<MapPoint>?): MapPoint {
@@ -2278,6 +2403,15 @@ private fun paddockPressureColor(ratio: Double?): Color {
         else -> Color(0xFFCC0000)
     }
 }
+
+private fun fenceConditionColor(condition: String?): Color =
+    when (condition?.lowercase()) {
+        "good" -> Color(0xFF16A34A)
+        "fair" -> Color(0xFFCA8A04)
+        "bad" -> Color(0xFFEA580C)
+        "critical" -> Color(0xFFDC2626)
+        else -> Color(0xFF64748B)
+    }
 
 @Composable
 private fun CalendarScreen(
@@ -3259,6 +3393,165 @@ private fun WaterAssetDetailScreen(
 }
 
 @Composable
+private fun FencesScreen(
+    state: FieldUiState,
+    onBackHome: () -> Unit,
+    onFenceSectionSelected: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+) {
+    FormScaffold("Fences", onBackHome) {
+        val snapshot = state.snapshot ?: return@FormScaffold
+        if (snapshot.fenceSections.isEmpty()) {
+            EntityCard("No fence sections", "Sync fences from the farm map in the web app.")
+        }
+        snapshot.fenceSections.forEach { fence ->
+            ClickableEntityCard(
+                title = fence.name,
+                detail = "${fence.conditionLabel} | ${fence.sectionTypeLabel} | ${formatFenceLength(fence.lengthM)} | ${if (fence.electricWire) "electric" else "no electric"}",
+            ) {
+                onFenceSectionSelected(fence.id)
+                onOpenScreen(AppScreen.FenceDetail)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FenceDetailScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onFenceSectionSelected: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onStartTaskForEntity: (String, String, String) -> Unit,
+    onEntityNoteChange: (String) -> Unit,
+    onEntityNoteTagsChange: (String) -> Unit,
+    onQueueFenceNote: () -> Unit,
+) {
+    FormScaffold("Fence Detail", onBackToList) {
+        val snapshot = state.snapshot ?: return@FormScaffold
+        val fence = selectedFenceSection(state) ?: return@FormScaffold
+        EntityCard(fence.name, "${fence.paddockLabel} | ${fence.conditionLabel} | ${formatFenceLength(fence.lengthM)}")
+        MetricRows(
+            listOf(
+                "Type" to fence.sectionTypeLabel,
+                "Condition" to fence.conditionLabel,
+                "Height" to fence.heightProfileLabel,
+                "Build" to fence.constructionTypeLabel,
+                "Posts" to labelFromValue(fence.postType),
+                "Droppers" to labelFromValue(fence.dropperType),
+                "Wire" to labelFromValue(fence.wireType),
+                "Mesh" to labelFromValue(fence.meshType),
+                "Electric" to if (fence.electricWire) "Yes" else "No",
+                "Length" to formatFenceLength(fence.lengthM),
+            )
+        )
+        fence.notes?.takeIf { it.isNotBlank() }?.let { notes ->
+            SectionCard("Notes") {
+                Text(notes, style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+        }
+        SectionCard("Suitability") {
+            MetricRows(
+                listOf(
+                    "Cattle" to labelFromValue(fence.holdsCattle),
+                    "Sheep" to labelFromValue(fence.holdsSheep),
+                    "Goats" to labelFromValue(fence.holdsGoats),
+                    "Jackal" to labelFromValue(fence.excludesJackal),
+                    "Predators" to labelFromValue(fence.excludesPredators),
+                )
+            )
+        }
+        SectionCard("Linked Tasks") {
+            RelatedTasks(snapshot.tasks, "fence_section", fence.id)
+        }
+        SectionCard("Comments / Inspections") {
+            OutlinedTextField(
+                state.entityNote,
+                onEntityNoteChange,
+                label = { Text("Note") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                state.entityNoteTags,
+                onEntityNoteTagsChange,
+                label = { Text("Tags") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = onQueueFenceNote,
+                enabled = state.entityNote.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Queue Inspection")
+            }
+            val events = snapshot.fenceEvents.filter { it.fenceSectionId == fence.id }.take(6)
+            if (events.isEmpty()) {
+                Text("No fence notes recorded", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+            }
+            events.forEach { event ->
+                val materials = event.materials.joinToString(", ") { material ->
+                    listOfNotNull(
+                        material.actionLabel,
+                        material.materialTypeLabel,
+                        material.quantity?.let { formatHeadCount(it) },
+                        material.unit,
+                    ).joinToString(" ")
+                }
+                EntityCard(
+                    title = event.eventAt ?: event.eventTypeLabel,
+                    detail = listOf(event.eventTypeLabel, event.description, materials)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" | "),
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { onFenceSectionSelected(fence.id); onOpenScreen(AppScreen.FenceEdit) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Update Fence")
+            }
+            OutlinedButton(
+                onClick = { onStartTaskForEntity("fence_section", fence.id, "Repair ${fence.name}") },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Create Linked Task")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FenceEditScreen(
+    state: FieldUiState,
+    onBackHome: () -> Unit,
+    onFenceConditionChange: (String) -> Unit,
+    onFenceNotesChange: (String) -> Unit,
+    onFenceElectricWireChange: (Boolean) -> Unit,
+    onQueueFenceUpdate: () -> Unit,
+) {
+    FormScaffold("Update Fence", onBackHome) {
+        val fence = selectedFenceSection(state)
+        Text(fence?.name ?: "Fence section", fontWeight = FontWeight.SemiBold)
+        OptionPicker("Condition", state.fenceCondition, fenceConditionOptions(), onFenceConditionChange)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = state.fenceElectricWire, onCheckedChange = onFenceElectricWireChange)
+            Text("Electrical wire running alongside")
+        }
+        OutlinedTextField(
+            state.fenceNotes,
+            onFenceNotesChange,
+            label = { Text("Notes") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(onClick = onQueueFenceUpdate, enabled = state.selectedFenceSectionId.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+            Text("Queue Fence Update")
+        }
+    }
+}
+
+@Composable
 private fun RainfallScreen(
     state: FieldUiState,
     onBackHome: () -> Unit,
@@ -4189,6 +4482,18 @@ private fun selectWaterAsset(state: FieldUiState, assetId: String): FieldUiState
     )
 }
 
+private fun selectFenceSection(state: FieldUiState, fenceSectionId: String): FieldUiState {
+    val section = state.snapshot?.fenceSections?.firstOrNull { it.id == fenceSectionId }
+    return state.copy(
+        selectedFenceSectionId = fenceSectionId,
+        fenceCondition = section?.condition.orEmpty(),
+        fenceNotes = section?.notes.orEmpty(),
+        fenceElectricWire = section?.electricWire ?: false,
+        entityNote = "",
+        entityNoteTags = "",
+    )
+}
+
 private fun selectAnimalGroup(state: FieldUiState, groupTypeId: String): FieldUiState {
     val currentBalance = selectedMob(state)?.balances?.firstOrNull { it.animalGroupTypeId == groupTypeId }
     return state.copy(selectedAnimalGroupTypeId = groupTypeId, stockQuantity = currentBalance?.headCount?.toString() ?: state.stockQuantity)
@@ -4266,6 +4571,13 @@ private fun selectDecision(state: FieldUiState, item: DecisionItemSummary): Fiel
                 targetState.copy(currentScreen = AppScreen.WaterAssets, statusMessage = "Water asset is not in the cached snapshot.")
             }
         }
+        "fence_section" -> {
+            if (snapshot.fenceSections.any { it.id == entityId }) {
+                selectFenceSection(targetState, entityId).copy(currentScreen = AppScreen.FenceDetail)
+            } else {
+                targetState.copy(currentScreen = AppScreen.Fences, statusMessage = "Fence section is not in the cached snapshot.")
+            }
+        }
         "farm" -> targetState.copy(currentScreen = AppScreen.Farm)
         else -> targetState.copy(currentScreen = AppScreen.Decisions, statusMessage = "This decision is not linked to an offline detail yet.")
     }
@@ -4282,6 +4594,7 @@ private fun decisionOpenLabel(item: DecisionItemSummary): String =
         "paddock" -> "Open Paddock"
         "mob" -> "Open Mob"
         "water_asset" -> "Open Water Asset"
+        "fence_section" -> "Open Fence"
         "farm" -> "Open Farm"
         else -> "Open"
     }
@@ -4499,6 +4812,21 @@ private fun queueWaterAssetNote(state: FieldUiState, repo: MobileRepository): Fi
     return state.copy(entityNote = "", entityNoteTags = "", statusMessage = "Queued water asset note.")
 }
 
+private fun queueFenceNote(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before adding a note.")
+    if (state.selectedFenceSectionId.isBlank()) return state.copy(statusMessage = "Choose a fence section.")
+    if (state.entityNote.isBlank()) return state.copy(statusMessage = "Note is required.")
+    repo.queueFenceNote(
+        farm.id,
+        state.selectedFenceSectionId,
+        state.entityNote,
+        parseNoteTags(state.entityNoteTags),
+        eventType = "inspection",
+        conditionAfter = state.fenceCondition,
+    )
+    return state.copy(entityNote = "", entityNoteTags = "", statusMessage = "Queued fence inspection.")
+}
+
 private fun queueWaterUpdate(state: FieldUiState, repo: MobileRepository): FieldUiState {
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before editing water.")
     if (state.selectedWaterAssetId.isBlank()) return state.copy(statusMessage = "Choose a water asset.")
@@ -4506,6 +4834,19 @@ private fun queueWaterUpdate(state: FieldUiState, repo: MobileRepository): Field
     val waterLevel = if (asset?.assetType in state.formOptions.waterLevelAssetTypes) state.waterLevel else ""
     repo.queueWaterStatus(farm.id, state.selectedWaterAssetId, state.waterStatus, waterLevel, state.waterActive)
     return state.copy(currentScreen = AppScreen.Home, statusMessage = "Queued water update.")
+}
+
+private fun queueFenceUpdate(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before editing a fence.")
+    if (state.selectedFenceSectionId.isBlank()) return state.copy(statusMessage = "Choose a fence section.")
+    repo.queueFenceUpdate(
+        farm.id,
+        state.selectedFenceSectionId,
+        state.fenceCondition,
+        state.fenceNotes,
+        state.fenceElectricWire,
+    )
+    return state.copy(currentScreen = AppScreen.Home, statusMessage = "Queued fence update.")
 }
 
 private fun queueGateUpdate(
@@ -4567,6 +4908,9 @@ private fun selectedPaddock(state: FieldUiState): PaddockSummary? =
 private fun selectedWaterAsset(state: FieldUiState): WaterAssetSummary? =
     state.snapshot?.waterAssets?.firstOrNull { it.id == state.selectedWaterAssetId }
 
+private fun selectedFenceSection(state: FieldUiState): FenceSectionSummary? =
+    state.snapshot?.fenceSections?.firstOrNull { it.id == state.selectedFenceSectionId }
+
 private fun initialStockCountRows(mob: MobSummary?): List<StockCountRowDraft> =
     mob?.balances.orEmpty().map { balance ->
         StockCountRowDraft(
@@ -4599,6 +4943,9 @@ private fun stockSpeciesOptions(formOptions: MobileFormOptions): List<MobileOpti
     formOptions.speciesOptions.ifEmpty {
         listOf("Cattle", "Sheep", "Goat").map { MobileOption(it, it) }
     }
+
+private fun fenceConditionOptions(): List<MobileOption> =
+    stockOptions("unknown", "good", "fair", "bad", "critical")
 
 private fun stockSexOptions(formOptions: MobileFormOptions, species: String): List<MobileOption> =
     formOptions.sexOptionsBySpecies[species].orEmpty().ifEmpty {

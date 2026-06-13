@@ -19,6 +19,7 @@ class NoteAttachmentService:
         "mob_event": "mob_event_id",
         "paddock_event": "paddock_event_id",
         "water_asset_event": "water_asset_event_id",
+        "fence_event": "fence_event_id",
     }
 
     @classmethod
@@ -154,7 +155,9 @@ class NoteAttachmentService:
             return "mob_event"
         if attachment.paddock_event_id:
             return "paddock_event"
-        return "water_asset_event"
+        if attachment.water_asset_event_id:
+            return "water_asset_event"
+        return "fence_event"
 
     @classmethod
     def _existing_user_attachment(

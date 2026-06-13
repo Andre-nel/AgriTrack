@@ -36,6 +36,16 @@ class Paddock(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         back_populates="paddock",
         cascade="all, delete-orphan",
     )
+    fence_sections_as_a = db.relationship(
+        "FenceSection",
+        foreign_keys="FenceSection.paddock_a_id",
+        back_populates="paddock_a",
+    )
+    fence_sections_as_b = db.relationship(
+        "FenceSection",
+        foreign_keys="FenceSection.paddock_b_id",
+        back_populates="paddock_b",
+    )
 
     __table_args__ = (
         db.CheckConstraint(

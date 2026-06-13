@@ -86,6 +86,30 @@
 
 <section class="card">
   <div class="task-section-heading">
+    <h2>Enclosing Fence Sections</h2>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_fences', farm_id=paddock.farm_id) }}">Open Fence Register</a>
+  </div>
+  <table>
+    <thead><tr><th>Section</th><th>Type</th><th>Condition</th><th>Build</th><th>Electric</th><th>Length</th></tr></thead>
+    <tbody>
+      {% for row in fence_section_rows %}
+      <tr>
+        <td><a href="{{ url_for('web.farm_fence_detail', farm_id=paddock.farm_id, fence_section_id=row.id) }}">{{ row.name }}</a></td>
+        <td>{{ row.section_type_label }}</td>
+        <td><span class="status-pill status-{{ row.condition }}">{{ row.condition_label }}</span></td>
+        <td>{{ row.height_profile_label }} / {{ row.construction_type_label }}</td>
+        <td>{{ "Yes" if row.electric_wire else "No" }}</td>
+        <td>{% if row.length_m is not none %}{{ "%.1f"|format(row.length_m) }} m{% else %}-{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">No fence sections are linked to this paddock yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <div class="task-section-heading">
     <h2>Linked Tasks</h2>
     <a class="btn btn-secondary" href="{{ url_for('tasks.new_task_page', paddock_id=paddock.id) }}">Create Task For Paddock</a>
   </div>

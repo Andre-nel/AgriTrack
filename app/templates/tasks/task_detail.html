@@ -151,6 +151,13 @@
         {% endfor %}
       </select>
     </label>
+    <label>Fence Sections
+      <select name="fence_section_ids" multiple size="5">
+        {% for section in entity_options.fence_sections %}
+        <option value="{{ section.id }}">{{ section.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button type="submit" class="btn">Add Farm Entity Links</button>
   </form>
   {% else %}

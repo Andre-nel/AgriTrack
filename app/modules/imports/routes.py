@@ -50,12 +50,17 @@ def register_legacy_routes(bp) -> None:
                 if result.get("water_asset_count")
                 else ""
             )
+            fence_note = (
+                f"; fences {result['fence_created_count']} added, "
+                f"{result['fence_updated_count']} updated, "
+                f"{result['fence_retired_count']} retired"
+            )
             flash(
                 (
                     f"Updated farm {result['farm_name']} from import with "
                     f"{result['paddock_count']} paddock(s) "
                     f"({result['created_count']} added, "
-                    f"{result['updated_count']} updated{retired_note}){water_note}"
+                    f"{result['updated_count']} updated{retired_note}){water_note}{fence_note}"
                 ),
                 "success",
             )
@@ -65,8 +70,16 @@ def register_legacy_routes(bp) -> None:
                 if result.get("water_asset_count")
                 else ""
             )
+            fence_note = (
+                f" and {result['fence_created_count']} fence section(s)"
+                if result.get("fence_created_count")
+                else ""
+            )
             flash(
-                f"Imported farm {result['farm_name']} with {result['paddock_count']} paddock(s){water_note}",
+                (
+                    f"Imported farm {result['farm_name']} with "
+                    f"{result['paddock_count']} paddock(s){water_note}{fence_note}"
+                ),
                 "success",
             )
         non_imported_water_assets = _active_non_imported_water_assets_for_farm(result["farm_id"])
@@ -136,4 +149,3 @@ def register_legacy_routes(bp) -> None:
             )
             return redirect(url_for("web.review_import_water_assets", farm_id=farm_id))
         return redirect(url_for("web.farm_detail", farm_id=farm_id))
-

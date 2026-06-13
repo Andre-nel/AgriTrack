@@ -136,24 +136,28 @@ class TaskEntityLink(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     paddock_id = db.Column(db.String(36), db.ForeignKey("paddocks.id"), index=True)
     water_asset_id = db.Column(db.String(36), db.ForeignKey("water_assets.id"), index=True)
     mob_id = db.Column(db.String(36), db.ForeignKey("mobs.id"), index=True)
+    fence_section_id = db.Column(db.String(36), db.ForeignKey("fence_sections.id"), index=True)
 
     task = db.relationship("Task", back_populates="entity_links")
     paddock = db.relationship("Paddock", back_populates="task_entity_links")
     water_asset = db.relationship("WaterAsset", back_populates="task_entity_links")
     mob = db.relationship("Mob", back_populates="task_entity_links")
+    fence_section = db.relationship("FenceSection", back_populates="task_entity_links")
 
     __table_args__ = (
         db.CheckConstraint(
             (
-                "(paddock_id IS NOT NULL AND water_asset_id IS NULL AND mob_id IS NULL) "
-                "OR (paddock_id IS NULL AND water_asset_id IS NOT NULL AND mob_id IS NULL) "
-                "OR (paddock_id IS NULL AND water_asset_id IS NULL AND mob_id IS NOT NULL)"
+                "(paddock_id IS NOT NULL AND water_asset_id IS NULL AND mob_id IS NULL AND fence_section_id IS NULL) "
+                "OR (paddock_id IS NULL AND water_asset_id IS NOT NULL AND mob_id IS NULL AND fence_section_id IS NULL) "
+                "OR (paddock_id IS NULL AND water_asset_id IS NULL AND mob_id IS NOT NULL AND fence_section_id IS NULL) "
+                "OR (paddock_id IS NULL AND water_asset_id IS NULL AND mob_id IS NULL AND fence_section_id IS NOT NULL)"
             ),
             name="ck_task_entity_links_one_entity",
         ),
         db.UniqueConstraint("task_id", "paddock_id", name="uq_task_entity_links_task_paddock"),
         db.UniqueConstraint("task_id", "water_asset_id", name="uq_task_entity_links_task_water_asset"),
         db.UniqueConstraint("task_id", "mob_id", name="uq_task_entity_links_task_mob"),
+        db.UniqueConstraint("task_id", "fence_section_id", name="uq_task_entity_links_task_fence_section"),
     )
 
 

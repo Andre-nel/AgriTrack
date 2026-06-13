@@ -7,6 +7,7 @@ from app.models import (
     AnimalGroupBalance,
     AnimalGroupType,
     Farm,
+    FenceSection,
     GrazingAllocation,
     GrazingAllocationLsuHistory,
     GrazingSession,
@@ -306,11 +307,20 @@ def test_import_farm_creates_closed_auto_gate_and_preserves_status_on_reimport(c
     with app.app_context():
         farm = Farm.query.filter_by(name="Gate Import Ranch").one()
         gate = PaddockGate.query.filter_by(farm_id=farm.id).one()
+        fences = FenceSection.query.filter_by(farm_id=farm.id, active=True).all()
         assert gate.source == "auto"
         assert gate.status == "closed"
         assert gate.active is True
         assert float(gate.shared_boundary_length_m) > 100
+        assert {fence.section_type for fence in fences} == {"boundary", "internal"}
+        assert len([fence for fence in fences if fence.section_type == "boundary"]) == 2
+        assert len([fence for fence in fences if fence.section_type == "internal"]) == 1
+        assert all(fence.height_profile == "low" for fence in fences)
+        assert all(fence.condition == "unknown" for fence in fences)
+        internal_fence = next(fence for fence in fences if fence.section_type == "internal")
+        internal_fence_id = str(internal_fence.id)
         gate.status = "open"
+        internal_fence.condition = "bad"
         db.session.commit()
         farm_id = str(farm.id)
         gate_id = str(gate.id)
@@ -322,6 +332,8 @@ def test_import_farm_creates_closed_auto_gate_and_preserves_status_on_reimport(c
         gate = db.session.get(PaddockGate, gate_id)
         assert gate.status == "open"
         assert gate.active is True
+        internal_fence = db.session.get(FenceSection, internal_fence_id)
+        assert internal_fence.condition == "bad"
 
     response = client.get(f"/farms/{farm_id}/map-data")
     assert response.status_code == 200
@@ -330,8 +342,14 @@ def test_import_farm_creates_closed_auto_gate_and_preserves_status_on_reimport(c
         feature for feature in payload["features"]
         if feature["properties"].get("feature_type") == "gate"
     ]
+    fence_features = [
+        feature for feature in payload["features"]
+        if feature["properties"].get("feature_type") == "fence_section"
+    ]
     assert len(gate_features) == 1
     assert gate_features[0]["properties"]["status"] == "open"
+    assert len(fence_features) == 3
+    assert any(feature["properties"]["condition"] == "bad" for feature in fence_features)
 
 
 def test_web_gate_state_route_updates_active_grazing_allocations(client, app):

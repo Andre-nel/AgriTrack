@@ -107,6 +107,49 @@ class MobileMapGeoJsonTest {
         assertEquals("tank-1", properties.getString("id"))
     }
 
+    @Test
+    fun featureCollectionFallsBackToFenceProperties() {
+        val json = JSONObject(
+            mobileMapFeatureCollectionJson(
+                listOf(
+                    MapFeatureSummary(
+                        featureType = "fence_section",
+                        name = "North Fence",
+                        farmId = "farm-1",
+                        farmName = "Demo Farm",
+                        paddockId = null,
+                        waterAssetId = null,
+                        fenceSectionId = "fence-1",
+                        fenceCondition = "bad",
+                        waterAlertLevel = null,
+                        waterAlertMessage = null,
+                        grazingPressureRatio = null,
+                        currentLsu = null,
+                        hectaresPerCurrentLsu = null,
+                        mobs = emptyList(),
+                        geometryType = "LineString",
+                        geometryJson = JSONObject()
+                            .put("type", "LineString")
+                            .put(
+                                "coordinates",
+                                JSONArray()
+                                    .put(JSONArray().put(25.0).put(-32.0))
+                                    .put(JSONArray().put(25.1).put(-32.1))
+                            )
+                            .toString(),
+                        propertiesJson = "{",
+                    ),
+                ),
+            ),
+        )
+
+        val properties = json.getJSONArray("features").getJSONObject(0).getJSONObject("properties")
+
+        assertEquals("fence_section", properties.getString("feature_type"))
+        assertEquals("fence-1", properties.getString("fence_section_id"))
+        assertEquals("bad", properties.getString("condition"))
+    }
+
     private fun mapFeature(geometry: JSONObject, properties: JSONObject): MapFeatureSummary =
         MapFeatureSummary(
             featureType = properties.optString("feature_type", "feature"),

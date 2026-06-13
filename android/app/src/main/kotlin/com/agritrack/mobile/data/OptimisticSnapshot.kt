@@ -25,6 +25,7 @@ internal fun FarmSnapshot.withOptimisticCommands(commands: JSONArray): FarmSnaps
             "mob_event.create" -> changed = applyMobEventCreate(json, command, payload) || changed
             "paddock_event.create" -> changed = applyPaddockEventCreate(json, command, payload) || changed
             "water_asset_event.create" -> changed = applyWaterAssetEventCreate(json, command, payload) || changed
+            "fence_event.create" -> changed = applyFenceEventCreate(json, command, payload) || changed
             "stock_count.record" -> {
                 if (applyStockCount(json, command, payload)) {
                     changed = true
@@ -51,6 +52,7 @@ internal fun FarmSnapshot.withOptimisticCommands(commands: JSONArray): FarmSnaps
                 }
             }
             "water_asset_status.update" -> changed = applyWaterAssetStatus(json, payload) || changed
+            "fence_section.update" -> changed = applyFenceSectionUpdate(json, payload) || changed
             "task.create" -> changed = applyTaskCreate(json, command, payload) || changed
             "task.status.update" -> changed = applyTaskStatus(json, command, payload) || changed
             "task.comment.create" -> changed = applyTaskComment(json, command, payload) || changed
@@ -187,6 +189,37 @@ private fun applyWaterAssetEventCreate(json: JSONObject, command: JSONObject, pa
             .put("attachments", JSONArray())
             .put("pending_sync", true),
     )
+    return true
+}
+
+private fun applyFenceEventCreate(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val fenceSectionId = payload.optString("fence_section_id")
+    val description = payload.optString("description").trim()
+    if (fenceSectionId.isBlank() || description.isBlank()) {
+        return false
+    }
+    val eventType = payload.optString("event_type", "inspection").ifBlank { "inspection" }
+    val conditionAfter = payload.optionalString("condition_after")
+    prependObject(
+        json,
+        "fence_events",
+        JSONObject()
+            .put("id", pendingId(command, "fence-event"))
+            .put("farm_id", command.optString("farm_id"))
+            .put("fence_section_id", fenceSectionId)
+            .putOptional("event_at", payload.optionalString("event_at"))
+            .put("event_type", eventType)
+            .put("event_type_label", labelFromValue(eventType))
+            .put("tags", copyArray(payload.optJSONArray("tags")))
+            .putOptional("condition_after", conditionAfter)
+            .putOptional("condition_after_label", conditionAfter?.let(::labelFromValue))
+            .put("description", description)
+            .put("materials", copyArray(payload.optJSONArray("materials")))
+            .put("attachment_count", 0)
+            .put("attachments", JSONArray())
+            .put("pending_sync", true),
+    )
+    conditionAfter?.let { updateFenceCondition(json, fenceSectionId, it) }
     return true
 }
 
@@ -671,6 +704,62 @@ private fun applyWaterAssetStatus(json: JSONObject, payload: JSONObject): Boolea
     return true
 }
 
+private fun applyFenceSectionUpdate(json: JSONObject, payload: JSONObject): Boolean {
+    val fenceSectionId = payload.optString("fence_section_id")
+    val section = findObjectById(json.optJSONArray("fence_sections"), fenceSectionId) ?: return false
+    if (payload.has("condition")) {
+        val condition = payload.optString("condition")
+        section.put("condition", condition)
+        section.put("condition_label", labelFromValue(condition))
+    }
+    if (payload.has("notes")) {
+        section.putOptional("notes", payload.optionalString("notes"))
+    }
+    if (payload.has("electric_wire")) {
+        section.put("electric_wire", payload.optBoolean("electric_wire", false))
+    }
+    section.put("pending_sync", true)
+    updateFenceMapFeature(json, fenceSectionId, payload)
+    return true
+}
+
+private fun updateFenceCondition(json: JSONObject, fenceSectionId: String, condition: String) {
+    findObjectById(json.optJSONArray("fence_sections"), fenceSectionId)?.let { section ->
+        section.put("condition", condition)
+        section.put("condition_label", labelFromValue(condition))
+        section.put("pending_sync", true)
+    }
+    updateFenceMapFeature(
+        json,
+        fenceSectionId,
+        JSONObject().put("condition", condition),
+    )
+}
+
+private fun updateFenceMapFeature(json: JSONObject, fenceSectionId: String, payload: JSONObject) {
+    val mapFeatures = json.optJSONArray("map_features") ?: return
+    for (index in 0 until mapFeatures.length()) {
+        val feature = mapFeatures.optJSONObject(index) ?: continue
+        val properties = feature.optJSONObject("properties") ?: continue
+        val featureFenceId = properties.optString("fence_section_id", properties.optString("id"))
+        if (properties.optString("feature_type") != "fence_section" || featureFenceId != fenceSectionId) {
+            continue
+        }
+        if (payload.has("condition")) {
+            val condition = payload.optString("condition")
+            properties.put("condition", condition)
+            properties.put("condition_label", labelFromValue(condition))
+        }
+        if (payload.has("notes")) {
+            properties.putOptional("notes", payload.optionalString("notes"))
+        }
+        if (payload.has("electric_wire")) {
+            properties.put("electric_wire", payload.optBoolean("electric_wire", false))
+        }
+        properties.put("pending_sync", true)
+    }
+}
+
 private fun applyTaskCreate(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
     val heading = payload.optString("heading", payload.optString("title")).trim()
     if (heading.isBlank()) {
@@ -811,9 +900,11 @@ private fun taskLinks(
     addLink("paddock", payload.optString("paddock_id"))
     addLink("mob", payload.optString("mob_id"))
     addLink("water_asset", payload.optString("water_asset_id"))
+    addLink("fence_section", payload.optString("fence_section_id"))
     addLinks("paddock", payload.optJSONArray("paddock_ids"), ::addLink)
     addLinks("mob", payload.optJSONArray("mob_ids"), ::addLink)
     addLinks("water_asset", payload.optJSONArray("water_asset_ids"), ::addLink)
+    addLinks("fence_section", payload.optJSONArray("fence_section_ids"), ::addLink)
     return links
 }
 
@@ -1002,6 +1093,7 @@ private fun entityName(json: JSONObject, entityType: String, entityId: String): 
         "paddock" -> "paddocks"
         "mob" -> "mobs"
         "water_asset" -> "water_assets"
+        "fence_section" -> "fence_sections"
         else -> return null
     }
     return findObjectById(json.optJSONArray(arrayName), entityId)?.optString("name")?.takeIf { it.isNotBlank() }

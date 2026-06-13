@@ -162,6 +162,55 @@ class MobileModelsTest {
                         )
                 )
                 .put(
+                    "fence_sections",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "fence-1")
+                                .put("farm_id", "farm-1")
+                                .put("name", "North Boundary Fence")
+                                .put("section_type", "boundary")
+                                .put("section_type_label", "Boundary")
+                                .put("paddock_a_id", "paddock-1")
+                                .put("paddock_a_name", "North Camp")
+                                .put("condition", "bad")
+                                .put("condition_label", "Bad")
+                                .put("height_profile", "low")
+                                .put("height_profile_label", "Low")
+                                .put("construction_type", "mesh")
+                                .put("construction_type_label", "Mesh")
+                                .put("length_m", 125.5)
+                                .put("electric_wire", true)
+                        )
+                )
+                .put(
+                    "fence_events",
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("id", "fence-event-1")
+                                .put("fence_section_id", "fence-1")
+                                .put("event_type", "maintenance")
+                                .put("event_type_label", "Maintenance")
+                                .put("condition_after", "fair")
+                                .put("condition_after_label", "Fair")
+                                .put("description", "Packed stones below the fence")
+                                .put(
+                                    "materials",
+                                    JSONArray().put(
+                                        JSONObject()
+                                            .put("id", "material-1")
+                                            .put("action", "packed")
+                                            .put("action_label", "Packed")
+                                            .put("material_type", "stone")
+                                            .put("material_type_label", "Stone")
+                                            .put("quantity", 2.0)
+                                            .put("unit", "bag")
+                                    )
+                                )
+                        )
+                )
+                .put(
                     "water_asset_state_history",
                     JSONArray()
                         .put(
@@ -297,6 +346,29 @@ class MobileModelsTest {
                                         .put("status", "closed")
                                 )
                         )
+                        .put(
+                            JSONObject()
+                                .put("type", "Feature")
+                                .put(
+                                    "geometry",
+                                    JSONObject()
+                                        .put("type", "LineString")
+                                        .put(
+                                            "coordinates",
+                                            JSONArray()
+                                                .put(JSONArray().put(18.0).put(-34.0))
+                                                .put(JSONArray().put(18.002).put(-34.001))
+                                        )
+                                )
+                                .put(
+                                    "properties",
+                                    JSONObject()
+                                        .put("feature_type", "fence_section")
+                                        .put("fence_section_id", "fence-1")
+                                        .put("name", "North Boundary Fence")
+                                        .put("condition", "bad")
+                                )
+                        )
                 )
         )
 
@@ -323,6 +395,12 @@ class MobileModelsTest {
         assertEquals("mob-note.jpg", snapshot.mobEvents.first().attachments.first().originalFilename)
         assertEquals("Pasture recovering", snapshot.paddockEvents.first().description)
         assertEquals("Tank checked", snapshot.waterAssetEvents.first().description)
+        assertEquals(1, snapshot.fenceSectionCount)
+        assertEquals("North Boundary Fence", snapshot.fenceSections.first().name)
+        assertEquals(true, snapshot.fenceSections.first().electricWire)
+        assertEquals(1, snapshot.fenceEventCount)
+        assertEquals("Packed stones below the fence", snapshot.fenceEvents.first().description)
+        assertEquals("stone", snapshot.fenceEvents.first().materials.first().materialType)
         assertEquals(1, snapshot.waterAssetStateHistoryCount)
         assertEquals("low", snapshot.waterAssetStateHistory.first().previousWaterLevel)
         assertEquals("full", snapshot.waterAssetStateHistory.first().waterLevel)
@@ -334,8 +412,10 @@ class MobileModelsTest {
         assertEquals(1, snapshot.tasks.first().attachmentCount)
         assertEquals("trough.jpg", snapshot.tasks.first().attachments.first().originalFilename)
         assertEquals(0.42, snapshot.mapFeatures.first().grazingPressureRatio ?: 0.0, 0.0)
-        assertEquals("gate-1", snapshot.mapFeatures.last().gateId)
-        assertEquals("closed", snapshot.mapFeatures.last().gateStatus)
+        assertEquals("gate-1", snapshot.mapFeatures[1].gateId)
+        assertEquals("closed", snapshot.mapFeatures[1].gateStatus)
+        assertEquals("fence-1", snapshot.mapFeatures.last().fenceSectionId)
+        assertEquals("bad", snapshot.mapFeatures.last().fenceCondition)
         assertEquals(1, snapshot.calendarItemCount)
         assertEquals("task-1", snapshot.calendarItems.first().taskId)
         assertEquals("Confirm level", snapshot.calendarItems.first().description)

@@ -155,6 +155,30 @@ data class MobileCommand(
             )
         }
 
+        fun fenceNote(
+            farmId: String,
+            fenceSectionId: String,
+            description: String,
+            tags: List<String>,
+            eventType: String = "inspection",
+            conditionAfter: String = "",
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("fence_section_id", fenceSectionId)
+                .put("event_type", eventType.ifBlank { "inspection" })
+                .put("description", description.trim())
+                .put("tags", JSONArray(tags))
+            if (conditionAfter.isNotBlank()) {
+                payload.put("condition_after", conditionAfter.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "fence_event.create",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
         fun stockCount(
             farmId: String,
             mobId: String,
@@ -228,6 +252,28 @@ data class MobileCommand(
             return MobileCommand(
                 clientCommandId = UUID.randomUUID().toString(),
                 type = "water_asset_status.update",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun fenceUpdate(
+            farmId: String,
+            fenceSectionId: String,
+            condition: String,
+            notes: String,
+            electricWire: Boolean,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("fence_section_id", fenceSectionId)
+                .put("electric_wire", electricWire)
+            if (condition.isNotBlank()) {
+                payload.put("condition", condition.trim())
+            }
+            payload.put("notes", notes.trim())
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "fence_section.update",
                 farmId = farmId,
                 payload = payload,
             )
@@ -315,6 +361,7 @@ data class MobileCommand(
                 "paddock" -> payload.put("paddock_id", entityId)
                 "mob" -> payload.put("mob_id", entityId)
                 "water_asset" -> payload.put("water_asset_id", entityId)
+                "fence_section" -> payload.put("fence_section_id", entityId)
             }
             return MobileCommand(
                 clientCommandId = UUID.randomUUID().toString(),

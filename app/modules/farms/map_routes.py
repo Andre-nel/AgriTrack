@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 from flask import current_app, jsonify, url_for
 
 from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock
+from app.services.fence_service import FenceService
 from app.services.gate_service import GateService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.paddock_service import PaddockService
@@ -286,6 +287,16 @@ def _build_farm_map_feature_collection(
             warnings.append("Showing water network features without farm KML polygons.")
 
     feature_collection.extend(GateService.active_map_features_for_farm(str(farm.id)))
+    fence_features = FenceService.active_map_features_for_farm(str(farm.id))
+    for feature in fence_features:
+        properties = feature.get("properties", {})
+        if properties.get("fence_section_id"):
+            properties["fence_detail_url"] = url_for(
+                "web.farm_fence_detail",
+                farm_id=farm.id,
+                fence_section_id=properties["fence_section_id"],
+            )
+    feature_collection.extend(fence_features)
 
     return {
         "type": "FeatureCollection",

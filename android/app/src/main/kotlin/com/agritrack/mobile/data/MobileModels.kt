@@ -183,6 +183,43 @@ data class GateSummary(
     val lastStateChangedAt: String?,
 )
 
+data class FenceSectionSummary(
+    val id: String,
+    val farmId: String,
+    val name: String,
+    val sectionType: String,
+    val sectionTypeLabel: String,
+    val paddockAId: String,
+    val paddockAName: String?,
+    val paddockBId: String?,
+    val paddockBName: String?,
+    val lengthM: Double?,
+    val condition: String,
+    val conditionLabel: String,
+    val heightProfile: String,
+    val heightProfileLabel: String,
+    val constructionType: String,
+    val constructionTypeLabel: String,
+    val postType: String,
+    val dropperType: String,
+    val wireType: String,
+    val meshType: String,
+    val electricWire: Boolean,
+    val electricWireType: String?,
+    val notes: String?,
+    val holdsCattle: String,
+    val holdsSheep: String,
+    val holdsGoats: String,
+    val excludesJackal: String,
+    val excludesPredators: String,
+) {
+    val paddockLabel: String
+        get() = listOfNotNull(paddockAName, paddockBName)
+            .filter { it.isNotBlank() }
+            .joinToString(" / ")
+            .ifBlank { "Farm boundary" }
+}
+
 data class RainfallSummary(
     val id: String,
     val recordedOn: String,
@@ -228,6 +265,33 @@ data class WaterAssetEventSummary(
     val eventAt: String?,
     val tags: List<String>,
     val description: String,
+    val attachmentCount: Int,
+    val attachments: List<NoteAttachmentSummary>,
+)
+
+data class FenceEventMaterialSummary(
+    val id: String,
+    val action: String,
+    val actionLabel: String,
+    val materialType: String,
+    val materialTypeLabel: String,
+    val materialDetail: String?,
+    val quantity: Double?,
+    val unit: String?,
+    val notes: String?,
+)
+
+data class FenceEventSummary(
+    val id: String,
+    val fenceSectionId: String,
+    val eventAt: String?,
+    val eventType: String,
+    val eventTypeLabel: String,
+    val tags: List<String>,
+    val conditionAfter: String?,
+    val conditionAfterLabel: String?,
+    val description: String,
+    val materials: List<FenceEventMaterialSummary>,
     val attachmentCount: Int,
     val attachments: List<NoteAttachmentSummary>,
 )
@@ -335,6 +399,8 @@ data class MapFeatureSummary(
     val waterAssetId: String?,
     val gateId: String? = null,
     val gateStatus: String? = null,
+    val fenceSectionId: String? = null,
+    val fenceCondition: String? = null,
     val waterAlertLevel: String?,
     val waterAlertMessage: String?,
     val grazingPressureRatio: Double?,
@@ -355,6 +421,8 @@ data class FarmSnapshot(
     val mobEventCount: Int,
     val paddockEventCount: Int,
     val waterAssetEventCount: Int,
+    val fenceSectionCount: Int,
+    val fenceEventCount: Int,
     val waterAssetStateHistoryCount: Int,
     val taskCount: Int,
     val calendarItemCount: Int,
@@ -369,6 +437,8 @@ data class FarmSnapshot(
     val mobEvents: List<MobEventSummary>,
     val paddockEvents: List<PaddockEventSummary>,
     val waterAssetEvents: List<WaterAssetEventSummary>,
+    val fenceSections: List<FenceSectionSummary>,
+    val fenceEvents: List<FenceEventSummary>,
     val waterAssetStateHistory: List<WaterAssetStateHistorySummary>,
     val tasks: List<TaskSummary>,
     val calendarItems: List<CalendarItemSummary>,
@@ -390,6 +460,8 @@ data class FarmSnapshot(
             val mobEvents = parseMobEvents(json.optJSONArray("mob_events") ?: JSONArray())
             val paddockEvents = parsePaddockEvents(json.optJSONArray("paddock_events") ?: JSONArray())
             val waterAssetEvents = parseWaterAssetEvents(json.optJSONArray("water_asset_events") ?: JSONArray())
+            val fenceSections = parseFenceSections(json.optJSONArray("fence_sections") ?: JSONArray())
+            val fenceEvents = parseFenceEvents(json.optJSONArray("fence_events") ?: JSONArray())
             val waterAssetStateHistory = parseWaterAssetStateHistory(json.optJSONArray("water_asset_state_history") ?: JSONArray())
             val tasks = parseTasks(json.optJSONArray("tasks") ?: JSONArray())
             val calendarItems = parseCalendarItems(json.optJSONArray("calendar_items") ?: JSONArray())
@@ -409,6 +481,8 @@ data class FarmSnapshot(
                 mobEventCount = mobEvents.size,
                 paddockEventCount = paddockEvents.size,
                 waterAssetEventCount = waterAssetEvents.size,
+                fenceSectionCount = fenceSections.size,
+                fenceEventCount = fenceEvents.size,
                 waterAssetStateHistoryCount = waterAssetStateHistory.size,
                 taskCount = tasks.size,
                 calendarItemCount = calendarItems.size,
@@ -423,6 +497,8 @@ data class FarmSnapshot(
                 mobEvents = mobEvents,
                 paddockEvents = paddockEvents,
                 waterAssetEvents = waterAssetEvents,
+                fenceSections = fenceSections,
+                fenceEvents = fenceEvents,
                 waterAssetStateHistory = waterAssetStateHistory,
                 tasks = tasks,
                 calendarItems = calendarItems,
@@ -618,6 +694,44 @@ data class FarmSnapshot(
             }
         }
 
+        private fun parseFenceSections(json: JSONArray): List<FenceSectionSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val section = json.getJSONObject(index)
+                add(
+                    FenceSectionSummary(
+                        id = section.optString("id", section.optString("fence_section_id")),
+                        farmId = section.optString("farm_id"),
+                        name = section.optString("name", "Fence section"),
+                        sectionType = section.optString("section_type", "internal"),
+                        sectionTypeLabel = section.optString("section_type_label", section.optString("section_type", "Fence")),
+                        paddockAId = section.optString("paddock_a_id"),
+                        paddockAName = section.optNullableString("paddock_a_name"),
+                        paddockBId = section.optNullableString("paddock_b_id"),
+                        paddockBName = section.optNullableString("paddock_b_name"),
+                        lengthM = section.optNullableDouble("length_m"),
+                        condition = section.optString("condition", "unknown"),
+                        conditionLabel = section.optString("condition_label", section.optString("condition", "Unknown")),
+                        heightProfile = section.optString("height_profile", "low"),
+                        heightProfileLabel = section.optString("height_profile_label", section.optString("height_profile", "Low")),
+                        constructionType = section.optString("construction_type", "high_strung_wire"),
+                        constructionTypeLabel = section.optString("construction_type_label", section.optString("construction_type", "Fence")),
+                        postType = section.optString("post_type", "unknown"),
+                        dropperType = section.optString("dropper_type", "unknown"),
+                        wireType = section.optString("wire_type", "unknown"),
+                        meshType = section.optString("mesh_type", "none"),
+                        electricWire = section.optBoolean("electric_wire", false),
+                        electricWireType = section.optNullableString("electric_wire_type"),
+                        notes = section.optNullableString("notes"),
+                        holdsCattle = section.optString("holds_cattle", "unknown"),
+                        holdsSheep = section.optString("holds_sheep", "unknown"),
+                        holdsGoats = section.optString("holds_goats", "unknown"),
+                        excludesJackal = section.optString("excludes_jackal", "unknown"),
+                        excludesPredators = section.optString("excludes_predators", "unknown"),
+                    )
+                )
+            }
+        }
+
         private fun parseMobEvents(json: JSONArray): List<MobEventSummary> = buildList {
             for (index in 0 until json.length()) {
                 val event = json.getJSONObject(index)
@@ -664,6 +778,47 @@ data class FarmSnapshot(
                         description = event.optString("description"),
                         attachmentCount = event.optInt("attachment_count", event.optJSONArray("attachments")?.length() ?: 0),
                         attachments = parseNoteAttachments(event.optJSONArray("attachments") ?: JSONArray()),
+                    )
+                )
+            }
+        }
+
+        private fun parseFenceEvents(json: JSONArray): List<FenceEventSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val event = json.getJSONObject(index)
+                add(
+                    FenceEventSummary(
+                        id = event.optString("id"),
+                        fenceSectionId = event.optString("fence_section_id"),
+                        eventAt = event.optNullableString("event_at"),
+                        eventType = event.optString("event_type", "note"),
+                        eventTypeLabel = event.optString("event_type_label", event.optString("event_type", "Note")),
+                        tags = event.optJSONArray("tags").strings(),
+                        conditionAfter = event.optNullableString("condition_after"),
+                        conditionAfterLabel = event.optNullableString("condition_after_label"),
+                        description = event.optString("description"),
+                        materials = parseFenceEventMaterials(event.optJSONArray("materials") ?: JSONArray()),
+                        attachmentCount = event.optInt("attachment_count", event.optJSONArray("attachments")?.length() ?: 0),
+                        attachments = parseNoteAttachments(event.optJSONArray("attachments") ?: JSONArray()),
+                    )
+                )
+            }
+        }
+
+        private fun parseFenceEventMaterials(json: JSONArray): List<FenceEventMaterialSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val material = json.getJSONObject(index)
+                add(
+                    FenceEventMaterialSummary(
+                        id = material.optString("id"),
+                        action = material.optString("action"),
+                        actionLabel = material.optString("action_label", material.optString("action")),
+                        materialType = material.optString("material_type"),
+                        materialTypeLabel = material.optString("material_type_label", material.optString("material_type")),
+                        materialDetail = material.optNullableString("material_detail"),
+                        quantity = material.optNullableDouble("quantity"),
+                        unit = material.optNullableString("unit"),
+                        notes = material.optNullableString("notes"),
                     )
                 )
             }
@@ -849,6 +1004,12 @@ data class FarmSnapshot(
                         waterAssetId = if (featureType == "water_asset") properties.optNullableString("id") else null,
                         gateId = if (featureType == "gate") properties.optNullableString("gate_id") else null,
                         gateStatus = if (featureType == "gate") properties.optNullableString("status") else null,
+                        fenceSectionId = if (featureType == "fence_section") {
+                            properties.optNullableString("fence_section_id") ?: properties.optNullableString("id")
+                        } else {
+                            null
+                        },
+                        fenceCondition = if (featureType == "fence_section") properties.optNullableString("condition") else null,
                         waterAlertLevel = properties.optNullableString("water_alert_level"),
                         waterAlertMessage = properties.optNullableString("water_alert_message"),
                         grazingPressureRatio = properties.optNullableDouble("grazing_pressure_ratio"),

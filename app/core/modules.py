@@ -24,6 +24,7 @@ MODULES: tuple[ModuleSpec, ...] = (
     ModuleSpec("paddocks", "app.modules.paddocks", "Paddock API routes"),
     ModuleSpec("mobs", "app.modules.mobs", "Mob API routes"),
     ModuleSpec("water", "app.modules.water", "Water network API routes"),
+    ModuleSpec("fences", "app.modules.fences", "Fence section API routes"),
 )
 
 

@@ -8,6 +8,7 @@ from app.extensions import db
 from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, PaddockEvent
 from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.services.gate_service import GateService
+from app.services.fence_service import FenceService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
@@ -371,6 +372,10 @@ def register_legacy_routes(bp) -> None:
                     "close_requirements": GateService.close_requirements(gate),
                 }
                 for gate in GateService.adjacent_gates_for_paddock(str(paddock.id))
+            ],
+            fence_section_rows=[
+                FenceService.serialize_section(section)
+                for section in FenceService.sections_for_paddock(str(paddock.id))
             ],
             linked_task_rows=linked_task_rows_for_entity(
                 paddock_id=str(paddock.id),

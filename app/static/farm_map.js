@@ -6,6 +6,8 @@
 
   const statusElement = document.getElementById("farm-map-status");
   const dataUrl = mapElement.dataset.url;
+  const mapFocus = String(mapElement.dataset.mapFocus || "").trim().toLowerCase();
+  const fenceFocusMode = mapFocus === "fences";
   const baseLayerMode = String(mapElement.dataset.baseLayer || "street")
     .trim()
     .toLowerCase();
@@ -17,6 +19,9 @@
   const gateDetailUrlTemplate = mapElement.dataset.gateDetailUrlTemplate || "";
   const gateStateUrlTemplate = mapElement.dataset.gateStateUrlTemplate || "";
   const gateLocationUrlTemplate = mapElement.dataset.gateLocationUrlTemplate || "";
+  const fenceCreateUrl = mapElement.dataset.fenceCreateUrl || "";
+  const fenceUpdateUrlTemplate = mapElement.dataset.fenceUpdateUrlTemplate || "";
+  const fenceDeleteUrlTemplate = mapElement.dataset.fenceDeleteUrlTemplate || "";
   const hasWaterAssetFilter = mapElement.dataset.waterAssetFilter !== undefined;
   const selectedWaterAssetTypes = hasWaterAssetFilter
     ? new Set(
@@ -84,6 +89,30 @@
   const waterAssetFontFamily = "'Segoe UI', 'Trebuchet MS', sans-serif";
   let waterAssetMarkerSequence = 0;
   const gateMarkersById = new Map();
+  const fenceLayersById = new Map();
+  const fenceRegisterRowsById = new Map();
+  const fencePanel = document.querySelector("[data-fence-map-panel]");
+  const fenceForm = document.querySelector("[data-fence-map-form]");
+  const fencePanelTitle = document.querySelector("[data-fence-panel-title]");
+  const fencePanelStatus = document.querySelector("[data-fence-panel-status]");
+  const fenceNewButton = document.querySelector("[data-fence-map-new]");
+  const fenceEditButton = document.querySelector("[data-fence-map-edit]");
+  const fenceSaveButton = document.querySelector("[data-fence-map-save]");
+  const fenceCancelButton = document.querySelector("[data-fence-map-cancel]");
+  const fenceArchiveButton = document.querySelector("[data-fence-map-archive]");
+  const fenceDetailLink = document.querySelector("[data-fence-map-detail-link]");
+  const fenceRegisterBody = document.querySelector("[data-fence-register-body]");
+  let selectedFenceId = "";
+  let selectedFenceFeature = null;
+  let selectedFenceLayer = null;
+  let fenceEditGeometry = null;
+  let fenceEditing = false;
+  let fenceDrawing = false;
+  let fenceDrawPoints = [];
+  let fenceEditLineLayer = null;
+  let fenceEditMarkerLayer = null;
+  let fenceDrawLayer = null;
+  let fenceDrawMarkerLayer = null;
   if (!dataUrl) {
     if (statusElement) {
       statusElement.textContent = "Map data URL is missing.";
@@ -116,6 +145,44 @@
       return "";
     }
     return gateStateUrlTemplate.replace("__gate_id__", encodeURIComponent(gateId));
+  }
+
+  function fenceUpdateUrl(fenceId) {
+    if (!fenceUpdateUrlTemplate || !fenceId) {
+      return "";
+    }
+    return fenceUpdateUrlTemplate.replace("__fence_id__", encodeURIComponent(fenceId));
+  }
+
+  function fenceDeleteUrl(fenceId) {
+    if (!fenceDeleteUrlTemplate || !fenceId) {
+      return "";
+    }
+    return fenceDeleteUrlTemplate.replace("__fence_id__", encodeURIComponent(fenceId));
+  }
+
+  function requestJson(url, method, payload) {
+    if (!url) {
+      return Promise.reject(new Error("Fence map updates are not available."));
+    }
+    const options = {
+      method: method,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    };
+    if (payload !== undefined) {
+      options.body = JSON.stringify(payload);
+    }
+    return fetch(url, options).then((response) =>
+      response.json().then((body) => {
+        if (!response.ok) {
+          throw new Error(body.error || "Fence could not be saved.");
+        }
+        return body;
+      })
+    );
   }
 
   function fetchGateDetail(gateId) {
@@ -496,6 +563,28 @@
     return waterAssetStatusColors[normalizeKey(status)] || neutralWaterAssetColor;
   }
 
+  function fenceConditionColor(condition) {
+    const colors = {
+      unknown: "#64748b",
+      good: "#16a34a",
+      fair: "#ca8a04",
+      bad: "#ea580c",
+      critical: "#dc2626",
+    };
+    return colors[normalizeKey(condition)] || colors.unknown;
+  }
+
+  function fenceConstructionLineStyle(constructionType) {
+    const styles = {
+      mesh: { dashArray: null, lineCap: "round" },
+      high_strung_wire: { dashArray: "12 8", lineCap: "butt" },
+      barbed_wire: { dashArray: "3 7", lineCap: "round" },
+      mixed: { dashArray: "14 6 3 6", lineCap: "butt" },
+      other: { dashArray: "6 6", lineCap: "butt" },
+    };
+    return styles[normalizeKey(constructionType)] || styles.other;
+  }
+
   function waterAssetLevelVisual(waterLevel) {
     return waterLevelVisuals[normalizeKey(waterLevel)] || null;
   }
@@ -632,6 +721,9 @@
 
   function isFeatureVisible(feature) {
     const props = (feature && feature.properties) || {};
+    if (fenceFocusMode) {
+      return props.feature_type === "paddock" || props.feature_type === "farm_boundary" || props.feature_type === "fence_section";
+    }
     if (props.feature_type === "water_asset") {
       return isWaterAssetVisible(props);
     }
@@ -645,10 +737,11 @@
     const props = feature.properties || {};
     if (props.feature_type === "farm_boundary") {
       return {
-        color: "#2b5d4f",
-        weight: 2.4,
+        color: fenceFocusMode ? "#94a3b8" : "#2b5d4f",
+        weight: fenceFocusMode ? 1.2 : 2.4,
         fill: false,
-        opacity: 0.95,
+        opacity: fenceFocusMode ? 0.55 : 0.95,
+        interactive: !fenceFocusMode,
       };
     }
 
@@ -662,7 +755,33 @@
       };
     }
 
+    if (props.feature_type === "fence_section") {
+      const fenceId = String(props.fence_section_id || props.id || "");
+      const selected = fenceFocusMode && selectedFenceId && fenceId === selectedFenceId;
+      const critical = normalizeKey(props.condition) === "critical";
+      const constructionStyle = fenceConstructionLineStyle(props.construction_type);
+      return {
+        color: selected ? "#111827" : fenceConditionColor(props.condition),
+        weight: selected ? 7 : critical ? 4.2 : fenceFocusMode ? 4 : 3.2,
+        fill: false,
+        opacity: selected ? 1 : 0.96,
+        dashArray: constructionStyle.dashArray,
+        lineCap: constructionStyle.lineCap,
+        lineJoin: "round",
+      };
+    }
+
     if (props.feature_type === "paddock") {
+      if (fenceFocusMode) {
+        return {
+          color: "#94a3b8",
+          weight: 1.3,
+          fillColor: "#f8fafc",
+          fillOpacity: 0.16,
+          opacity: 0.72,
+          interactive: false,
+        };
+      }
       if (normalizeKey(props.water_alert_level) === "critical") {
         return {
           color: "#b91c1c",
@@ -744,6 +863,35 @@
           "<tr><td>Shared Fence</td><td>" + formatNumber(props.shared_boundary_length_m, 1) + " m</td></tr>",
           "</table>",
           actionHtml,
+        ].join("");
+      }
+
+      if (props.feature_type === "fence_section") {
+        const paddockNames = Array.isArray(props.paddock_names) ? props.paddock_names : [];
+        const connectedText = paddockNames.length
+          ? paddockNames.map((item) => escapeHtml(item)).join(" / ")
+          : escapeHtml(props.paddock_a_name || props.paddock_b_name || "-");
+        const electricText = props.electric_wire ? "Yes" : "No";
+        const tagsText = Array.isArray(props.tags) ? props.tags.join(", ") : props.tags_csv || "";
+        const notesText = String(props.notes || "").trim();
+        const detailLink = props.fence_detail_url
+          ? '<a href="' + escapeHtml(props.fence_detail_url) + '">Open fence</a>'
+          : "";
+        return [
+          farmLine,
+          "<strong>" + name + "</strong>",
+          '<div class="map-popup-farm">' + connectedText + "</div>",
+          '<table class="map-popup-table">',
+          "<tr><td>Type</td><td>" + escapeHtml(props.section_type_label || props.section_type || "-") + "</td></tr>",
+          "<tr><td>Condition</td><td>" + escapeHtml(props.condition_label || props.condition || "-") + "</td></tr>",
+          "<tr><td>Build</td><td>" + escapeHtml(props.construction_type_label || props.construction_type || "-") + "</td></tr>",
+          "<tr><td>Height</td><td>" + escapeHtml(props.height_profile_label || props.height_profile || "-") + "</td></tr>",
+          "<tr><td>Electric</td><td>" + electricText + "</td></tr>",
+          "<tr><td>Length</td><td>" + formatNumber(props.length_m, 1) + " m</td></tr>",
+          tagsText ? "<tr><td>Tags</td><td>" + escapeHtml(tagsText) + "</td></tr>" : "",
+          "</table>",
+          notesText ? "<strong>Notes</strong><br>" + escapeHtml(notesText) : "",
+          detailLink,
         ].join("");
       }
 
@@ -884,12 +1032,14 @@
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
 
+  const fullscreenTarget = mapElement.closest("[data-map-fullscreen-root]") || mapElement;
+
   function requestMapFullscreen() {
-    if (typeof mapElement.requestFullscreen === "function") {
-      return mapElement.requestFullscreen();
+    if (typeof fullscreenTarget.requestFullscreen === "function") {
+      return fullscreenTarget.requestFullscreen();
     }
-    if (typeof mapElement.webkitRequestFullscreen === "function") {
-      return mapElement.webkitRequestFullscreen();
+    if (typeof fullscreenTarget.webkitRequestFullscreen === "function") {
+      return fullscreenTarget.webkitRequestFullscreen();
     }
     return Promise.reject(new Error("Full-screen mode is not supported in this browser."));
   }
@@ -1276,8 +1426,692 @@
     setStatus("Choose the two camps for this gate.");
   }
 
+  function setFencePanelStatus(message) {
+    if (fencePanelStatus) {
+      fencePanelStatus.textContent = message || "";
+    }
+    if (message) {
+      setStatus(message);
+    }
+  }
+
+  function fenceIdFromFeature(feature) {
+    const props = (feature && feature.properties) || {};
+    return String(props.fence_section_id || props.id || "");
+  }
+
+  function cloneGeometry(geometry) {
+    return geometry ? JSON.parse(JSON.stringify(geometry)) : null;
+  }
+
+  function geometryCoordinateLines(geometry) {
+    if (!geometry || !Array.isArray(geometry.coordinates)) {
+      return [];
+    }
+    if (geometry.type === "LineString") {
+      return [geometry.coordinates];
+    }
+    if (geometry.type === "MultiLineString") {
+      return geometry.coordinates;
+    }
+    return [];
+  }
+
+  function geometryFromCoordinateLines(lines) {
+    const cleanLines = lines
+      .map((line) =>
+        line
+          .filter((point) => Array.isArray(point) && point.length >= 2)
+          .map((point) => [Number(point[0]), Number(point[1])])
+      )
+      .filter((line) => line.length >= 2);
+    return cleanLines.length === 1
+      ? { type: "LineString", coordinates: cleanLines[0] }
+      : { type: "MultiLineString", coordinates: cleanLines };
+  }
+
+  function latLngLinesFromGeometry(geometry) {
+    return geometryCoordinateLines(geometry).map((line) =>
+      line.map((point) => L.latLng(Number(point[1]), Number(point[0])))
+    );
+  }
+
+  function fenceVertexIcon(className) {
+    return L.divIcon({
+      className: className + "-wrap",
+      html: '<span class="' + className + '"></span>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
+  }
+
+  function clearFenceEditLayers() {
+    if (fenceEditLineLayer) {
+      map.removeLayer(fenceEditLineLayer);
+      fenceEditLineLayer = null;
+    }
+    if (fenceEditMarkerLayer) {
+      map.removeLayer(fenceEditMarkerLayer);
+      fenceEditMarkerLayer = null;
+    }
+  }
+
+  function refreshFenceEditLine() {
+    if (fenceEditLineLayer && fenceEditGeometry) {
+      fenceEditLineLayer.setLatLngs(latLngLinesFromGeometry(fenceEditGeometry));
+    }
+  }
+
+  function renderFenceEditGeometry() {
+    clearFenceEditLayers();
+    if (!fenceEditGeometry) {
+      return;
+    }
+    fenceEditLineLayer = L.polyline(latLngLinesFromGeometry(fenceEditGeometry), {
+      color: "#111827",
+      weight: 6,
+      opacity: 0.88,
+      dashArray: "2 5",
+    }).addTo(map);
+    fenceEditMarkerLayer = L.layerGroup().addTo(map);
+    const editLines = geometryCoordinateLines(fenceEditGeometry);
+    const editPointCount = editLines.reduce((count, line) => count + line.length, 0);
+    editLines.forEach((line, lineIndex) => {
+      line.forEach((point, pointIndex) => {
+        const marker = L.marker([point[1], point[0]], {
+          draggable: true,
+          autoPan: true,
+          icon: fenceVertexIcon("fence-vertex-marker"),
+        });
+        const removeTooltip =
+          editPointCount <= 2
+            ? "Drag to move. Click to archive section."
+            : line.length <= 2
+              ? "Drag to move. Click to remove this line."
+              : "Drag to move. Click to remove.";
+        marker.bindTooltip(removeTooltip, { direction: "top" });
+        marker.on("drag", function () {
+          const latlng = marker.getLatLng();
+          point[0] = Number(latlng.lng.toFixed(8));
+          point[1] = Number(latlng.lat.toFixed(8));
+          refreshFenceEditLine();
+        });
+        marker.on("dragend", function () {
+          renderFenceEditGeometry();
+          setFencePanelStatus("Point moved. Save the fence when ready.");
+        });
+        marker.on("click", function (event) {
+          L.DomEvent.stop(event);
+          if (editPointCount <= 2) {
+            archiveSelectedFence();
+            return;
+          }
+          if (line.length <= 2) {
+            const nextLines = geometryCoordinateLines(fenceEditGeometry).filter((_, index) => index !== lineIndex);
+            if (!nextLines.length) {
+              archiveSelectedFence();
+              return;
+            }
+            fenceEditGeometry = geometryFromCoordinateLines(nextLines);
+            renderFenceEditGeometry();
+            setFencePanelStatus("Fence line removed. Save the fence when ready.");
+            return;
+          }
+          line.splice(pointIndex, 1);
+          fenceEditGeometry = geometryFromCoordinateLines(geometryCoordinateLines(fenceEditGeometry));
+          renderFenceEditGeometry();
+          setFencePanelStatus("Point removed. Save the fence when ready.");
+        });
+        fenceEditMarkerLayer.addLayer(marker);
+      });
+      for (let index = 0; index < line.length - 1; index += 1) {
+        const start = line[index];
+        const end = line[index + 1];
+        const midpoint = [(Number(start[0]) + Number(end[0])) / 2, (Number(start[1]) + Number(end[1])) / 2];
+        const marker = L.marker([midpoint[1], midpoint[0]], {
+          icon: fenceVertexIcon("fence-segment-marker"),
+        });
+        marker.bindTooltip("Click to add a point.", { direction: "top" });
+        marker.on("click", function (event) {
+          L.DomEvent.stop(event);
+          line.splice(index + 1, 0, [Number(midpoint[0].toFixed(8)), Number(midpoint[1].toFixed(8))]);
+          fenceEditGeometry = geometryFromCoordinateLines(geometryCoordinateLines(fenceEditGeometry));
+          renderFenceEditGeometry();
+          setFencePanelStatus("Point added. Drag it into place, then save.");
+        });
+        fenceEditMarkerLayer.addLayer(marker);
+      }
+    });
+  }
+
+  function clearFenceDrawLayers() {
+    if (fenceDrawLayer) {
+      map.removeLayer(fenceDrawLayer);
+      fenceDrawLayer = null;
+    }
+    if (fenceDrawMarkerLayer) {
+      map.removeLayer(fenceDrawMarkerLayer);
+      fenceDrawMarkerLayer = null;
+    }
+  }
+
+  function renderFenceDrawGeometry() {
+    clearFenceDrawLayers();
+    fenceDrawMarkerLayer = L.layerGroup().addTo(map);
+    if (fenceDrawPoints.length >= 2) {
+      fenceDrawLayer = L.polyline(
+        [fenceDrawPoints.map((point) => L.latLng(point[1], point[0]))],
+        { color: "#0f766e", weight: 5, opacity: 0.9, dashArray: "7 5" }
+      ).addTo(map);
+    }
+    fenceDrawPoints.forEach((point, pointIndex) => {
+      const marker = L.marker([point[1], point[0]], {
+        draggable: true,
+        autoPan: true,
+        icon: fenceVertexIcon("fence-draw-marker"),
+      });
+      marker.bindTooltip("Drag to move. Click to remove.", { direction: "top" });
+      marker.on("drag", function () {
+        const latlng = marker.getLatLng();
+        point[0] = Number(latlng.lng.toFixed(8));
+        point[1] = Number(latlng.lat.toFixed(8));
+        if (fenceDrawLayer) {
+          fenceDrawLayer.setLatLngs([fenceDrawPoints.map((row) => L.latLng(row[1], row[0]))]);
+        }
+      });
+      marker.on("dragend", renderFenceDrawGeometry);
+      marker.on("click", function (event) {
+        L.DomEvent.stop(event);
+        fenceDrawPoints.splice(pointIndex, 1);
+        renderFenceDrawGeometry();
+        updateFencePanelState();
+      });
+      fenceDrawMarkerLayer.addLayer(marker);
+    });
+  }
+
+  function fenceFormValue(name) {
+    return fenceForm && fenceForm.elements[name] ? fenceForm.elements[name].value : "";
+  }
+
+  function setFenceFormValue(name, value) {
+    if (fenceForm && fenceForm.elements[name]) {
+      fenceForm.elements[name].value = value == null ? "" : String(value);
+    }
+  }
+
+  function setFenceFormChecked(name, value) {
+    if (fenceForm && fenceForm.elements[name]) {
+      fenceForm.elements[name].checked = Boolean(value);
+    }
+  }
+
+  function fenceTagsText(props) {
+    if (props.tags_csv) {
+      return props.tags_csv;
+    }
+    if (Array.isArray(props.tags)) {
+      return props.tags.join(", ");
+    }
+    return "";
+  }
+
+  function syncFencePaddockBRequirement() {
+    if (!fenceForm || !fenceForm.elements.paddock_b_id) {
+      return;
+    }
+    const internal = fenceFormValue("section_type") === "internal";
+    fenceForm.elements.paddock_b_id.required = internal;
+    if (!internal) {
+      fenceForm.elements.paddock_b_id.value = "";
+    }
+  }
+
+  function populateFenceForm(props) {
+    if (!fenceForm) {
+      return;
+    }
+    setFenceFormValue("fence_section_id", props.fence_section_id || props.id || "");
+    setFenceFormValue("name", props.name || "");
+    setFenceFormValue("section_type", props.section_type || "boundary");
+    setFenceFormValue("paddock_a_id", props.paddock_a_id || "");
+    setFenceFormValue("paddock_b_id", props.paddock_b_id || "");
+    setFenceFormValue("condition", props.condition || "unknown");
+    setFenceFormValue("height_profile", props.height_profile || "low");
+    setFenceFormValue("construction_type", props.construction_type || "high_strung_wire");
+    setFenceFormValue("electric_wire_type", props.electric_wire_type || "");
+    setFenceFormValue("tags", fenceTagsText(props));
+    setFenceFormValue("notes", props.notes || "");
+    setFenceFormChecked("electric_wire", props.electric_wire);
+    syncFencePaddockBRequirement();
+  }
+
+  function resetFenceFormForDraw() {
+    if (!fenceForm) {
+      return;
+    }
+    fenceForm.reset();
+    setFenceFormValue("farm_id", fenceFormValue("farm_id"));
+    setFenceFormValue("fence_section_id", "");
+    setFenceFormValue("section_type", "boundary");
+    setFenceFormValue("condition", "unknown");
+    setFenceFormValue("height_profile", "low");
+    setFenceFormValue("construction_type", "high_strung_wire");
+    setFenceFormValue("tags", "");
+    setFenceFormValue("notes", "");
+    syncFencePaddockBRequirement();
+  }
+
+  function fencePayloadFromForm() {
+    const sectionType = fenceFormValue("section_type") || "boundary";
+    return {
+      farm_id: fenceFormValue("farm_id"),
+      name: fenceFormValue("name"),
+      section_type: sectionType,
+      paddock_a_id: fenceFormValue("paddock_a_id"),
+      paddock_b_id: sectionType === "internal" ? fenceFormValue("paddock_b_id") : "",
+      condition: fenceFormValue("condition") || "unknown",
+      height_profile: fenceFormValue("height_profile") || "low",
+      construction_type: fenceFormValue("construction_type") || "high_strung_wire",
+      electric_wire: Boolean(fenceForm && fenceForm.elements.electric_wire && fenceForm.elements.electric_wire.checked),
+      electric_wire_type: fenceFormValue("electric_wire_type"),
+      tags: fenceFormValue("tags"),
+      notes: fenceFormValue("notes"),
+    };
+  }
+
+  function updateFencePanelState() {
+    const hasSelection = Boolean(selectedFenceId);
+    const canSave = fenceDrawing ? fenceDrawPoints.length >= 2 : hasSelection;
+    if (fenceNewButton) {
+      fenceNewButton.disabled = fenceDrawing;
+      fenceNewButton.textContent = fenceDrawing ? "Drawing..." : "Draw Fence";
+    }
+    if (fenceEditButton) {
+      fenceEditButton.disabled = !hasSelection || fenceDrawing || fenceEditing;
+      fenceEditButton.textContent = fenceEditing ? "Editing Points" : "Edit Points";
+    }
+    if (fenceSaveButton) {
+      fenceSaveButton.disabled = !canSave;
+    }
+    if (fenceCancelButton) {
+      fenceCancelButton.disabled = !fenceDrawing && !fenceEditing;
+    }
+    if (fenceArchiveButton) {
+      fenceArchiveButton.disabled = !hasSelection || fenceDrawing;
+    }
+  }
+
+  function refreshFenceStyles() {
+    fenceLayersById.forEach((layer) => {
+      if (layer.setStyle && layer.feature) {
+        layer.setStyle(styleForFeature(layer.feature));
+        if (fenceIdFromFeature(layer.feature) === selectedFenceId && layer.bringToFront) {
+          layer.bringToFront();
+        }
+      }
+    });
+  }
+
+  function refreshFenceRegisterSelection() {
+    fenceRegisterRowsById.forEach((row, fenceId) => {
+      row.classList.toggle("is-selected-fence", fenceId === selectedFenceId);
+    });
+  }
+
+  function stopFenceEditing(message) {
+    fenceEditing = false;
+    fenceEditGeometry = null;
+    clearFenceEditLayers();
+    if (message) {
+      setFencePanelStatus(message);
+    }
+    updateFencePanelState();
+  }
+
+  function stopFenceDrawing(message) {
+    fenceDrawing = false;
+    fenceDrawPoints = [];
+    mapElement.classList.remove("map-fence-draw-mode");
+    clearFenceDrawLayers();
+    if (message) {
+      setFencePanelStatus(message);
+    }
+    updateFencePanelState();
+  }
+
+  function clearFenceSelection() {
+    selectedFenceId = "";
+    selectedFenceFeature = null;
+    selectedFenceLayer = null;
+    if (fenceDetailLink) {
+      fenceDetailLink.hidden = true;
+      fenceDetailLink.href = "#";
+    }
+    if (fencePanelTitle) {
+      fencePanelTitle.textContent = "Fence Editor";
+    }
+    refreshFenceStyles();
+    refreshFenceRegisterSelection();
+    updateFencePanelState();
+  }
+
+  function selectFenceById(fenceId, options) {
+    if (!fenceFocusMode || !fenceId) {
+      return;
+    }
+    if (fenceDrawing) {
+      stopFenceDrawing();
+    }
+    if (fenceEditing) {
+      stopFenceEditing();
+    }
+    const layer = fenceLayersById.get(String(fenceId));
+    if (!layer || !layer.feature) {
+      setFencePanelStatus("Fence section is not visible on the map.");
+      return;
+    }
+    selectedFenceId = String(fenceId);
+    selectedFenceLayer = layer;
+    selectedFenceFeature = layer.feature;
+    const props = selectedFenceFeature.properties || {};
+    populateFenceForm(props);
+    if (fencePanelTitle) {
+      fencePanelTitle.textContent = props.name || "Fence Editor";
+    }
+    if (fenceDetailLink) {
+      fenceDetailLink.hidden = !props.fence_detail_url;
+      fenceDetailLink.href = props.fence_detail_url || "#";
+    }
+    refreshFenceStyles();
+    refreshFenceRegisterSelection();
+    updateFencePanelState();
+    if (options && options.fit && layer.getBounds) {
+      const bounds = layer.getBounds();
+      if (bounds.isValid()) {
+        map.fitBounds(bounds.pad(0.24));
+      }
+    }
+    setFencePanelStatus("Fence selected.");
+  }
+
+  function beginFencePointEdit() {
+    if (!selectedFenceFeature || !selectedFenceFeature.geometry) {
+      setFencePanelStatus("Choose a mapped fence section before editing points.");
+      return;
+    }
+    if (fenceDrawing) {
+      stopFenceDrawing();
+    }
+    fenceEditing = true;
+    fenceEditGeometry = cloneGeometry(selectedFenceFeature.geometry);
+    renderFenceEditGeometry();
+    updateFencePanelState();
+    setFencePanelStatus("Drag points, click blue markers to add points, or click white points to remove them.");
+  }
+
+  function beginFenceDraw() {
+    if (!fenceFocusMode) {
+      return;
+    }
+    if (fenceEditing) {
+      stopFenceEditing();
+    }
+    clearFenceSelection();
+    resetFenceFormForDraw();
+    fenceDrawing = true;
+    fenceDrawPoints = [];
+    map.closePopup();
+    mapElement.classList.add("map-fence-draw-mode");
+    renderFenceDrawGeometry();
+    updateFencePanelState();
+    setFencePanelStatus("Click the map to place fence points.");
+  }
+
+  function validateFencePayload(payload) {
+    if (!String(payload.name || "").trim()) {
+      throw new Error("Fence name is required.");
+    }
+    if (!payload.paddock_a_id) {
+      throw new Error("Paddock A is required.");
+    }
+    if (payload.section_type === "internal" && !payload.paddock_b_id) {
+      throw new Error("Paddock B is required for internal fences.");
+    }
+    if (payload.section_type === "internal" && payload.paddock_a_id === payload.paddock_b_id) {
+      throw new Error("Internal fences must connect two different paddocks.");
+    }
+  }
+
+  function featureFromFenceResponse(payload) {
+    return payload && payload.feature ? payload.feature : null;
+  }
+
+  function upsertFenceFeature(feature) {
+    const fenceId = fenceIdFromFeature(feature);
+    if (!fenceId || !mapFeatureLayer) {
+      return null;
+    }
+    const existingLayer = fenceLayersById.get(fenceId);
+    if (existingLayer) {
+      mapFeatureLayer.removeLayer(existingLayer);
+      fenceLayersById.delete(fenceId);
+    }
+    mapFeatureLayer.addData(feature);
+    return fenceLayersById.get(fenceId) || null;
+  }
+
+  function fenceTagsHtml(fence) {
+    const tags = Array.isArray(fence.tags)
+      ? fence.tags
+      : String(fence.tags_csv || "")
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean);
+    if (!tags.length) {
+      return '<span class="muted">-</span>';
+    }
+    return tags.map((tag) => '<span class="tag-pill">' + escapeHtml(tag) + "</span>").join(" ");
+  }
+
+  function fenceRegisterRowHtml(fence, detailUrl, taskCount) {
+    const sectionType = fence.section_type_label || fence.section_type || "-";
+    const condition = fence.condition || "unknown";
+    const conditionLabel = fence.condition_label || condition;
+    const heightLabel = fence.height_profile_label || fence.height_profile || "-";
+    const constructionLabel = fence.construction_type_label || fence.construction_type || "-";
+    const lengthText = fence.length_m === null || fence.length_m === undefined ? "-" : Number(fence.length_m).toFixed(1) + " m";
+    const paddockNames = Array.isArray(fence.paddock_names) ? fence.paddock_names.join(" / ") : "";
+    return [
+      "<td>",
+      '<a href="' + escapeHtml(detailUrl || "#") + '">' + escapeHtml(fence.name || "Fence Section") + "</a>",
+      '<div class="muted">' + escapeHtml(paddockNames) + "</div>",
+      "</td>",
+      "<td>" + escapeHtml(sectionType) + "</td>",
+      '<td><span class="status-pill status-' + escapeHtml(condition) + '">' + escapeHtml(conditionLabel) + "</span></td>",
+      "<td>" + escapeHtml(heightLabel) + " / " + escapeHtml(constructionLabel) + "</td>",
+      "<td>" + escapeHtml(lengthText) + "</td>",
+      "<td>" + (fence.electric_wire ? "Yes" : "No") + "</td>",
+      "<td>" + fenceTagsHtml(fence) + "</td>",
+      "<td>",
+      escapeHtml(taskCount),
+      ' <button type="button" class="btn btn-secondary btn-small" data-fence-map-select="' +
+        escapeHtml(fence.id || fence.fence_section_id || "") +
+        '">Map</button>',
+      "</td>",
+    ].join("");
+  }
+
+  function upsertFenceRegisterRow(fence, feature) {
+    if (!fenceRegisterBody || !fence) {
+      return;
+    }
+    const fenceId = String(fence.id || fence.fence_section_id || "");
+    if (!fenceId) {
+      return;
+    }
+    const props = (feature && feature.properties) || {};
+    const detailUrl = props.fence_detail_url || "#";
+    let row = fenceRegisterRowsById.get(fenceId);
+    if (!row) {
+      row = document.createElement("tr");
+      row.dataset.fenceRegisterRow = "";
+      row.dataset.fenceSectionId = fenceId;
+      row.dataset.taskCount = "0";
+      fenceRegisterRowsById.set(fenceId, row);
+      fenceRegisterBody.appendChild(row);
+    }
+    const taskCount = row.dataset.taskCount || String(fence.task_count || 0);
+    row.dataset.taskCount = taskCount;
+    row.innerHTML = fenceRegisterRowHtml(fence, detailUrl, taskCount);
+  }
+
+  function removeFenceRegisterRow(fenceId) {
+    const row = fenceRegisterRowsById.get(String(fenceId));
+    if (row && row.parentNode) {
+      row.parentNode.removeChild(row);
+    }
+    fenceRegisterRowsById.delete(String(fenceId));
+  }
+
+  function saveFenceFromMap() {
+    if (!fenceFocusMode || !fenceForm) {
+      return;
+    }
+    let payload;
+    try {
+      payload = fencePayloadFromForm();
+      validateFencePayload(payload);
+      if (fenceDrawing) {
+        if (fenceDrawPoints.length < 2) {
+          throw new Error("Draw at least two points before saving.");
+        }
+        payload.geometry = { type: "LineString", coordinates: fenceDrawPoints };
+      } else if (fenceEditing) {
+        payload.geometry = cloneGeometry(fenceEditGeometry);
+      }
+    } catch (error) {
+      setFencePanelStatus(error.message);
+      return;
+    }
+    const selectedId = selectedFenceId;
+    const saveUrl = fenceDrawing ? fenceCreateUrl : fenceUpdateUrl(selectedId);
+    const method = fenceDrawing ? "POST" : "PATCH";
+    if (fenceSaveButton) {
+      fenceSaveButton.disabled = true;
+    }
+    setFencePanelStatus("Saving fence...");
+    requestJson(saveUrl, method, payload)
+      .then((body) => {
+        const feature = featureFromFenceResponse(body);
+        if (feature) {
+          upsertFenceFeature(feature);
+        }
+        if (body && body.fence) {
+          upsertFenceRegisterRow(body.fence, feature);
+        }
+        if (fenceDrawing) {
+          stopFenceDrawing();
+        }
+        if (fenceEditing) {
+          stopFenceEditing();
+        }
+        const fenceId = String((body && body.fence && (body.fence.id || body.fence.fence_section_id)) || fenceIdFromFeature(feature));
+        if (fenceId) {
+          selectFenceById(fenceId, { fit: false });
+        }
+        setFencePanelStatus("Fence saved.");
+      })
+      .catch((error) => {
+        setFencePanelStatus(error.message || "Fence could not be saved.");
+        updateFencePanelState();
+      });
+  }
+
+  function archiveSelectedFence() {
+    if (!selectedFenceId) {
+      return;
+    }
+    if (!window.confirm("Archive this fence section? Notes, events, and linked tasks will remain.")) {
+      return;
+    }
+    const fenceId = selectedFenceId;
+    if (fenceArchiveButton) {
+      fenceArchiveButton.disabled = true;
+    }
+    setFencePanelStatus("Archiving fence...");
+    requestJson(fenceDeleteUrl(fenceId), "DELETE")
+      .then(() => {
+        const layer = fenceLayersById.get(fenceId);
+        if (layer && mapFeatureLayer) {
+          mapFeatureLayer.removeLayer(layer);
+        }
+        fenceLayersById.delete(fenceId);
+        removeFenceRegisterRow(fenceId);
+        stopFenceEditing();
+        clearFenceSelection();
+        setFencePanelStatus("Fence archived.");
+      })
+      .catch((error) => {
+        setFencePanelStatus(error.message || "Fence could not be archived.");
+        updateFencePanelState();
+      });
+  }
+
+  function bindFenceMapUi() {
+    if (!fenceFocusMode || !fenceForm) {
+      return;
+    }
+    document.querySelectorAll("[data-fence-register-row]").forEach((row) => {
+      const fenceId = row.dataset.fenceSectionId;
+      if (fenceId) {
+        fenceRegisterRowsById.set(String(fenceId), row);
+      }
+    });
+    document.addEventListener("click", function (event) {
+      const button = event.target.closest("[data-fence-map-select]");
+      if (!button) {
+        return;
+      }
+      event.preventDefault();
+      selectFenceById(button.dataset.fenceMapSelect, { fit: true });
+    });
+    fenceForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      saveFenceFromMap();
+    });
+    fenceForm.elements.section_type.addEventListener("change", syncFencePaddockBRequirement);
+    if (fenceNewButton) {
+      fenceNewButton.addEventListener("click", beginFenceDraw);
+    }
+    if (fenceEditButton) {
+      fenceEditButton.addEventListener("click", beginFencePointEdit);
+    }
+    if (fenceCancelButton) {
+      fenceCancelButton.addEventListener("click", function () {
+        if (fenceDrawing) {
+          stopFenceDrawing("Drawing cancelled.");
+          clearFenceSelection();
+          return;
+        }
+        if (fenceEditing) {
+          stopFenceEditing("Point editing cancelled.");
+          if (selectedFenceFeature) {
+            populateFenceForm(selectedFenceFeature.properties || {});
+          }
+        }
+      });
+    }
+    if (fenceArchiveButton) {
+      fenceArchiveButton.addEventListener("click", archiveSelectedFence);
+    }
+    syncFencePaddockBRequirement();
+    updateFencePanelState();
+  }
+
   function isMapFullscreen() {
-    return getFullscreenElement() === mapElement;
+    const activeElement = getFullscreenElement();
+    return activeElement === fullscreenTarget || activeElement === mapElement;
   }
 
   function refreshMapSize() {
@@ -1406,11 +2240,24 @@
   });
 
   map.addControl(new LabelToggleControl());
-  map.addControl(new GateToggleControl());
-  map.addControl(new AddGateControl());
+  if (!fenceFocusMode) {
+    map.addControl(new GateToggleControl());
+    map.addControl(new AddGateControl());
+  }
   map.addControl(new FullscreenControl());
 
   map.on("click", function (event) {
+    if (fenceFocusMode && fenceDrawing) {
+      fenceDrawPoints.push([Number(event.latlng.lng.toFixed(8)), Number(event.latlng.lat.toFixed(8))]);
+      renderFenceDrawGeometry();
+      updateFencePanelState();
+      setFencePanelStatus(
+        fenceDrawPoints.length < 2
+          ? "Place at least one more point."
+          : "Fence line ready. Add more points or save."
+      );
+      return;
+    }
     if (!gateAddMode) {
       return;
     }
@@ -1423,6 +2270,7 @@
   map.on("popupopen", function (event) {
     bindGateStateForm(event.popup);
   });
+  bindFenceMapUi();
 
   document.addEventListener("fullscreenchange", function () {
     updateFullscreenButton();
@@ -1485,39 +2333,87 @@
 
       paddockLabelLayer = L.layerGroup().addTo(map);
       const stockFloatLayer = showStockFloats ? L.layerGroup().addTo(map) : null;
-      const layer = L.geoJSON(payload, {
-        style: styleForFeature,
-        pointToLayer: function (feature, latlng) {
-          const props = (feature && feature.properties) || {};
-          if (props.feature_type === "gate") {
-            return gateMarker(feature, latlng);
-          }
-          if (props.feature_type === "water_asset") {
-            return waterAssetMarker(feature, latlng);
-          }
-          return L.marker(latlng);
-        },
-        onEachFeature: function (feature, geoLayer) {
-          const props = (feature && feature.properties) || {};
+      const featureCollection = function (rows) {
+        return {
+          type: "FeatureCollection",
+          features: rows,
+        };
+      };
+      const pointToMapLayer = function (feature, latlng) {
+        const props = (feature && feature.properties) || {};
+        if (props.feature_type === "gate") {
+          return gateMarker(feature, latlng);
+        }
+        if (props.feature_type === "water_asset") {
+          return waterAssetMarker(feature, latlng);
+        }
+        return L.marker(latlng);
+      };
+      const bindFeatureInteractions = function (feature, geoLayer) {
+        const props = (feature && feature.properties) || {};
+        const passiveFenceContext =
+          fenceFocusMode && (props.feature_type === "paddock" || props.feature_type === "farm_boundary");
+        if (!passiveFenceContext) {
           geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
           bindWaterAlertTooltip(feature, geoLayer);
-          addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
+        }
+        addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
+        if (!fenceFocusMode) {
           addStockFloatMarker(feature, geoLayer, stockFloatLayer);
-          if (props.feature_type === "paddock") {
-            geoLayer.on("click", function (event) {
-              if (!gateAddMode) {
+        }
+        if (props.feature_type === "fence_section") {
+          const fenceId = fenceIdFromFeature(feature);
+          if (fenceId) {
+            fenceLayersById.set(fenceId, geoLayer);
+            geoLayer.on("click", function () {
+              if (fenceDrawing) {
                 return;
               }
-              suppressNextMapCreateClick = true;
-              openGateCreatePopup(event.latlng, props.paddock_id);
+              selectFenceById(fenceId);
             });
           }
-        },
-        filter: function (feature) {
+        }
+        if (!fenceFocusMode && props.feature_type === "paddock") {
+          geoLayer.on("click", function (event) {
+            if (!gateAddMode) {
+              return;
+            }
+            suppressNextMapCreateClick = true;
+            openGateCreatePopup(event.latlng, props.paddock_id);
+          });
+        }
+      };
+      let layer = null;
+      let boundsLayer = null;
+      if (fenceFocusMode) {
+        const contextFeatures = features.filter((feature) => {
           const props = (feature && feature.properties) || {};
-          return props.feature_type !== "gate" && isFeatureVisible(feature);
-        },
-      }).addTo(map);
+          return props.feature_type === "paddock" || props.feature_type === "farm_boundary";
+        });
+        const fenceFeatures = features.filter((feature) => {
+          const props = (feature && feature.properties) || {};
+          return props.feature_type === "fence_section";
+        });
+        const contextLayer = L.geoJSON(featureCollection(contextFeatures), {
+          interactive: false,
+          style: styleForFeature,
+          onEachFeature: function (feature, geoLayer) {
+            addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
+          },
+        }).addTo(map);
+        layer = L.geoJSON(featureCollection(fenceFeatures), {
+          style: styleForFeature,
+          onEachFeature: bindFeatureInteractions,
+        }).addTo(map);
+        boundsLayer = L.featureGroup([contextLayer, layer]);
+      } else {
+        layer = L.geoJSON(featureCollection(features), {
+          style: styleForFeature,
+          pointToLayer: pointToMapLayer,
+          onEachFeature: bindFeatureInteractions,
+        }).addTo(map);
+        boundsLayer = layer;
+      }
       mapFeatureLayer = layer;
       gateMarkersById.clear();
       gateLayer = L.geoJSON(
@@ -1538,7 +2434,7 @@
       syncPaddockLabelVisibility();
       updateLabelToggleButton();
 
-      const bounds = layer.getBounds();
+      const bounds = boundsLayer.getBounds();
       if (bounds.isValid()) {
         map.fitBounds(bounds.pad(0.08));
       }

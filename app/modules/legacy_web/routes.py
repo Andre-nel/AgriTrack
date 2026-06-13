@@ -4,6 +4,7 @@ from app.modules.analytics.routes import register_legacy_routes as register_anal
 from app.modules.dashboard.routes import register_legacy_routes as register_dashboard_routes
 from app.modules.farms.map_routes import register_legacy_routes as register_farm_map_routes
 from app.modules.farms.routes import register_legacy_routes as register_farm_routes
+from app.modules.fences.routes import register_legacy_routes as register_fence_routes
 from app.modules.grazing.routes import register_legacy_routes as register_grazing_routes
 from app.modules.imports.routes import register_legacy_routes as register_import_routes
 from app.modules.mobs.routes import register_legacy_routes as register_mob_routes
@@ -17,6 +18,7 @@ register_analytics_routes(bp)
 register_dashboard_routes(bp)
 register_import_routes(bp)
 register_farm_routes(bp)
+register_fence_routes(bp)
 register_farm_map_routes(bp)
 register_grazing_routes(bp)
 register_mob_routes(bp)

@@ -26,6 +26,8 @@ class OptimisticSnapshotTest {
             .put(MobileCommand.mobNote("farm-1", "mob-1", "Settled after move", listOf("move")).toJson())
             .put(MobileCommand.paddockNote("farm-1", "paddock-1", "Pasture recovering", listOf("pasture")).toJson())
             .put(MobileCommand.waterAssetNote("farm-1", "tank-1", "Tank checked", listOf("water")).toJson())
+            .put(MobileCommand.fenceUpdate("farm-1", "fence-1", "bad", "Loose bottom wire", electricWire = true).toJson())
+            .put(MobileCommand.fenceNote("farm-1", "fence-1", "Packed stones under the fence", listOf("fence"), conditionAfter = "fair").toJson())
             .put(MobileCommand.rainfall("farm-1", "2026-05-31", 8.5, "Storm").toJson())
 
         val optimistic = base.withOptimisticCommands(commands)
@@ -44,6 +46,10 @@ class OptimisticSnapshotTest {
         assertEquals("Settled after move", optimistic.mobEvents.first().description)
         assertEquals("Pasture recovering", optimistic.paddockEvents.first().description)
         assertEquals("Tank checked", optimistic.waterAssetEvents.first().description)
+        assertEquals("fair", optimistic.fenceSections.first().condition)
+        assertEquals(true, optimistic.fenceSections.first().electricWire)
+        assertEquals("Packed stones under the fence", optimistic.fenceEvents.first().description)
+        assertEquals("fair", optimistic.mapFeatures.first { it.fenceSectionId == "fence-1" }.fenceCondition)
     }
 
     @Test
@@ -215,6 +221,27 @@ class OptimisticSnapshotTest {
                     ),
                 )
                 .put(
+                    "fence_sections",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("id", "fence-1")
+                            .put("farm_id", "farm-1")
+                            .put("name", "North Boundary Fence")
+                            .put("section_type", "boundary")
+                            .put("section_type_label", "Boundary")
+                            .put("paddock_a_id", "paddock-1")
+                            .put("paddock_a_name", "North Camp")
+                            .put("condition", "unknown")
+                            .put("condition_label", "Unknown")
+                            .put("height_profile", "low")
+                            .put("height_profile_label", "Low")
+                            .put("construction_type", "mesh")
+                            .put("construction_type_label", "Mesh")
+                            .put("electric_wire", false),
+                    ),
+                )
+                .put("fence_events", JSONArray())
+                .put(
                     "tasks",
                     JSONArray().put(
                         JSONObject()
@@ -251,19 +278,43 @@ class OptimisticSnapshotTest {
                 .put("paddock_events", JSONArray())
                 .put(
                     "map_features",
-                    JSONArray().put(
-                        JSONObject()
-                            .put("type", "Feature")
-                            .put("geometry", JSONObject().put("type", "Point").put("coordinates", JSONArray().put(25.0).put(-32.0)))
-                            .put(
-                                "properties",
-                                JSONObject()
-                                    .put("feature_type", "gate")
-                                    .put("gate_id", "gate-1")
-                                    .put("name", "North Camp / South Camp Gate")
-                                    .put("status", "closed"),
-                            ),
-                    ),
+                    JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("type", "Feature")
+                                .put("geometry", JSONObject().put("type", "Point").put("coordinates", JSONArray().put(25.0).put(-32.0)))
+                                .put(
+                                    "properties",
+                                    JSONObject()
+                                        .put("feature_type", "gate")
+                                        .put("gate_id", "gate-1")
+                                        .put("name", "North Camp / South Camp Gate")
+                                        .put("status", "closed"),
+                                ),
+                        )
+                        .put(
+                            JSONObject()
+                                .put("type", "Feature")
+                                .put(
+                                    "geometry",
+                                    JSONObject()
+                                        .put("type", "LineString")
+                                        .put(
+                                            "coordinates",
+                                            JSONArray()
+                                                .put(JSONArray().put(25.0).put(-32.0))
+                                                .put(JSONArray().put(25.001).put(-32.001)),
+                                        ),
+                                )
+                                .put(
+                                    "properties",
+                                    JSONObject()
+                                        .put("feature_type", "fence_section")
+                                        .put("fence_section_id", "fence-1")
+                                        .put("name", "North Boundary Fence")
+                                        .put("condition", "unknown"),
+                                ),
+                        ),
                 ),
         )
 

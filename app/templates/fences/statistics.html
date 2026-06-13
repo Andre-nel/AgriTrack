@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}{{ farm.name }} Fence Statistics | AgriTrack{% endblock %}
+{% block content %}
+<section class="paddock-page-header">
+  <div>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_fences', farm_id=farm.id) }}">Back To Fences</a>
+    <h1>{{ farm.name }} Fence Statistics</h1>
+    <p class="muted">Active fence section totals, construction mix, condition exposure, tasks, and maintenance records.</p>
+  </div>
+  <a class="btn" href="{{ url_for('web.farm_fences', farm_id=farm.id) }}">Open Fence Register</a>
+</section>
+
+<section class="cards">
+  <article class="card stat"><h2>Active Sections</h2><p>{{ stats.summary.active_count }}</p></article>
+  <article class="card stat"><h2>Total Length</h2><p>{{ "%.1f"|format(stats.summary.total_length_m) }} m</p></article>
+  <article class="card stat"><h2>Bad / Critical</h2><p>{{ stats.summary.needs_attention_count }}</p></article>
+  <article class="card stat"><h2>Electric Sections</h2><p>{{ stats.summary.electric_count }}</p></article>
+  <article class="card stat"><h2>Fence Events</h2><p>{{ stats.summary.event_count }}</p></article>
+  <article class="card stat"><h2>Linked Tasks</h2><p>{{ stats.summary.linked_task_count }}</p></article>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Condition</h2>
+    <table>
+      <thead><tr><th>Condition</th><th>Sections</th><th>Length</th></tr></thead>
+      <tbody>
+        {% for row in stats.by_condition %}
+        <tr>
+          <td><span class="status-pill status-{{ row.value }}">{{ row.label }}</span></td>
+          <td>{{ row.count }}</td>
+          <td>{{ "%.1f"|format(row.length_m) }} m</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <article class="card">
+    <h2>Construction</h2>
+    <table>
+      <thead><tr><th>Build</th><th>Sections</th><th>Length</th></tr></thead>
+      <tbody>
+        {% for row in stats.by_construction %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.length_m) }} m</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Fence Shape</h2>
+    <table>
+      <thead><tr><th>Group</th><th>Sections</th><th>Length</th></tr></thead>
+      <tbody>
+        {% for row in stats.by_type %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.length_m) }} m</td></tr>
+        {% endfor %}
+        {% for row in stats.by_height %}
+        <tr><td>{{ row.label }} Fence</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.length_m) }} m</td></tr>
+        {% endfor %}
+        {% for row in stats.by_electric %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.length_m) }} m</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <article class="card">
+    <h2>Tags</h2>
+    <table>
+      <thead><tr><th>Tag</th><th>Sections</th></tr></thead>
+      <tbody>
+        {% for row in stats.tag_rows %}
+        <tr><td><span class="tag-pill">{{ row.tag }}</span></td><td>{{ row.count }}</td></tr>
+        {% else %}
+        <tr><td colspan="2">No fence tags recorded yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Events</h2>
+    <table>
+      <thead><tr><th>Type</th><th>Count</th></tr></thead>
+      <tbody>
+        {% for row in stats.event_rows %}
+        <tr><td>{{ row.label }}</td><td>{{ row.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <article class="card">
+    <h2>Material Lines</h2>
+    <table>
+      <thead><tr><th>Material</th><th>Action</th><th>Quantity</th><th>Lines</th></tr></thead>
+      <tbody>
+        {% for row in stats.material_rows %}
+        <tr>
+          <td>{{ row.material_type_label }}</td>
+          <td>{{ row.action_label }}</td>
+          <td>{% if row.quantity %}{{ "%.2f"|format(row.quantity) }} {{ row.unit }}{% else %}-{% endif %}</td>
+          <td>{{ row.line_count }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">No material lines recorded yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Task Hotspots</h2>
+    <table>
+      <thead><tr><th>Fence</th><th>Open Tasks</th><th>Total Tasks</th></tr></thead>
+      <tbody>
+        {% for row in stats.task_section_rows %}
+        <tr>
+          <td><a href="{{ url_for('web.farm_fence_detail', farm_id=farm.id, fence_section_id=row.section.id) }}">{{ row.section.name }}</a></td>
+          <td>{{ row.open_task_count }}</td>
+          <td>{{ row.task_count }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3">No linked fence tasks yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <article class="card">
+    <h2>Recent Events</h2>
+    <table>
+      <thead><tr><th>Recorded At</th><th>Type</th><th>Condition</th><th>Description</th></tr></thead>
+      <tbody>
+        {% for row in stats.recent_events %}
+        <tr>
+          <td>{{ row.event_at or "-" }}</td>
+          <td>{{ row.event_type_label }}</td>
+          <td>{{ row.condition_after_label or "-" }}</td>
+          <td>{{ row.description }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">No fence events recorded yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+</section>
+{% endblock %}

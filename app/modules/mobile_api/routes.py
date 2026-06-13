@@ -15,6 +15,8 @@ from app.models import (
     AnimalGroupType,
     CalendarActivity,
     Farm,
+    FenceEvent,
+    FenceSection,
     GrazingSession,
     MobileAuthToken,
     MobileSyncCommand,
@@ -38,6 +40,7 @@ from app.models import (
 from app.models.stock_ledger import StockEventType
 from app.modules.farms.map_routes import _build_farm_map_feature_collection
 from app.services.calendar_service import CalendarService
+from app.services.fence_service import FenceService
 from app.services.gate_service import GateService
 from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
@@ -369,6 +372,24 @@ def _serialize_water_asset_event(event: WaterAssetEvent) -> dict:
     }
 
 
+def _serialize_fence_section(section: FenceSection) -> dict:
+    return FenceService.serialize_section(section)
+
+
+def _serialize_fence_event(event: FenceEvent) -> dict:
+    attachments = sorted(event.attachments, key=lambda item: item.created_at, reverse=True)
+    payload = FenceService.serialize_event(event, include_materials=True, include_attachments=False)
+    payload.update(
+        {
+            "event_at": _iso_datetime(event.event_at),
+            "attachment_count": len(attachments),
+            "attachments": [_serialize_note_attachment(attachment) for attachment in attachments[:12]],
+            "updated_at": _iso_datetime(event.updated_at),
+        }
+    )
+    return payload
+
+
 def _serialize_task_space(space: TaskSpace) -> dict:
     return {
         "id": str(space.id),
@@ -392,6 +413,10 @@ def _serialize_task_entity_link(link: TaskEntityLink) -> dict:
         entity_type = "mob"
         entity_id = link.mob_id
         entity_name = link.mob.name if link.mob else None
+    if link.fence_section_id:
+        entity_type = "fence_section"
+        entity_id = link.fence_section_id
+        entity_name = link.fence_section.name if link.fence_section else None
     return {
         "id": str(link.id),
         "task_id": str(link.task_id),
@@ -425,6 +450,7 @@ def _serialize_note_attachment(attachment: NoteAttachment) -> dict:
             attachment.mob_event_id
             or attachment.paddock_event_id
             or attachment.water_asset_event_id
+            or attachment.fence_event_id
         ),
         "client_attachment_id": attachment.client_attachment_id,
         "original_filename": attachment.original_filename,
@@ -859,6 +885,7 @@ def bootstrap():
                     "mob_event.create",
                     "paddock_event.create",
                     "water_asset_event.create",
+                    "fence_event.create",
                     "stock_count.record",
                     "mob.move",
                     "mob.transfer",
@@ -868,6 +895,7 @@ def bootstrap():
                     "paddock.update",
                     "gate.update",
                     "water_asset_status.update",
+                    "fence_section.update",
                 ],
                 "max_commands_per_request": MAX_COMMANDS_PER_REQUEST,
             },
@@ -945,6 +973,18 @@ def farm_snapshot(farm_id):
         .limit(200)
         .all()
     )
+    fence_sections = FenceService.sections_for_farm(str(farm.id))
+    fence_events = (
+        FenceEvent.query.join(FenceSection)
+        .filter(
+            FenceEvent.farm_id == farm.id,
+            FenceSection.farm_id == farm.id,
+            FenceSection.active.is_(True),
+        )
+        .order_by(FenceEvent.event_at.desc(), FenceEvent.created_at.desc())
+        .limit(200)
+        .all()
+    )
     water_asset_state_history = WaterNetworkService.recent_state_history_for_farm(
         str(farm.id),
         limit=500,
@@ -1007,6 +1047,8 @@ def farm_snapshot(farm_id):
             "water_asset_events": [
                 _serialize_water_asset_event(event) for event in water_asset_events
             ],
+            "fence_sections": [_serialize_fence_section(section) for section in fence_sections],
+            "fence_events": [_serialize_fence_event(event) for event in fence_events],
             "water_asset_state_history": [
                 WaterNetworkService.serialize_asset_state_history(row)
                 for row in water_asset_state_history
@@ -1217,6 +1259,9 @@ def _get_note_event_for_farm(farm: Farm, event_type: str, event_id: str):
     elif event_type == "water_asset_event":
         event = WaterAssetEvent.query.filter_by(id=normalized_id, farm_id=farm.id).first()
         message = "Water asset note not found for this farm"
+    elif event_type == "fence_event":
+        event = FenceEvent.query.filter_by(id=normalized_id, farm_id=farm.id).first()
+        message = "Fence note not found for this farm"
     else:
         raise MobileApiError("invalid_payload", "Attachment event type is invalid")
     if event is None:
@@ -1270,6 +1315,11 @@ def upload_paddock_event_attachment(farm_id, event_id):
 @bp.post("/farms/<farm_id>/water-asset-events/<event_id>/attachments")
 def upload_water_asset_event_attachment(farm_id, event_id):
     return _upload_note_attachment_response(farm_id, "water_asset_event", event_id)
+
+
+@bp.post("/farms/<farm_id>/fence-events/<event_id>/attachments")
+def upload_fence_event_attachment(farm_id, event_id):
+    return _upload_note_attachment_response(farm_id, "fence_event", event_id)
 
 
 @bp.get("/farms/<farm_id>/note-attachments/<attachment_id>")
@@ -1468,6 +1518,7 @@ def _dispatch_command(command_type: str, farm: Farm, payload) -> dict:
         "mob_event.create": _handle_mob_event_create,
         "paddock_event.create": _handle_paddock_event_create,
         "water_asset_event.create": _handle_water_asset_event_create,
+        "fence_event.create": _handle_fence_event_create,
         "stock_count.record": _handle_stock_count_record,
         "mob.move": _handle_mob_move,
         "mob.transfer": _handle_mob_transfer,
@@ -1477,6 +1528,7 @@ def _dispatch_command(command_type: str, farm: Farm, payload) -> dict:
         "paddock.update": _handle_paddock_update,
         "gate.update": _handle_gate_update,
         "water_asset_status.update": _handle_water_asset_status_update,
+        "fence_section.update": _handle_fence_section_update,
     }
     handler = handlers.get(command_type)
     if handler is None:
@@ -1576,6 +1628,34 @@ def _handle_water_asset_event_create(farm: Farm, payload: dict) -> dict:
     )
     db.session.flush()
     return {"event_id": str(event.id)}
+
+
+def _get_fence_section_for_farm(farm: Farm, fence_section_id: str) -> FenceSection:
+    section = FenceSection.query.filter_by(
+        id=str(fence_section_id or "").strip(),
+        farm_id=farm.id,
+    ).first()
+    if section is None:
+        raise MobileApiError("not_found", "Fence section not found for this farm", 404)
+    return section
+
+
+def _handle_fence_event_create(farm: Farm, payload: dict) -> dict:
+    section = _get_fence_section_for_farm(farm, str(payload.get("fence_section_id") or "").strip())
+    raw_tags = payload.get("tags")
+    if isinstance(raw_tags, list):
+        raw_tags = ",".join(str(value) for value in raw_tags)
+    event = FenceService.create_event(
+        section=section,
+        event_type=payload.get("event_type"),
+        description=payload.get("description"),
+        raw_tags=raw_tags,
+        condition_after=payload.get("condition_after"),
+        event_at=_parse_iso_datetime(payload.get("event_at"), "event_at"),
+        material_rows=payload.get("materials") or [],
+    )
+    db.session.flush()
+    return {"event": _serialize_fence_event(event), "event_id": str(event.id)}
 
 
 def _resolve_stock_count_group(payload: dict) -> tuple[AnimalGroupType, bool]:
@@ -1756,6 +1836,7 @@ def _handle_task_create(farm: Farm, payload: dict) -> dict:
         paddock_ids=_payload_entity_ids(payload, "paddock_ids", "paddock_id"),
         water_asset_ids=_payload_entity_ids(payload, "water_asset_ids", "water_asset_id"),
         mob_ids=_payload_entity_ids(payload, "mob_ids", "mob_id"),
+        fence_section_ids=_payload_entity_ids(payload, "fence_section_ids", "fence_section_id"),
     )
     db.session.flush()
     return {"task": _serialize_task(task)}
@@ -1854,3 +1935,32 @@ def _handle_water_asset_status_update(farm: Farm, payload: dict) -> dict:
     return {
         "water_asset": WaterNetworkService.serialize_asset(asset, network_state=network_state)
     }
+
+
+def _handle_fence_section_update(farm: Farm, payload: dict) -> dict:
+    section = _get_fence_section_for_farm(farm, str(payload.get("fence_section_id") or "").strip())
+    allowed_fields = {
+        "active",
+        "condition",
+        "height_profile",
+        "construction_type",
+        "post_type",
+        "dropper_type",
+        "wire_type",
+        "mesh_type",
+        "electric_wire",
+        "electric_wire_type",
+        "notes",
+        "tags",
+        "holds_cattle",
+        "holds_sheep",
+        "holds_goats",
+        "excludes_jackal",
+        "excludes_predators",
+    }
+    update_payload = {field: payload[field] for field in allowed_fields if field in payload}
+    if not update_payload:
+        raise ValueError("At least one fence field is required")
+    FenceService.update_section(section, update_payload)
+    db.session.flush()
+    return {"fence_section": _serialize_fence_section(section)}

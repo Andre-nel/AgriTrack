@@ -180,6 +180,7 @@ Important response fields:
       "mob_event.create",
       "paddock_event.create",
       "water_asset_event.create",
+      "fence_event.create",
       "stock_count.record",
       "mob.move",
       "mob.transfer",
@@ -188,7 +189,8 @@ Important response fields:
       "task.comment.create",
       "paddock.update",
       "gate.update",
-      "water_asset_status.update"
+      "water_asset_status.update",
+      "fence_section.update"
     ],
     "max_commands_per_request": 100
   },
@@ -379,6 +381,7 @@ Supported command types:
 - `mob_event.create`: `mob_id`, `description`, optional `tags`, optional `event_at`.
 - `paddock_event.create`: `paddock_id`, `description`, optional `tags`, optional `event_at`.
 - `water_asset_event.create`: `water_asset_id`, `description`, optional `tags`, optional `event_at`.
+- `fence_event.create`: `fence_section_id`, `description`, optional `event_type`, optional `tags`, optional `condition_after`, optional `materials`, optional `event_at`.
 - `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group.
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
 - `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.
@@ -388,6 +391,7 @@ Supported command types:
 - `paddock.update`: `paddock_id`, optional `status`, optional `notes`, optional `tags`.
 - `gate.update`: `gate_id`, `status` (`open` or `closed`), optional `event_time`, and optional `closure_choices` rows shaped as `{ "mob_id": "...", "component_paddock_id": "..." }` when closing a gate that splits a mob across disconnected camp groups.
 - `water_asset_status.update`: `water_asset_id`, and at least one of `active`, `status`, `water_level`.
+- `fence_section.update`: `fence_section_id`, and at least one editable fence field such as `condition`, `notes`, `electric_wire`, build fields, or suitability ratings.
 
 Android should keep these commands in a durable outbox until the backend returns
 `"status": "applied"`. Failed commands with terminal validation errors such as

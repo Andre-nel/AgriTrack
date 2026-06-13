@@ -1,6 +1,7 @@
 from app.models.animal_group import AnimalGroupBalance, AnimalGroupType
 from app.models.calendar import CalendarActivity, CalendarActivityException
 from app.models.farm import Farm
+from app.models.fence import FenceEvent, FenceEventMaterial, FenceSection
 from app.models.finance import CashTransaction, CashTransactionLine
 from app.models.gate import PaddockGate
 from app.models.grazing import (
@@ -43,6 +44,9 @@ __all__ = [
     "CashTransactionLine",
     "DailyStockSnapshot",
     "Farm",
+    "FenceEvent",
+    "FenceEventMaterial",
+    "FenceSection",
     "GrazingAllocation",
     "GrazingAllocationLsuBreakdownHistory",
     "GrazingAllocationLsuHistory",

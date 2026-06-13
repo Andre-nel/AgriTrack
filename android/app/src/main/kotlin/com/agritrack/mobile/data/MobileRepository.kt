@@ -104,6 +104,26 @@ class MobileRepository(
         fieldStore.enqueue(MobileCommand.waterAssetNote(farmId, waterAssetId, description, tags))
     }
 
+    fun queueFenceNote(
+        farmId: String,
+        fenceSectionId: String,
+        description: String,
+        tags: List<String>,
+        eventType: String = "inspection",
+        conditionAfter: String = "",
+    ) {
+        fieldStore.enqueue(
+            MobileCommand.fenceNote(
+                farmId = farmId,
+                fenceSectionId = fenceSectionId,
+                description = description,
+                tags = tags,
+                eventType = eventType,
+                conditionAfter = conditionAfter,
+            )
+        )
+    }
+
     fun queueStockCount(
         farmId: String,
         mobId: String,
@@ -154,6 +174,16 @@ class MobileRepository(
         active: Boolean,
     ) {
         fieldStore.enqueue(MobileCommand.waterAssetStatus(farmId, waterAssetId, status, waterLevel, active))
+    }
+
+    fun queueFenceUpdate(
+        farmId: String,
+        fenceSectionId: String,
+        condition: String,
+        notes: String,
+        electricWire: Boolean,
+    ) {
+        fieldStore.enqueue(MobileCommand.fenceUpdate(farmId, fenceSectionId, condition, notes, electricWire))
     }
 
     fun queuePaddockUpdate(

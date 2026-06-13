@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from app.extensions import db
-from app.models import Farm, Mob, Paddock, Task, TaskComment, TaskEntityLink, TaskLink, TaskSpace, TaskSpaceComment, WaterAsset
+from app.models import Farm, FenceSection, Mob, Paddock, Task, TaskComment, TaskEntityLink, TaskLink, TaskSpace, TaskSpaceComment, WaterAsset
 from app.services.task_service import TaskService
 
 
@@ -120,12 +120,23 @@ def test_task_creation_and_detail_manage_farm_entity_links(client, app):
         tank = WaterAsset(farm_id=farm.id, name="Header Tank", asset_type="tank", active=True)
         mob = Mob(farm_id=farm.id, name="Main Mob", status="active")
         db.session.add_all([paddock, second_paddock, tank, mob])
+        db.session.flush()
+        fence = FenceSection(
+            farm_id=farm.id,
+            section_key="boundary:north-camp",
+            name="North Camp Boundary Fence",
+            source=FenceSection.SOURCE_MANUAL,
+            section_type=FenceSection.TYPE_BOUNDARY,
+            paddock_a_id=paddock.id,
+        )
+        db.session.add(fence)
         db.session.commit()
         space_id = str(space.id)
         paddock_id = str(paddock.id)
         second_paddock_id = str(second_paddock.id)
         tank_id = str(tank.id)
         mob_id = str(mob.id)
+        fence_id = str(fence.id)
 
     response = client.post(
         f"/tasks/spaces/{space_id}/tasks",
@@ -142,6 +153,7 @@ def test_task_creation_and_detail_manage_farm_entity_links(client, app):
             "paddock_ids": [paddock_id],
             "water_asset_ids": [tank_id],
             "mob_ids": [mob_id],
+            "fence_section_ids": [fence_id],
         },
         follow_redirects=True,
     )
@@ -151,7 +163,7 @@ def test_task_creation_and_detail_manage_farm_entity_links(client, app):
         task = Task.query.filter_by(heading="Inspect water and fences").first()
         assert task is not None
         task_id = str(task.id)
-        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 3
+        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 4
         paddock_link_id = str(TaskEntityLink.query.filter_by(task_id=task_id, paddock_id=paddock_id).first().id)
 
     detail = client.get(f"/tasks/{task_id}")
@@ -159,17 +171,18 @@ def test_task_creation_and_detail_manage_farm_entity_links(client, app):
     assert "North Camp" in body
     assert "Header Tank" in body
     assert "Main Mob" in body
+    assert "North Camp Boundary Fence" in body
 
     duplicate = client.post(
         f"/tasks/{task_id}/entity-links",
-        data={"paddock_ids": [paddock_id], "water_asset_ids": [], "mob_ids": []},
+        data={"paddock_ids": [paddock_id], "water_asset_ids": [], "mob_ids": [], "fence_section_ids": [fence_id]},
         follow_redirects=True,
     )
     assert duplicate.status_code == 200
     assert b"No new farm entity links were added" in duplicate.data
 
     with app.app_context():
-        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 3
+        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 4
 
     add_second = client.post(
         f"/tasks/{task_id}/entity-links",
@@ -188,7 +201,7 @@ def test_task_creation_and_detail_manage_farm_entity_links(client, app):
 
     with app.app_context():
         assert TaskEntityLink.query.filter_by(task_id=task_id, paddock_id=paddock_id).count() == 0
-        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 3
+        assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 4
 
 
 def test_new_task_page_prefills_entity_links_and_rejects_cross_farm_links(client, app):

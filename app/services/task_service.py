@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import Mob, Paddock, Task, TaskEntityLink, TaskLink, TaskSpace, TaskStatusTransition, WaterAsset
+from app.models import FenceSection, Mob, Paddock, Task, TaskEntityLink, TaskLink, TaskSpace, TaskStatusTransition, WaterAsset
 
 TASK_STATUSES = (
     "todo",
@@ -305,19 +305,23 @@ class TaskService:
         paddock_ids=None,
         water_asset_ids=None,
         mob_ids=None,
+        fence_section_ids=None,
     ) -> list[TaskEntityLink]:
         space = task.space or db.session.get(TaskSpace, task.space_id)
         farm_id = space.farm_id
         normalized_paddock_ids = cls.normalize_entity_ids(paddock_ids)
         normalized_water_asset_ids = cls.normalize_entity_ids(water_asset_ids)
         normalized_mob_ids = cls.normalize_entity_ids(mob_ids)
+        normalized_fence_section_ids = cls.normalize_entity_ids(fence_section_ids)
 
         paddocks = cls._rows_by_id(Paddock, normalized_paddock_ids, "paddocks")
         water_assets = cls._rows_by_id(WaterAsset, normalized_water_asset_ids, "water assets")
         mobs = cls._rows_by_id(Mob, normalized_mob_ids, "mobs")
+        fence_sections = cls._rows_by_id(FenceSection, normalized_fence_section_ids, "fence sections")
         cls._require_same_farm(paddocks, farm_id, "paddocks")
         cls._require_same_farm(water_assets, farm_id, "water assets")
         cls._require_same_farm(mobs, farm_id, "mobs")
+        cls._require_same_farm(fence_sections, farm_id, "fence sections")
 
         existing = {
             ("paddock", str(link.paddock_id))
@@ -335,6 +339,14 @@ class TaskService:
             {
                 ("mob", str(link.mob_id))
                 for link in TaskEntityLink.query.filter_by(task_id=task.id).filter(TaskEntityLink.mob_id.isnot(None))
+            }
+        )
+        existing.update(
+            {
+                ("fence_section", str(link.fence_section_id))
+                for link in TaskEntityLink.query.filter_by(task_id=task.id).filter(
+                    TaskEntityLink.fence_section_id.isnot(None)
+                )
             }
         )
 
@@ -361,6 +373,14 @@ class TaskService:
                 continue
             existing.add(key)
             link = TaskEntityLink(task_id=task.id, mob_id=mob.id)
+            db.session.add(link)
+            links.append(link)
+        for section in fence_sections:
+            key = ("fence_section", str(section.id))
+            if key in existing:
+                continue
+            existing.add(key)
+            link = TaskEntityLink(task_id=task.id, fence_section_id=section.id)
             db.session.add(link)
             links.append(link)
         return links

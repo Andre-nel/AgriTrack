@@ -10,6 +10,7 @@ from app.extensions import db
 from app.models import (
     CalendarActivity,
     Farm,
+    FenceSection,
     Mob,
     Paddock,
     Task,
@@ -34,7 +35,7 @@ from app.services.task_service import (
 
 bp = Blueprint("tasks", __name__)
 TASK_SUMMARY_OPEN_STATUSES = {"selected_for_execution", "in_progress", "ready_for_verification"}
-TASK_ENTITY_TABLES = ("paddocks", "water_assets", "mobs")
+TASK_ENTITY_TABLES = ("paddocks", "water_assets", "mobs", "fence_sections")
 
 
 def _space_redirect(space: TaskSpace):
@@ -80,18 +81,24 @@ def _source_list(source, *names: str) -> list[str]:
 
 def _farm_entity_options(farm_id: str | None) -> dict:
     if not _entity_tables_available():
-        return {"paddocks": [], "water_assets": [], "mobs": []}
+        return {"paddocks": [], "water_assets": [], "mobs": [], "fence_sections": []}
     paddock_query = Paddock.query.order_by(Paddock.name.asc())
     water_asset_query = WaterAsset.query.order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
     mob_query = Mob.query.order_by(Mob.name.asc())
+    fence_query = FenceSection.query.filter(FenceSection.active.is_(True)).order_by(
+        FenceSection.section_type.asc(),
+        FenceSection.name.asc(),
+    )
     if farm_id:
         paddock_query = paddock_query.filter(Paddock.farm_id == farm_id)
         water_asset_query = water_asset_query.filter(WaterAsset.farm_id == farm_id)
         mob_query = mob_query.filter(Mob.farm_id == farm_id)
+        fence_query = fence_query.filter(FenceSection.farm_id == farm_id, FenceSection.active.is_(True))
     return {
         "paddocks": paddock_query.all(),
         "water_assets": water_asset_query.all(),
         "mobs": mob_query.all(),
+        "fence_sections": fence_query.all(),
     }
 
 
@@ -100,6 +107,8 @@ def _entity_link_kind_and_target(link: TaskEntityLink) -> tuple[str, object]:
         return "Paddock", link.paddock
     if link.water_asset is not None:
         return "Water Asset", link.water_asset
+    if link.fence_section is not None:
+        return "Fence Section", link.fence_section
     return "Mob", link.mob
 
 
@@ -112,6 +121,12 @@ def _entity_target_url(kind: str, target) -> str:
             farm_id=target.farm_id,
             open_asset_id=target.id,
             _anchor="water-assets",
+        )
+    if kind == "Fence Section":
+        return url_for(
+            "web.farm_fence_detail",
+            farm_id=target.farm_id,
+            fence_section_id=target.id,
         )
     return url_for("web.mob_detail", mob_id=target.id)
 
@@ -143,6 +158,16 @@ def _build_selected_entity_rows(form_values: dict) -> list[dict]:
         rows.append({"kind": "Water Asset", "label": asset.name, "url": _entity_target_url("Water Asset", asset)})
     for mob in Mob.query.filter(Mob.id.in_(form_values["mob_ids"])).order_by(Mob.name.asc()).all():
         rows.append({"kind": "Mob", "label": mob.name, "url": _entity_target_url("Mob", mob)})
+    for section in FenceSection.query.filter(FenceSection.id.in_(form_values["fence_section_ids"])).order_by(
+        FenceSection.name.asc()
+    ).all():
+        rows.append(
+            {
+                "kind": "Fence Section",
+                "label": section.name,
+                "url": _entity_target_url("Fence Section", section),
+            }
+        )
     return rows
 
 
@@ -295,6 +320,7 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
     paddock_ids = _source_list(source, "paddock_ids", "paddock_id")
     water_asset_ids = _source_list(source, "water_asset_ids", "water_asset_id")
     mob_ids = _source_list(source, "mob_ids", "mob_id")
+    fence_section_ids = _source_list(source, "fence_section_ids", "fence_section_id")
 
     selected_space = None
     if selected_space_id:
@@ -308,6 +334,8 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
             selected_entity_farm_ids.append(str(asset.farm_id))
         for mob in Mob.query.filter(Mob.id.in_(mob_ids)).all():
             selected_entity_farm_ids.append(str(mob.farm_id))
+        for section in FenceSection.query.filter(FenceSection.id.in_(fence_section_ids)).all():
+            selected_entity_farm_ids.append(str(section.farm_id))
 
     if not selected_farm_id and source_activity is not None:
         selected_farm_id = source_activity.farm_id
@@ -347,6 +375,7 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
             "paddock_ids": paddock_ids,
             "water_asset_ids": water_asset_ids,
             "mob_ids": mob_ids,
+            "fence_section_ids": fence_section_ids,
         },
         source_activity,
     )
@@ -473,6 +502,7 @@ def create_task_from_page():
             paddock_ids=form_values["paddock_ids"],
             water_asset_ids=form_values["water_asset_ids"],
             mob_ids=form_values["mob_ids"],
+            fence_section_ids=form_values["fence_section_ids"],
         )
         db.session.commit()
         due_label = task.due_date.isoformat() if task.due_date else "no due date"
@@ -607,6 +637,7 @@ def create_task(space_id: str):
             paddock_ids=request.form.getlist("paddock_ids"),
             water_asset_ids=request.form.getlist("water_asset_ids"),
             mob_ids=request.form.getlist("mob_ids"),
+            fence_section_ids=request.form.getlist("fence_section_ids"),
         )
         db.session.commit()
         flash(f"Task {task.display_key} created", "success")
@@ -688,6 +719,7 @@ def task_detail(task_id: str):
             selectinload(TaskEntityLink.paddock),
             selectinload(TaskEntityLink.water_asset),
             selectinload(TaskEntityLink.mob),
+            selectinload(TaskEntityLink.fence_section),
         )
         .filter_by(task_id=task.id)
         .order_by(TaskEntityLink.created_at.desc(), TaskEntityLink.id.desc())
@@ -788,6 +820,7 @@ def create_task_entity_links(task_id: str):
             paddock_ids=request.form.getlist("paddock_ids"),
             water_asset_ids=request.form.getlist("water_asset_ids"),
             mob_ids=request.form.getlist("mob_ids"),
+            fence_section_ids=request.form.getlist("fence_section_ids"),
         )
         db.session.commit()
         if links:

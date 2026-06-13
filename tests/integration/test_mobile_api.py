@@ -8,6 +8,8 @@ from app.models import (
     AnimalGroupType,
     CalendarActivity,
     Farm,
+    FenceEvent,
+    FenceSection,
     GrazingAllocation,
     GrazingSession,
     MobileAuthToken,
@@ -287,7 +289,38 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
             due_date=datetime.now(timezone.utc).date().isoformat(),
         )
         db.session.flush()
-        TaskService.add_entity_links(task=task, paddock_ids=[paddock.id], mob_ids=[mob.id])
+        fence = FenceSection(
+            farm_id=farm.id,
+            section_key="boundary:north-camp",
+            name="North Camp Boundary Fence",
+            source=FenceSection.SOURCE_AUTO,
+            section_type=FenceSection.TYPE_BOUNDARY,
+            paddock_a_id=paddock.id,
+            condition="bad",
+            height_profile="low",
+            construction_type="mesh",
+            mesh_type="wire_mesh",
+            electric_wire=True,
+            length_m=240,
+        )
+        db.session.add(fence)
+        db.session.flush()
+        db.session.add(
+            FenceEvent(
+                farm_id=farm.id,
+                fence_section_id=fence.id,
+                event_type="inspection",
+                tags_csv="fence,field note",
+                condition_after="bad",
+                description="Jackal hole under boundary fence",
+            )
+        )
+        TaskService.add_entity_links(
+            task=task,
+            paddock_ids=[paddock.id],
+            mob_ids=[mob.id],
+            fence_section_ids=[fence.id],
+        )
         db.session.add(
             activity := CalendarActivity(
                 farm_id=farm.id,
@@ -355,13 +388,18 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert payload["paddock_events"][0]["description"] == "Pasture recovering after rain"
     assert payload["water_asset_events"][0]["tags"] == ["inspection", "field note"]
     assert payload["water_asset_events"][0]["description"] == "Float valve checked on water run"
+    assert payload["fence_sections"][0]["name"] == "North Camp Boundary Fence"
+    assert payload["fence_sections"][0]["condition"] == "bad"
+    assert payload["fence_sections"][0]["electric_wire"] is True
+    assert payload["fence_events"][0]["event_type"] == "inspection"
+    assert payload["fence_events"][0]["description"] == "Jackal hole under boundary fence"
     assert {asset["name"] for asset in payload["water_assets"]} == {"Header Tank", "North Trough"}
     assert payload["water_connections"][0]["flow_type"] == "gravity"
     assert payload["tasks"][0]["heading"] == "Check north trough"
     assert payload["tasks"][0]["tags"] == ["water", "field"]
     assert payload["tasks"][0]["assignee_name"] == "Field Team"
     assert payload["tasks"][0]["priority_label"] == "High"
-    assert {link["entity_type"] for link in payload["tasks"][0]["entity_links"]} == {"paddock", "mob"}
+    assert {link["entity_type"] for link in payload["tasks"][0]["entity_links"]} == {"paddock", "mob", "fence_section"}
     assert payload["calendar_items"][0]["title"] in {"Check north trough", "Weekly water run"}
     task_item = next(item for item in payload["calendar_items"] if item["kind"] == "task")
     assert task_item["source_id"] == task_id
@@ -371,7 +409,7 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
     assert task_item["stage_label"] == "TO DO"
     assert task_item["assignee_name"] == "Field Team"
     assert task_item["tags"] == ["water", "field"]
-    assert {link["entity_type"] for link in task_item["entity_links"]} == {"paddock", "mob"}
+    assert {link["entity_type"] for link in task_item["entity_links"]} == {"paddock", "mob", "fence_section"}
     activity_item = next(item for item in payload["calendar_items"] if item["kind"] == "activity")
     assert activity_item["source_id"] == activity_id
     assert activity_item["activity_id"] == activity_id
@@ -774,6 +812,16 @@ def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, 
         )
         db.session.add_all([paddock, mob, asset])
         db.session.flush()
+        fence = FenceSection(
+            farm_id=farm.id,
+            section_key="boundary:note-camp",
+            name="Note Camp Fence",
+            source=FenceSection.SOURCE_MANUAL,
+            section_type=FenceSection.TYPE_BOUNDARY,
+            paddock_a_id=paddock.id,
+        )
+        db.session.add(fence)
+        db.session.flush()
         mob_event = MobEvent(
             farm_id=farm.id,
             mob_id=mob.id,
@@ -792,7 +840,14 @@ def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, 
             tags_csv="water",
             description="Water note with photo",
         )
-        db.session.add_all([mob_event, paddock_event, water_event])
+        fence_event = FenceEvent(
+            farm_id=farm.id,
+            fence_section_id=fence.id,
+            event_type="inspection",
+            tags_csv="fence",
+            description="Fence note with photo",
+        )
+        db.session.add_all([mob_event, paddock_event, water_event, fence_event])
         db.session.flush()
         farm_id = str(farm.id)
         event_targets = [
@@ -806,6 +861,11 @@ def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, 
                 "water",
                 str(water_event.id),
                 f"/api/mobile/v1/farms/{farm.id}/water-asset-events/{water_event.id}/attachments",
+            ),
+            (
+                "fence",
+                str(fence_event.id),
+                f"/api/mobile/v1/farms/{farm.id}/fence-events/{fence_event.id}/attachments",
             ),
         ]
         db.session.commit()
@@ -833,7 +893,7 @@ def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, 
         event_targets[-1][2],
         headers=_auth(token),
         data={
-            "client_attachment_id": "water-photo-1",
+            "client_attachment_id": "fence-photo-1",
             "file": (BytesIO(b"duplicate bytes"), "duplicate.jpg", "image/jpeg"),
         },
         content_type="multipart/form-data",
@@ -848,6 +908,7 @@ def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, 
     assert snapshot_payload["mob_events"][0]["attachment_count"] == 1
     assert snapshot_payload["paddock_events"][0]["attachment_count"] == 1
     assert snapshot_payload["water_asset_events"][0]["attachment_count"] == 1
+    assert snapshot_payload["fence_events"][0]["attachment_count"] == 1
 
     for attachment in uploaded:
         file_response = client.get(
@@ -858,7 +919,7 @@ def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, 
         assert file_response.data.endswith(b"jpeg bytes")
 
     with app.app_context():
-        assert NoteAttachment.query.filter_by(farm_id=farm_id).count() == 3
+        assert NoteAttachment.query.filter_by(farm_id=farm_id).count() == 4
 
 
 def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, app):
@@ -886,6 +947,19 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
             water_level="low",
         )
         db.session.add_all([source, destination, mob, transfer_target, group, tank])
+        db.session.flush()
+        fence_paddock_a_id, fence_paddock_b_id = sorted([str(source.id), str(destination.id)])
+        fence = FenceSection(
+            farm_id=farm.id,
+            section_key="internal:sync-source-destination",
+            name="Source / Destination Fence",
+            source=FenceSection.SOURCE_MANUAL,
+            section_type=FenceSection.TYPE_INTERNAL,
+            paddock_a_id=fence_paddock_a_id,
+            paddock_b_id=fence_paddock_b_id,
+            condition="unknown",
+        )
+        db.session.add(fence)
         db.session.flush()
         db.session.add(
             AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=5)
@@ -916,6 +990,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         transfer_target_id = str(transfer_target.id)
         group_id = str(group.id)
         tank_id = str(tank.id)
+        fence_id = str(fence.id)
         task_id = str(task.id)
         source_id = str(source.id)
         db.session.commit()
@@ -996,6 +1071,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
                 "heading": "Mobile-created task",
                 "description": "Created while offline",
                 "paddock_id": source_id,
+                "fence_section_id": fence_id,
                 "due_date": "2026-05-18",
             },
         },
@@ -1038,6 +1114,37 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
                 "description": "Tank inspected from mobile",
             },
         },
+        {
+            "client_command_id": "fence-1",
+            "type": "fence_section.update",
+            "farm_id": farm_id,
+            "payload": {
+                "fence_section_id": fence_id,
+                "condition": "bad",
+                "electric_wire": True,
+                "notes": "Loose bottom wire near the drift",
+            },
+        },
+        {
+            "client_command_id": "fence-note-1",
+            "type": "fence_event.create",
+            "farm_id": farm_id,
+            "payload": {
+                "fence_section_id": fence_id,
+                "event_type": "maintenance",
+                "tags": ["fence", "jackal"],
+                "condition_after": "fair",
+                "description": "Packed stones under the low section",
+                "materials": [
+                    {
+                        "action": "packed",
+                        "material_type": "stone",
+                        "quantity": "2",
+                        "unit": "bag",
+                    }
+                ],
+            },
+        },
     ]
     response = client.post(
         "/api/mobile/v1/sync/commands",
@@ -1046,7 +1153,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
     )
     assert response.status_code == 200
     payload = response.get_json()
-    assert [result["status"] for result in payload["results"]] == ["applied"] * 13
+    assert [result["status"] for result in payload["results"]] == ["applied"] * 15
     assert all(result["duplicate"] is False for result in payload["results"])
 
     duplicate = client.post(
@@ -1066,6 +1173,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert MobEvent.query.filter_by(farm_id=farm_id).count() == 1
         assert PaddockEvent.query.filter_by(farm_id=farm_id).count() == 1
         assert WaterAssetEvent.query.filter_by(farm_id=farm_id).count() == 1
+        assert FenceEvent.query.filter_by(farm_id=farm_id).count() == 1
         balance = AnimalGroupBalance.query.filter_by(
             mob_id=mob_id,
             animal_group_type_id=group_id,
@@ -1080,6 +1188,8 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert active_session is not None
         assert sorted(float(row.allocation_fraction) for row in active_session.allocations) == [0.5, 0.5]
         assert db.session.get(WaterAsset, tank_id).water_level == "full"
+        assert db.session.get(FenceSection, fence_id).condition == "fair"
+        assert db.session.get(FenceSection, fence_id).electric_wire is True
         water_history = WaterAssetStateHistory.query.filter_by(water_asset_id=tank_id).one()
         assert water_history.change_type == "updated"
         assert water_history.previous_water_level == "low"
@@ -1087,9 +1197,11 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert db.session.get(Paddock, source_id).status == "resting"
         assert db.session.get(Paddock, source_id).notes == "Gate latch needs attention"
         assert Task.query.filter_by(heading="Mobile-created task").count() == 1
+        created_task = Task.query.filter_by(heading="Mobile-created task").one()
+        assert any(str(link.fence_section_id) == fence_id for link in created_task.entity_links)
         assert db.session.get(Task, task_id).status == "in_progress"
         assert TaskComment.query.filter_by(task_id=task_id).count() == 1
-        assert MobileSyncCommand.query.filter_by(status="applied").count() == 13
+        assert MobileSyncCommand.query.filter_by(status="applied").count() == 15
 
     snapshot_response = client.get(
         f"/api/mobile/v1/farms/{farm_id}/snapshot",
@@ -1102,6 +1214,8 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
     assert history_payload[0]["water_asset_id"] == tank_id
     assert history_payload[0]["previous_water_level"] == "low"
     assert history_payload[0]["water_level"] == "full"
+    assert snapshot_payload["fence_sections"][0]["condition"] == "fair"
+    assert snapshot_payload["fence_events"][0]["materials"][0]["material_type"] == "stone"
 
 
 def test_mobile_snapshot_includes_gates_and_gate_update_command(client, app):

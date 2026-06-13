@@ -51,6 +51,13 @@ private fun fallbackMapProperties(feature: MapFeatureSummary): JSONObject {
         feature.gateId?.let { properties.put("gate_id", it) }
         feature.gateStatus?.let { properties.put("status", it) }
     }
+    if (feature.featureType == "fence_section") {
+        feature.fenceSectionId?.let {
+            properties.put("id", it)
+            properties.put("fence_section_id", it)
+        }
+        feature.fenceCondition?.let { properties.put("condition", it) }
+    }
     feature.grazingPressureRatio?.let { properties.put("grazing_pressure_ratio", it) }
     feature.currentLsu?.let { properties.put("current_lsu", it) }
     return properties
