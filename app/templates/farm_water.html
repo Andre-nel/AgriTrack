@@ -25,6 +25,18 @@
   <p class="muted">Satellite imagery is shown under paddock outlines, with water assets and pumped or gravity-fed links layered on top.</p>
   <form method="get" class="water-map-filter-form">
     <input type="hidden" name="map_filters_applied" value="1" />
+    {% if water_asset_filters_applied %}
+    <input type="hidden" name="water_asset_filters_applied" value="1" />
+    {% for asset_type in selected_water_asset_types %}
+    <input type="hidden" name="water_asset_type" value="{{ asset_type }}" />
+    {% endfor %}
+    {% endif %}
+    {% if selected_water_asset_state != "all" %}
+    <input type="hidden" name="water_asset_state" value="{{ selected_water_asset_state }}" />
+    {% endif %}
+    {% if selected_water_asset_paddock_id %}
+    <input type="hidden" name="water_asset_paddock_id" value="{{ selected_water_asset_paddock_id }}" />
+    {% endif %}
     <fieldset class="water-map-filter-group">
       <legend>Water Asset Types On Map</legend>
       <div class="water-map-filter-grid">
@@ -65,9 +77,13 @@
   <p id="farm-map-status" class="muted">Loading map...</p>
 </section>
 
-<section class="split">
-  <article class="card">
-    <h2>Add Water Asset</h2>
+<section class="split water-create-actions">
+  <details class="card water-create-panel" id="add-water-asset-panel">
+    <summary class="water-create-panel-summary">
+      <span class="btn">Add Water Asset</span>
+    </summary>
+    <div class="water-create-panel-body">
+      <h2>Add Water Asset</h2>
     <form method="post" action="{{ url_for('web.create_water_asset_form', farm_id=farm.id) }}" class="grid-form">
       <div class="grid-two">
         <label>Name
@@ -183,10 +199,15 @@
       </div>
       <button type="submit" class="btn">Create Asset</button>
     </form>
-  </article>
+    </div>
+  </details>
 
-  <article class="card">
-    <h2>Add Water Connection</h2>
+  <details class="card water-create-panel" id="add-water-connection-panel">
+    <summary class="water-create-panel-summary">
+      <span class="btn">Add Water Connection</span>
+    </summary>
+    <div class="water-create-panel-body">
+      <h2>Add Water Connection</h2>
     <form method="post" action="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}" class="grid-form">
       <div class="grid-two">
         <label>Flow Type
@@ -250,13 +271,65 @@
       </div>
       <button type="submit" class="btn">Create Connection</button>
     </form>
-  </article>
+    </div>
+  </details>
 </section>
 
 <section class="card" id="water-assets">
   <h2>Water Assets</h2>
+  <form method="get" class="water-asset-filter-form">
+    <input type="hidden" name="water_asset_filters_applied" value="1" />
+    {% if map_filters_applied %}
+    <input type="hidden" name="map_filters_applied" value="1" />
+    {% for asset_type in selected_map_asset_types %}
+    <input type="hidden" name="asset_type" value="{{ asset_type }}" />
+    {% endfor %}
+    {% endif %}
+    <fieldset class="water-map-filter-group">
+      <legend>Water Asset Types</legend>
+      <div class="water-map-filter-grid">
+        {% for asset_type in water_asset_types %}
+        <label class="analytics-checkbox">
+          <input
+            type="checkbox"
+            name="water_asset_type"
+            value="{{ asset_type }}"
+            {% if asset_type in selected_water_asset_types %}checked{% endif %}
+          />
+          <span>{{ water_asset_type_labels[asset_type] }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <div class="grid-two">
+      <label>State
+        <select name="water_asset_state">
+          <option value="all" {% if selected_water_asset_state == "all" %}selected{% endif %}>All states</option>
+          <option value="active" {% if selected_water_asset_state == "active" %}selected{% endif %}>Active</option>
+          <option value="inactive" {% if selected_water_asset_state == "inactive" %}selected{% endif %}>Inactive</option>
+          <option value="needs_review" {% if selected_water_asset_state == "needs_review" %}selected{% endif %}>Needs Review</option>
+        </select>
+      </label>
+      <label>Location Paddock
+        <select name="water_asset_paddock_id">
+          <option value="" {% if not selected_water_asset_paddock_id %}selected{% endif %}>All paddocks</option>
+          <option value="__none__" {% if selected_water_asset_paddock_id == "__none__" %}selected{% endif %}>No paddock location</option>
+          {% for paddock in paddocks %}
+          <option value="{{ paddock.id }}" {% if selected_water_asset_paddock_id == paddock.id %}selected{% endif %}>
+            {{ paddock.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn btn-secondary">Apply Water Asset Filters</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.farm_water_workspace', farm_id=farm.id) }}#water-assets">Show All Assets</a>
+      <span class="muted">{{ filtered_assets|length }} of {{ assets|length }} shown</span>
+    </div>
+  </form>
   <div class="water-asset-list">
-    {% for asset in assets %}
+    {% for asset in filtered_assets %}
     {% set linked_tasks = linked_tasks_by_water_asset_id.get(asset.id|string, []) %}
     {% set asset_events = water_asset_events_by_asset_id.get(asset.id|string, []) %}
     <article class="water-asset-card" id="asset-{{ asset.id }}">
@@ -347,7 +420,11 @@
       </div>
     </article>
     {% else %}
+    {% if assets %}
+    <p>No water assets match the selected filters.</p>
+    {% else %}
     <p>No water assets on this farm yet.</p>
+    {% endif %}
     {% endfor %}
   </div>
 </section>

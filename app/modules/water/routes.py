@@ -86,6 +86,45 @@ def register_legacy_routes(bp) -> None:
             request.args.getlist("asset_type"),
             filters_applied=map_filters_applied,
         )
+        water_asset_filters_applied = (
+            (request.args.get("water_asset_filters_applied") or "").strip() == "1"
+        )
+        selected_water_asset_types = normalize_water_asset_type_filters(
+            request.args.getlist("water_asset_type"),
+            filters_applied=water_asset_filters_applied,
+        )
+        selected_water_asset_state = (
+            request.args.get("water_asset_state") or "all"
+        ).strip().lower()
+        if selected_water_asset_state not in {"all", "active", "inactive", "needs_review"}:
+            selected_water_asset_state = "all"
+        selected_water_asset_paddock_id = (
+            request.args.get("water_asset_paddock_id") or ""
+        ).strip()
+        active_paddock_ids = {str(paddock.id) for paddock in paddocks}
+        if selected_water_asset_paddock_id not in active_paddock_ids | {"", "__none__"}:
+            selected_water_asset_paddock_id = ""
+
+        selected_water_asset_type_set = set(selected_water_asset_types)
+        filtered_assets = []
+        for asset in assets:
+            if asset.asset_type not in selected_water_asset_type_set:
+                continue
+            if selected_water_asset_state == "active" and not asset.active:
+                continue
+            if selected_water_asset_state == "inactive" and asset.active:
+                continue
+            if selected_water_asset_state == "needs_review" and not asset.needs_review:
+                continue
+            if selected_water_asset_paddock_id == "__none__":
+                if asset.location_paddock_id:
+                    continue
+            elif (
+                selected_water_asset_paddock_id
+                and str(asset.location_paddock_id) != selected_water_asset_paddock_id
+            ):
+                continue
+            filtered_assets.append(asset)
         water_asset_editor_config = {
             "assetTypeLabels": WaterNetworkService.ASSET_TYPE_LABELS,
             "assetRecords": [
@@ -145,6 +184,7 @@ def register_legacy_routes(bp) -> None:
             farm=farm,
             paddocks=paddocks,
             assets=assets,
+            filtered_assets=filtered_assets,
             active_assets=active_assets,
             connections=connections,
             water_summary=water_summary,
@@ -174,6 +214,10 @@ def register_legacy_routes(bp) -> None:
             ),
             map_filters_applied=map_filters_applied,
             selected_map_asset_types=selected_map_asset_types,
+            water_asset_filters_applied=water_asset_filters_applied,
+            selected_water_asset_types=selected_water_asset_types,
+            selected_water_asset_state=selected_water_asset_state,
+            selected_water_asset_paddock_id=selected_water_asset_paddock_id,
             water_asset_editor_config=water_asset_editor_config,
             linked_tasks_by_water_asset_id=linked_tasks_by_water_asset_id,
             water_asset_events_by_asset_id=water_asset_events_by_asset_id,

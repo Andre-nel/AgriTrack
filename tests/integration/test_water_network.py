@@ -1511,6 +1511,64 @@ def test_farm_water_workspace_renders_map_filters_and_satellite_mode(client, app
     assert "Show All Types" in body
 
 
+def test_farm_water_workspace_collapses_create_forms_and_filters_water_assets(client, app):
+    with app.app_context():
+        farm = Farm(name="Water Asset Filter Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        north = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)
+        south = Paddock(farm_id=farm.id, name="South Camp", area_ha=8, grazeable_area_ha=8)
+        db.session.add_all([north, south])
+        db.session.flush()
+        tank = WaterAsset(
+            farm_id=farm.id,
+            name="Tank Alpha",
+            asset_type="tank",
+            active=True,
+            location_paddock_id=north.id,
+        )
+        trough = WaterAsset(
+            farm_id=farm.id,
+            name="Trough Beta",
+            asset_type="trough",
+            active=True,
+            location_paddock_id=south.id,
+        )
+        weir = WaterAsset(
+            farm_id=farm.id,
+            name="Weir Review",
+            asset_type="weir",
+            active=True,
+            needs_review=True,
+        )
+        db.session.add_all([tank, trough, weir])
+        db.session.commit()
+        farm_id = str(farm.id)
+        north_id = str(north.id)
+
+    response = client.get(
+        f"/farms/{farm_id}/water?"
+        f"water_asset_filters_applied=1&water_asset_type=tank&"
+        f"water_asset_state=active&water_asset_paddock_id={north_id}"
+    )
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    water_assets_section = body.split('<section class="card" id="water-assets">', 1)[1].split(
+        "<dialog",
+        1,
+    )[0]
+
+    assert 'id="add-water-asset-panel"' in body
+    assert 'id="add-water-connection-panel"' in body
+    assert '<span class="btn">Add Water Asset</span>' in body
+    assert '<span class="btn">Add Water Connection</span>' in body
+    assert "Apply Water Asset Filters" in water_assets_section
+    assert "1 of 3 shown" in water_assets_section
+    assert "Tank Alpha" in water_assets_section
+    assert "Trough Beta" not in water_assets_section
+    assert "Weir Review" not in water_assets_section
+
+
 def test_farm_water_workspace_renders_asset_modal_launchers(client, app):
     with app.app_context():
         farm = Farm(name="Modal Water Farm", timezone="UTC")
