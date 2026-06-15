@@ -1,5 +1,16 @@
+from datetime import datetime, timezone
+
 from app.extensions import db
-from app.models import AnimalGroupBalance, AnimalGroupType, Farm, Mob, MobEvent, Paddock
+from app.models import (
+    AnimalGroupBalance,
+    AnimalGroupType,
+    Farm,
+    GrazingAllocation,
+    GrazingSession,
+    Mob,
+    MobEvent,
+    Paddock,
+)
 from app.modules.mobs.presenters import build_mob_detail_context
 
 
@@ -17,8 +28,23 @@ def test_build_mob_detail_context_filters_events_and_builds_options(app):
             sex="ewe",
             age_class="adult",
         )
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
         db.session.add_all([paddock, mob, other_mob, group_type])
         db.session.flush()
+        session.mob_id = mob.id
+        db.session.add(session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=session.id,
+                paddock_id=paddock.id,
+                allocation_fraction="1.0",
+            )
+        )
         db.session.add(AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group_type.id, head_count=12))
         db.session.add(
             MobEvent(
@@ -46,6 +72,13 @@ def test_build_mob_detail_context_filters_events_and_builds_options(app):
         ]
         assert context["transfer_mobs_by_farm"][str(farm.id)] == [
             {"id": str(other_mob.id), "name": "Other Mob"}
+        ]
+        assert context["current_allocations"] == [
+            {
+                "paddock_id": str(paddock.id),
+                "paddock_name": "North Camp",
+                "allocation_pct": 100.0,
+            }
         ]
         assert context["split_group_options"][0]["head_count"] == 12
         assert [row["description"] for row in context["mob_events"]] == ["Checked condition"]

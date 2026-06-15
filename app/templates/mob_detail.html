@@ -158,7 +158,25 @@
 </section>
 
 <section class="card">
-  <h2>Mob Comments / Log Notes</h2>
+  <h2>Current Paddock Allocation</h2>
+  <table>
+    <thead><tr><th>Paddock</th><th>Allocation %</th></tr></thead>
+    <tbody>
+      {% for allocation in current_allocations %}
+      <tr>
+        <td><a href="{{ url_for('web.paddock_detail', paddock_id=allocation.paddock_id) }}">{{ allocation.paddock_name }}</a></td>
+        <td>{{ "%.2f"|format(allocation.allocation_pct) }}%</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="2">No active paddock allocation.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Current total: {{ "%.2f"|format(allocation_total_pct) }}%</p>
+</section>
+
+<details class="card">
+  <summary><strong>Mob Comments / Log Notes</strong></summary>
   <form method="post" action="{{ url_for('web.mob_event_create_form', mob_id=mob.id) }}" class="grid-form" enctype="multipart/form-data">
     <label>Tags / Keywords (comma separated)
       <input
@@ -223,28 +241,10 @@
       {% endfor %}
     </tbody>
   </table>
-</section>
+</details>
 
-<section class="card">
-  <h2>Current Paddock Allocation</h2>
-  <table>
-    <thead><tr><th>Paddock</th><th>Allocation %</th></tr></thead>
-    <tbody>
-      {% for allocation in current_allocations %}
-      <tr>
-        <td>{{ allocation.paddock_name }}</td>
-        <td>{{ "%.2f"|format(allocation.allocation_pct) }}%</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="2">No active paddock allocation.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <p class="muted">Current total: {{ "%.2f"|format(allocation_total_pct) }}%</p>
-</section>
-
-<section class="card">
-  <h2>Move Mob</h2>
+<details class="card">
+  <summary><strong>Move Mob</strong></summary>
   {% if has_move_paddocks %}
   <form method="post" action="{{ url_for('web.mob_move_form', mob_id=mob.id) }}" class="grid-form">
     <label>Destination Farm
@@ -292,10 +292,10 @@
   {% else %}
   <p>No paddocks are available yet. Add paddocks to a farm first.</p>
   {% endif %}
-</section>
+</details>
 
-<section class="card">
-  <h2>Transfer Stock To Existing Mob</h2>
+<details class="card">
+  <summary><strong>Transfer Stock To Existing Mob</strong></summary>
   {% if split_group_options and has_transfer_destination_mobs %}
   <form method="post" action="{{ url_for('web.mob_transfer_form', mob_id=mob.id) }}" class="grid-form">
     <label>Destination Farm
@@ -358,18 +358,18 @@
   {% else %}
   <p>No destination mobs are available yet. Create another active mob first.</p>
   {% endif %}
-</section>
+</details>
 
-<section class="card">
-  <h2>Deactivate Mob</h2>
+<details class="card">
+  <summary><strong>Deactivate Mob</strong></summary>
   <p class="muted">A mob can only be deactivated when total head count is zero.</p>
   <form method="post" action="{{ url_for('web.mob_deactivate_form', mob_id=mob.id) }}">
     <button type="submit" class="btn btn-secondary">Deactivate Mob</button>
   </form>
-</section>
+</details>
 
-<section class="card">
-  <h2>Split Mob</h2>
+<details class="card">
+  <summary><strong>Split Mob</strong></summary>
   {% if split_group_options %}
   <p class="muted">Move selected stock into one or more new mobs. Any unallocated stock stays in this mob.</p>
   <form method="post" action="{{ url_for('web.mob_split_form', mob_id=mob.id) }}" class="grid-form">
@@ -436,7 +436,7 @@
   {% else %}
   <p>No positive stock balances are available to split from this mob.</p>
   {% endif %}
-</section>
+</details>
 <script>
   (function () {
     const speciesDefaults = {

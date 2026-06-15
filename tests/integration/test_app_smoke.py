@@ -1547,16 +1547,49 @@ def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
         db.session.add(farm)
         db.session.flush()
 
+        paddock = Paddock(
+            farm_id=farm.id,
+            name="Default North Camp",
+            area_ha=12,
+            grazeable_area_ha=10,
+        )
         mob = Mob(farm_id=farm.id, name="Adjust Default Mob", status="active")
-        db.session.add(mob)
+        db.session.add_all([paddock, mob])
+        db.session.flush()
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
+        db.session.add(session)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocation(
+                grazing_session_id=session.id,
+                paddock_id=paddock.id,
+                allocation_fraction="1.0",
+            )
+        )
         db.session.commit()
 
         mob_id = str(mob.id)
+        paddock_id = str(paddock.id)
 
     response = client.get(f"/mobs/{mob_id}")
     assert response.status_code == 200
 
     body = response.data.decode("utf-8")
+    assert body.index("Current Paddock Allocation") < body.index("Mob Comments / Log Notes")
+    assert f'href="/paddocks/{paddock_id}"' in body
+    assert "Default North Camp" in body
+    for heading in [
+        "Mob Comments / Log Notes",
+        "Move Mob",
+        "Transfer Stock To Existing Mob",
+        "Deactivate Mob",
+        "Split Mob",
+    ]:
+        assert f'<details class="card">\n  <summary><strong>{heading}</strong></summary>' in body
     assert 'option value="adjustment_in" selected' in body
     assert "count (set final total)" in body
     assert "Use count only when you want to set the final head count for this exact line." in body

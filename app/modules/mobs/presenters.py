@@ -33,6 +33,7 @@ def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
             allocation_total_pct += pct
             current_allocations.append(
                 {
+                    "paddock_id": str(allocation.paddock_id),
                     "paddock_name": allocation.paddock.name,
                     "allocation_pct": float(pct),
                 }
