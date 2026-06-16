@@ -9,23 +9,33 @@ function Invoke-AgriTrackPython {
     )
 
     $root = Get-AgriTrackRoot
+    $active = $null
+    if ($env:VIRTUAL_ENV) {
+        $active = Join-Path $env:VIRTUAL_ENV "Scripts\python.exe"
+    }
+
+    if ($active -and (Test-Path -LiteralPath $active)) {
+        & $active @Arguments
+        return
+    }
+
     $preferred = Join-Path $root ".venv\Scripts\python.exe"
 
     if (Test-Path -LiteralPath $preferred) {
         & $preferred @Arguments
-        return $LASTEXITCODE
+        return
     }
 
     $python = Get-Command python -ErrorAction SilentlyContinue
     if ($python) {
         & $python.Source @Arguments
-        return $LASTEXITCODE
+        return
     }
 
     $py = Get-Command py -ErrorAction SilentlyContinue
     if ($py) {
         & $py.Source -3.12 @Arguments
-        return $LASTEXITCODE
+        return
     }
 
     throw "No Python interpreter found. Install Python 3.12, then run scripts\setup-venv.ps1."

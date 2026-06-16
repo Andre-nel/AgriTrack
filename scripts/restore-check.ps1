@@ -16,5 +16,6 @@ if ($BackupDir) {
     $argsList += @("--backup-dir", $BackupDir)
 }
 
-$code = Invoke-AgriTrackPython -Arguments $argsList
+Invoke-AgriTrackPython -Arguments $argsList
+$code = $LASTEXITCODE
 exit $code

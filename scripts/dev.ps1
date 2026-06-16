@@ -14,9 +14,11 @@ if (-not $env:DATABASE_URL) { $env:DATABASE_URL = "sqlite:///agritrack.db" }
 if (-not $env:SECRET_KEY) { $env:SECRET_KEY = "dev-secret-key" }
 
 if (-not $SkipMigrations) {
-    $code = Invoke-AgriTrackPython -Arguments @("-m", "flask", "db", "upgrade")
+    Invoke-AgriTrackPython -Arguments @("-m", "flask", "db", "upgrade")
+    $code = $LASTEXITCODE
     if ($code -ne 0) { exit $code }
 }
 
-$code = Invoke-AgriTrackPython -Arguments @("-m", "flask", "run", "--host", "127.0.0.1", "--port", "$Port")
+Invoke-AgriTrackPython -Arguments @("-m", "flask", "run", "--host", "127.0.0.1", "--port", "$Port")
+$code = $LASTEXITCODE
 exit $code

@@ -17,5 +17,6 @@ if ($NoPrune) {
     $argsList += "--no-prune"
 }
 
-$code = Invoke-AgriTrackPython -Arguments $argsList
+Invoke-AgriTrackPython -Arguments $argsList
+$code = $LASTEXITCODE
 exit $code

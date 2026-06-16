@@ -3,5 +3,6 @@ Import-Module (Join-Path $PSScriptRoot "agritrack.psm1") -Force
 $root = Get-AgriTrackRoot
 Set-Location $root
 
-$code = Invoke-AgriTrackPython -Arguments @("-m", "pytest")
+Invoke-AgriTrackPython -Arguments @("-m", "pytest")
+$code = $LASTEXITCODE
 exit $code

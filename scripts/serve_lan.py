@@ -20,7 +20,7 @@ def main() -> int:
     host = os.getenv("LAN_HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "5000"))
     app = create_app(get_config())
-    print(f"Serving AgriTrack on http://{host}:{port}")
+    print(f"Serving AgriTrack on http://{host}:{port}", flush=True)
     serve(app, host=host, port=port)
     return 0
 

@@ -20,9 +20,14 @@ $env:LAN_HOST = $HostAddress
 $env:PORT = "$Port"
 
 if (-not $SkipMigrations) {
-    $code = Invoke-AgriTrackPython -Arguments @("-m", "flask", "db", "upgrade")
+    Invoke-AgriTrackPython -Arguments @("-m", "flask", "db", "upgrade")
+    $code = $LASTEXITCODE
     if ($code -ne 0) { exit $code }
 }
 
-$code = Invoke-AgriTrackPython -Arguments @("scripts/serve_lan.py")
+Invoke-AgriTrackPython -Arguments @("scripts/serve_lan.py")
+$code = $LASTEXITCODE
+if ($code -eq 0) {
+    Write-Warning "AgriTrack LAN server exited. It should normally keep running until you stop it."
+}
 exit $code
