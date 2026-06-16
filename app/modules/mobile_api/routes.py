@@ -697,7 +697,12 @@ def _decision_feed(
     for asset in water_assets:
         level = (asset.water_level or "").strip().lower()
         status = (asset.status or "").strip().lower()
-        level_requires_attention = asset.asset_type != "weir" and level in {"empty", "low"}
+        is_damaged_empty_asset = status == "damaged" and level == "empty"
+        level_requires_attention = (
+            asset.asset_type != "weir"
+            and level in {"empty", "low"}
+            and not is_damaged_empty_asset
+        )
         status_requires_attention = status in {"dry", "blocked", "broken", "offline"}
         if level_requires_attention or status_requires_attention:
             items.append(

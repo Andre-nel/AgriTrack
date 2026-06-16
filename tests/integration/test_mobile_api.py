@@ -562,6 +562,35 @@ def test_mobile_decision_feed_ignores_weir_water_level(client, app):
     assert response.get_json()["decision_feed"] == []
 
 
+def test_mobile_decision_feed_ignores_damaged_empty_water_asset(client, app):
+    with app.app_context():
+        farm = Farm(name="Damaged Empty Water Decision Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        db.session.add(
+            RainfallRecord(farm_id=farm.id, recorded_on=date.today(), mm=4)
+        )
+        db.session.add(
+            WaterAsset(
+                farm_id=farm.id,
+                name="Cracked Tank",
+                asset_type="tank",
+                active=True,
+                status="damaged",
+                water_level="empty",
+            )
+        )
+        farm_id = str(farm.id)
+        db.session.commit()
+
+    token = _login(client)
+    response = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+
+    assert response.status_code == 200
+    assert response.get_json()["decision_feed"] == []
+
+
 def test_mobile_decision_feed_allows_rainfall_records_under_sixty_days(client, app):
     with app.app_context():
         farm = Farm(name="Recent Rain Decision Farm", timezone="UTC", active=True)
