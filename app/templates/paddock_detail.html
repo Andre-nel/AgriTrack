@@ -40,72 +40,22 @@
 </dialog>
 
 <section class="card">
-  <h2>Adjacent Gates</h2>
+  <h2>Current LSU By Mob (Allocation Weighted)</h2>
   <table>
-    <thead><tr><th>Gate</th><th>Status</th><th>Source</th><th>Action</th></tr></thead>
+    <thead><tr><th>Mob</th><th>Allocation %</th><th>Allocated LSU</th></tr></thead>
     <tbody>
-      {% for row in adjacent_gate_rows %}
+      {% for row in current_lsu.mobs %}
       <tr>
-        <td><a href="{{ url_for('web.edit_farm_gate', farm_id=paddock.farm_id, gate_id=row.id) }}">{{ row.paddock_names | join(" / ") }}</a></td>
-        <td><span class="status-pill status-{{ row.status }}">{{ row.status|capitalize }}</span></td>
-        <td>{{ row.source|capitalize }}</td>
-        <td>
-          {% if row.status == "closed" %}
-          <form method="post" action="{{ url_for('web.update_farm_gate_state_form', farm_id=paddock.farm_id, gate_id=row.id) }}">
-            <input type="hidden" name="status" value="open" />
-            <input type="hidden" name="next" value="{{ url_for('web.paddock_detail', paddock_id=paddock.id) }}" />
-            <button type="submit" class="btn">Open Gate</button>
-          </form>
-          {% else %}
-          <form method="post" action="{{ url_for('web.update_farm_gate_state_form', farm_id=paddock.farm_id, gate_id=row.id) }}" class="grid-form gate-close-form">
-            <input type="hidden" name="status" value="closed" />
-            <input type="hidden" name="next" value="{{ url_for('web.paddock_detail', paddock_id=paddock.id) }}" />
-            {% if row.close_requirements.requires_choices %}
-            {% for mob in row.close_requirements.mobs %}
-            <label>{{ mob.mob_name }}
-              <select name="closure_choice:{{ mob.mob_id }}" required>
-                <option value="">Choose side</option>
-                {% for component in row.close_requirements.components %}
-                <option value="{{ component.component_paddock_id }}">{{ component.label }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            {% endfor %}
-            {% endif %}
-            <button type="submit" class="btn btn-secondary">Close Gate</button>
-          </form>
-          {% endif %}
-        </td>
+        <td><a href="{{ url_for('web.mob_detail', mob_id=row.mob_id) }}">{{ row.mob_name }}</a></td>
+        <td>{{ "%.2f"|format(row.allocation_fraction * 100) }}%</td>
+        <td>{{ "%.2f"|format(row.allocated_lsu) }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="4">No gates connect to this paddock yet.</td></tr>
+      <tr><td colspan="3">No active grazing allocations.</td></tr>
       {% endfor %}
     </tbody>
   </table>
-</section>
-
-<section class="card">
-  <div class="task-section-heading">
-    <h2>Enclosing Fence Sections</h2>
-    <a class="btn btn-secondary" href="{{ url_for('web.farm_fences', farm_id=paddock.farm_id) }}">Open Fence Register</a>
-  </div>
-  <table>
-    <thead><tr><th>Section</th><th>Type</th><th>Condition</th><th>Build</th><th>Electric</th><th>Length</th></tr></thead>
-    <tbody>
-      {% for row in fence_section_rows %}
-      <tr>
-        <td><a href="{{ url_for('web.farm_fence_detail', farm_id=paddock.farm_id, fence_section_id=row.id) }}">{{ row.name }}</a></td>
-        <td>{{ row.section_type_label }}</td>
-        <td><span class="status-pill status-{{ row.condition }}">{{ row.condition_label }}</span></td>
-        <td>{{ row.height_profile_label }} / {{ row.construction_type_label }}</td>
-        <td>{{ "Yes" if row.electric_wire else "No" }}</td>
-        <td>{% if row.length_m is not none %}{{ "%.1f"|format(row.length_m) }} m{% else %}-{% endif %}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="6">No fence sections are linked to this paddock yet.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <p class="muted">Current total LSU on paddock: {{ "%.2f"|format(current_lsu.total_lsu) }}</p>
 </section>
 
 <section class="card">
@@ -133,8 +83,8 @@
   </ul>
 </section>
 
-<section class="card">
-  <h2>Paddock Comments / Log Notes</h2>
+<details class="card">
+  <summary><strong>Paddock Comments / Log Notes</strong></summary>
   <form method="post" action="{{ url_for('web.paddock_event_create_form', paddock_id=paddock.id) }}" class="grid-form" enctype="multipart/form-data">
     <label>Tags / Keywords (comma separated)
       <input
@@ -184,10 +134,10 @@
       {% endfor %}
     </tbody>
   </table>
-</section>
+</details>
 
-<section class="card">
-  <h2>Stocking Rate, Grazing Capacity & Density</h2>
+<details class="card">
+  <summary><strong>Stocking Rate, Grazing Capacity & Density</strong></summary>
   <form method="post" action="{{ url_for('web.update_paddock_stocking_rate_form', paddock_id=paddock.id) }}" class="grid-form">
     <label>Paddock Carrying Capacity Override (ha/LSU)
       <input type="number" step="0.01" min="0.01" name="stocking_rate_ha_per_lsu_override" value="{{ paddock.stocking_rate_ha_per_lsu_override or '' }}" placeholder="Leave blank to use farm default" />
@@ -267,29 +217,74 @@
       </tr>
     </tbody>
   </table>
-</section>
+</details>
 
-<section class="card">
-  <h2>Current LSU By Mob (Allocation Weighted)</h2>
+<details class="card">
+  <summary><strong>Current Weighted Stock</strong></summary>
   <table>
-    <thead><tr><th>Mob</th><th>Allocation %</th><th>Allocated LSU</th></tr></thead>
-    <tbody>
-      {% for row in current_lsu.mobs %}
+    <thead>
       <tr>
-        <td><a href="{{ url_for('web.mob_detail', mob_id=row.mob_id) }}">{{ row.mob_name }}</a></td>
-        <td>{{ "%.2f"|format(row.allocation_fraction * 100) }}%</td>
-        <td>{{ "%.2f"|format(row.allocated_lsu) }}</td>
+        <th>Species</th>
+        <th>Breed</th>
+        <th>Sex</th>
+        <th>Age Class</th>
+        <th>Head</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in stock_summary %}
+      <tr>
+        <td>{{ row.species }}</td>
+        <td>{{ row.breed }}</td>
+        <td>{{ row.sex }}</td>
+        <td>{{ row.age_class }}</td>
+        <td>{{ "%.2f"|format(row.head_count) }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="3">No active grazing allocations.</td></tr>
+      <tr><td colspan="5">No active grazing allocations.</td></tr>
       {% endfor %}
     </tbody>
   </table>
-  <p class="muted">Current total LSU on paddock: {{ "%.2f"|format(current_lsu.total_lsu) }}</p>
-</section>
+</details>
 
-<section class="card">
-  <h2>Move All Mobs Off This Paddock</h2>
+<details class="card">
+  <summary><strong>Water For This Paddock</strong></summary>
+  <div class="split">
+    <div>
+      <h3>Assets In This Paddock</h3>
+      <ul class="link-list-clean">
+        {% for asset in local_water_assets %}
+        <li>
+          <strong>{{ asset.name }}</strong>
+          <span class="muted">{{ water_asset_type_labels[asset.asset_type] }}</span>
+          {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
+        </li>
+        {% else %}
+        <li>No active water assets are located inside this paddock.</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3>Water Points Serving This Paddock</h3>
+      <ul class="link-list-clean">
+        {% for asset in serving_water_assets %}
+        <li>
+          <strong>{{ asset.name }}</strong>
+          <span class="muted">{{ water_asset_type_labels[asset.asset_type] }}</span>
+          {% if asset.location_paddock %}<span class="muted">Located in {{ asset.location_paddock.name }}</span>{% endif %}
+          {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
+        </li>
+        {% else %}
+        <li>No active water points are linked to this paddock.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('web.farm_water_workspace', farm_id=paddock.farm_id) }}">Open Farm Water Workspace</a>
+</details>
+
+<details class="card">
+  <summary><strong>Move All Mobs Off This Paddock</strong></summary>
   {% if bulk_move_mob_rows %}
   <p class="muted">Each listed mob is moved to one destination paddock at 100% allocation.</p>
   <form method="post" action="{{ url_for('web.paddock_move_all_mobs_form', paddock_id=paddock.id) }}" class="grid-form">
@@ -338,74 +333,10 @@
   {% else %}
   <p>No active mobs are currently allocated to this paddock.</p>
   {% endif %}
-</section>
+</details>
 
-<section class="card">
-  <h2>Water For This Paddock</h2>
-  <div class="split">
-    <div>
-      <h3>Assets In This Paddock</h3>
-      <ul class="link-list-clean">
-        {% for asset in local_water_assets %}
-        <li>
-          <strong>{{ asset.name }}</strong>
-          <span class="muted">{{ water_asset_type_labels[asset.asset_type] }}</span>
-          {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
-        </li>
-        {% else %}
-        <li>No active water assets are located inside this paddock.</li>
-        {% endfor %}
-      </ul>
-    </div>
-    <div>
-      <h3>Water Points Serving This Paddock</h3>
-      <ul class="link-list-clean">
-        {% for asset in serving_water_assets %}
-        <li>
-          <strong>{{ asset.name }}</strong>
-          <span class="muted">{{ water_asset_type_labels[asset.asset_type] }}</span>
-          {% if asset.location_paddock %}<span class="muted">Located in {{ asset.location_paddock.name }}</span>{% endif %}
-          {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
-        </li>
-        {% else %}
-        <li>No active water points are linked to this paddock.</li>
-        {% endfor %}
-      </ul>
-    </div>
-  </div>
-  <a class="btn btn-secondary" href="{{ url_for('web.farm_water_workspace', farm_id=paddock.farm_id) }}">Open Farm Water Workspace</a>
-</section>
-
-<section class="card">
-  <h2>Current Weighted Stock</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Species</th>
-        <th>Breed</th>
-        <th>Sex</th>
-        <th>Age Class</th>
-        <th>Head</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in stock_summary %}
-      <tr>
-        <td>{{ row.species }}</td>
-        <td>{{ row.breed }}</td>
-        <td>{{ row.sex }}</td>
-        <td>{{ row.age_class }}</td>
-        <td>{{ "%.2f"|format(row.head_count) }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5">No active grazing allocations.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</section>
-
-<section class="card">
-  <h2>Grazing History (Session Intensity)</h2>
+<details class="card">
+  <summary><strong>Grazing History (Session Intensity)</strong></summary>
   <table>
     <thead><tr><th>Mob</th><th>Start</th><th>End</th><th>Fraction</th><th>Allocated LSU</th></tr></thead>
     <tbody>
@@ -419,6 +350,75 @@
       </tr>
       {% else %}
       <tr><td colspan="5">No grazing history.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+
+<section class="card">
+  <h2>Adjacent Gates</h2>
+  <table>
+    <thead><tr><th>Gate</th><th>Status</th><th>Source</th><th>Action</th></tr></thead>
+    <tbody>
+      {% for row in adjacent_gate_rows %}
+      <tr>
+        <td><a href="{{ url_for('web.edit_farm_gate', farm_id=paddock.farm_id, gate_id=row.id) }}">{{ row.paddock_names | join(" / ") }}</a></td>
+        <td><span class="status-pill status-{{ row.status }}">{{ row.status|capitalize }}</span></td>
+        <td>{{ row.source|capitalize }}</td>
+        <td>
+          {% if row.status == "closed" %}
+          <form method="post" action="{{ url_for('web.update_farm_gate_state_form', farm_id=paddock.farm_id, gate_id=row.id) }}">
+            <input type="hidden" name="status" value="open" />
+            <input type="hidden" name="next" value="{{ url_for('web.paddock_detail', paddock_id=paddock.id) }}" />
+            <button type="submit" class="btn">Open Gate</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('web.update_farm_gate_state_form', farm_id=paddock.farm_id, gate_id=row.id) }}" class="grid-form gate-close-form">
+            <input type="hidden" name="status" value="closed" />
+            <input type="hidden" name="next" value="{{ url_for('web.paddock_detail', paddock_id=paddock.id) }}" />
+            {% if row.close_requirements.requires_choices %}
+            {% for mob in row.close_requirements.mobs %}
+            <label>{{ mob.mob_name }}
+              <select name="closure_choice:{{ mob.mob_id }}" required>
+                <option value="">Choose side</option>
+                {% for component in row.close_requirements.components %}
+                <option value="{{ component.component_paddock_id }}">{{ component.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            {% endfor %}
+            {% endif %}
+            <button type="submit" class="btn btn-secondary">Close Gate</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No gates connect to this paddock yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <div class="task-section-heading">
+    <h2>Enclosing Fence Sections</h2>
+    <a class="btn btn-secondary" href="{{ url_for('web.farm_fences', farm_id=paddock.farm_id) }}">Open Fence Register</a>
+  </div>
+  <table>
+    <thead><tr><th>Section</th><th>Type</th><th>Condition</th><th>Build</th><th>Electric</th><th>Length</th></tr></thead>
+    <tbody>
+      {% for row in fence_section_rows %}
+      <tr>
+        <td><a href="{{ url_for('web.farm_fence_detail', farm_id=paddock.farm_id, fence_section_id=row.id) }}">{{ row.name }}</a></td>
+        <td>{{ row.section_type_label }}</td>
+        <td><span class="status-pill status-{{ row.condition }}">{{ row.condition_label }}</span></td>
+        <td>{{ row.height_profile_label }} / {{ row.construction_type_label }}</td>
+        <td>{{ "Yes" if row.electric_wire else "No" }}</td>
+        <td>{% if row.length_m is not none %}{{ "%.1f"|format(row.length_m) }} m{% else %}-{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">No fence sections are linked to this paddock yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
