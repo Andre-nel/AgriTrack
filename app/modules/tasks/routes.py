@@ -1,11 +1,13 @@
 from collections import defaultdict
+from datetime import date, timedelta
 from pathlib import Path
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, current_app, flash, g, redirect, render_template, request, send_file, url_for
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import inspect as sa_inspect, or_
 
+from app.core.auth import safe_next_url
 from app.extensions import db
 from app.models import (
     CalendarActivity,
@@ -32,10 +34,20 @@ from app.services.task_service import (
     TASK_STATUS_LABELS,
     TaskService,
 )
+from app.services.calendar_service import CalendarService
 
 bp = Blueprint("tasks", __name__)
 TASK_SUMMARY_OPEN_STATUSES = {"selected_for_execution", "in_progress", "ready_for_verification"}
 TASK_ENTITY_TABLES = ("paddocks", "water_assets", "mobs", "fence_sections")
+TODO_DAY_OPTIONS = (7, 30, 90)
+TODO_ITEM_TYPES = ("all", "task", "activity")
+TODO_SECTIONS = (
+    ("overdue", "Overdue"),
+    ("today", "Today"),
+    ("upcoming", "Upcoming"),
+    ("unscheduled", "Unscheduled Tasks"),
+)
+TODO_PRIORITY_SORT = {"highest": 0, "high": 1, "low": 2, "lowest": 3}
 
 
 def _space_redirect(space: TaskSpace):
@@ -44,6 +56,20 @@ def _space_redirect(space: TaskSpace):
 
 def _task_redirect(task: Task):
     return redirect(url_for("tasks.task_detail", task_id=task.id))
+
+
+def _task_action_redirect(task: Task):
+    next_url = (request.form.get("next") or "").strip()
+    if next_url:
+        return redirect(safe_next_url(next_url))
+    return _task_redirect(task)
+
+
+def _web_actor_name() -> str:
+    user = getattr(g, "web_user", None)
+    if user is not None and user.name:
+        return user.name
+    return "Web User"
 
 
 def _format_linked_entity(task: Task | None = None, space: TaskSpace | None = None) -> dict:
@@ -84,7 +110,7 @@ def _farm_entity_options(farm_id: str | None) -> dict:
         return {"paddocks": [], "water_assets": [], "mobs": [], "fence_sections": []}
     paddock_query = Paddock.query.order_by(Paddock.name.asc())
     water_asset_query = WaterAsset.query.order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
-    mob_query = Mob.query.order_by(Mob.name.asc())
+    mob_query = Mob.query.filter(Mob.status == "active").order_by(Mob.name.asc())
     fence_query = FenceSection.query.filter(FenceSection.active.is_(True)).order_by(
         FenceSection.section_type.asc(),
         FenceSection.name.asc(),
@@ -156,7 +182,11 @@ def _build_selected_entity_rows(form_values: dict) -> list[dict]:
         WaterAsset.name.asc()
     ).all():
         rows.append({"kind": "Water Asset", "label": asset.name, "url": _entity_target_url("Water Asset", asset)})
-    for mob in Mob.query.filter(Mob.id.in_(form_values["mob_ids"])).order_by(Mob.name.asc()).all():
+    for mob in (
+        Mob.query.filter(Mob.id.in_(form_values["mob_ids"]), Mob.status == "active")
+        .order_by(Mob.name.asc())
+        .all()
+    ):
         rows.append({"kind": "Mob", "label": mob.name, "url": _entity_target_url("Mob", mob)})
     for section in FenceSection.query.filter(FenceSection.id.in_(form_values["fence_section_ids"])).order_by(
         FenceSection.name.asc()
@@ -255,6 +285,168 @@ def _build_task_card(task: Task, tz_name: str) -> dict:
     }
 
 
+def _parse_todo_days(raw_value: str | None) -> int:
+    try:
+        value = int(raw_value or 30)
+    except (TypeError, ValueError):
+        return 30
+    for option in TODO_DAY_OPTIONS:
+        if value <= option:
+            return option
+    return TODO_DAY_OPTIONS[-1]
+
+
+def _parse_todo_item_type(raw_value: str | None) -> str:
+    value = (raw_value or "all").strip().lower()
+    if value in TODO_ITEM_TYPES:
+        return value
+    return "all"
+
+
+def _todo_group_for_date(item_date: date | None, today: date) -> str:
+    if item_date is None:
+        return "unscheduled"
+    if item_date < today:
+        return "overdue"
+    if item_date == today:
+        return "today"
+    return "upcoming"
+
+
+def _latest_task_comment(task: Task) -> dict | None:
+    comments = sorted(
+        task.comments,
+        key=lambda comment: (
+            comment.created_at.isoformat() if comment.created_at else "",
+            str(comment.id),
+        ),
+        reverse=True,
+    )
+    if not comments:
+        return None
+    latest = comments[0]
+    return {"author_name": latest.author_name, "body": latest.body}
+
+
+def _todo_task_sort_key(row: dict) -> tuple:
+    card = row["task_card"]
+    due_date = row["date"] or date.max
+    return (
+        due_date,
+        TODO_PRIORITY_SORT.get(card["priority"], 9),
+        card["display_key"],
+        card["heading"].lower(),
+    )
+
+
+def _build_todo_task_rows(
+    *,
+    selected_farm_id: str,
+    today: date,
+    horizon_end: date,
+    actor_name: str,
+    return_to: str,
+) -> list[dict]:
+    task_query = (
+        Task.query.options(
+            selectinload(Task.space).selectinload(TaskSpace.farm),
+            selectinload(Task.comments),
+            selectinload(Task.attachments),
+            selectinload(Task.entity_links).selectinload(TaskEntityLink.paddock),
+            selectinload(Task.entity_links).selectinload(TaskEntityLink.water_asset),
+            selectinload(Task.entity_links).selectinload(TaskEntityLink.mob),
+            selectinload(Task.entity_links).selectinload(TaskEntityLink.fence_section),
+        )
+        .join(TaskSpace)
+        .filter(Task.status != "closed")
+        .filter(or_(Task.due_date.is_(None), Task.due_date <= horizon_end))
+    )
+    if selected_farm_id:
+        task_query = task_query.filter(TaskSpace.farm_id == selected_farm_id)
+
+    rows = []
+    for task in task_query.all():
+        tz_name = task.space.farm.timezone if task.space and task.space.farm else "UTC"
+        card = _build_task_card(task, tz_name)
+        row = {
+            "kind": "task",
+            "group": _todo_group_for_date(task.due_date, today),
+            "date": task.due_date,
+            "task": task,
+            "task_card": card,
+            "latest_comment": _latest_task_comment(task),
+            "comment_count": len(task.comments),
+            "attachment_count": len(task.attachments),
+            "entity_link_rows": _build_entity_link_rows(list(task.entity_links)),
+            "actor_name": actor_name,
+            "return_to": return_to,
+        }
+        rows.append(row)
+    return sorted(rows, key=_todo_task_sort_key)
+
+
+def _todo_activity_sort_key(row: dict) -> tuple:
+    return (row["date"], row["title"].lower())
+
+
+def _build_todo_activity_rows(
+    *,
+    selected_farm_id: str,
+    today: date,
+    horizon_end: date,
+) -> list[dict]:
+    calendar_data = CalendarService.build_calendar_data(
+        range_start=today,
+        range_end=horizon_end,
+        farm_id=selected_farm_id or None,
+    )
+    rows = []
+    for day, day_items in calendar_data["items_by_date"].items():
+        for item in day_items:
+            if item["kind"] != "activity":
+                continue
+            rows.append(
+                {
+                    "kind": "activity",
+                    "group": _todo_group_for_date(day, today),
+                    "date": day,
+                    "title": item["title"],
+                    "description": item.get("description"),
+                    "farm_name": item.get("farm_name"),
+                    "duration_text": item.get("duration_text"),
+                    "recurrence_text": item.get("recurrence_text"),
+                    "badge_text": item.get("badge_text"),
+                    "detail_url": item.get("detail_url"),
+                    "create_task_url": item.get("create_task_url"),
+                    "is_moved": item.get("is_moved"),
+                }
+            )
+    return sorted(rows, key=_todo_activity_sort_key)
+
+
+def _build_todo_sections(task_rows: list[dict], activity_rows: list[dict]) -> tuple[list[dict], dict]:
+    grouped = {section_id: [] for section_id, _label in TODO_SECTIONS}
+    summary = {
+        "task_count": len(task_rows),
+        "activity_count": len(activity_rows),
+        "overdue_count": 0,
+        "today_count": 0,
+        "upcoming_count": 0,
+        "unscheduled_count": 0,
+        "total_count": len(task_rows) + len(activity_rows),
+    }
+
+    for row in task_rows + activity_rows:
+        grouped[row["group"]].append(row)
+        summary[f"{row['group']}_count"] += 1
+
+    sections = [
+        {"id": section_id, "label": label, "item_rows": grouped[section_id]}
+        for section_id, label in TODO_SECTIONS
+    ]
+    return sections, summary
+
+
 def _build_space_summary(tasks: list[Task], tz_name: str) -> dict:
     return {
         "open_count": len([task for task in tasks if task.status != "closed"]),
@@ -332,7 +524,7 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
             selected_entity_farm_ids.append(str(paddock.farm_id))
         for asset in WaterAsset.query.filter(WaterAsset.id.in_(water_asset_ids)).all():
             selected_entity_farm_ids.append(str(asset.farm_id))
-        for mob in Mob.query.filter(Mob.id.in_(mob_ids)).all():
+        for mob in Mob.query.filter(Mob.id.in_(mob_ids), Mob.status == "active").all():
             selected_entity_farm_ids.append(str(mob.farm_id))
         for section in FenceSection.query.filter(FenceSection.id.in_(fence_section_ids)).all():
             selected_entity_farm_ids.append(str(section.farm_id))
@@ -464,6 +656,53 @@ def index():
         farms=farms,
         grouped_spaces=grouped_spaces,
         selected_farm_id=selected_farm_id,
+        summary=summary,
+    )
+
+
+@bp.get("/todos")
+def todo_list():
+    selected_farm_id = (request.args.get("farm_id") or "").strip()
+    days = _parse_todo_days(request.args.get("days"))
+    item_type = _parse_todo_item_type(request.args.get("item_type"))
+    farms = Farm.query.order_by(Farm.name).all()
+    today = date.today()
+    horizon_end = today + timedelta(days=days)
+    return_to = request.full_path if request.query_string else request.path
+
+    task_rows = []
+    activity_rows = []
+    if item_type in {"all", "task"}:
+        task_rows = _build_todo_task_rows(
+            selected_farm_id=selected_farm_id,
+            today=today,
+            horizon_end=horizon_end,
+            actor_name=_web_actor_name(),
+            return_to=return_to,
+        )
+    if item_type in {"all", "activity"}:
+        activity_rows = _build_todo_activity_rows(
+            selected_farm_id=selected_farm_id,
+            today=today,
+            horizon_end=horizon_end,
+        )
+
+    sections, summary = _build_todo_sections(task_rows, activity_rows)
+    return render_template(
+        "tasks/todos.html",
+        farms=farms,
+        selected_farm_id=selected_farm_id,
+        selected_days=days,
+        selected_item_type=item_type,
+        day_options=TODO_DAY_OPTIONS,
+        item_type_options=[
+            {"value": "all", "label": "All"},
+            {"value": "task", "label": "Tasks"},
+            {"value": "activity", "label": "Activities"},
+        ],
+        today=today,
+        horizon_end=horizon_end,
+        sections=sections,
         summary=summary,
     )
 
@@ -797,10 +1036,13 @@ def edit_task(task_id: str):
 def update_task_status(task_id: str):
     task = _load_task(task_id)
     try:
+        changed_by_name = request.form.get("changed_by_name")
+        if not changed_by_name and request.form.get("next"):
+            changed_by_name = _web_actor_name()
         TaskService.apply_status_transition(
             task,
             request.form.get("status"),
-            request.form.get("changed_by_name"),
+            changed_by_name,
             request.form.get("note"),
         )
         db.session.commit()
@@ -808,7 +1050,7 @@ def update_task_status(task_id: str):
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
-    return _task_redirect(task)
+    return _task_action_redirect(task)
 
 
 @bp.post("/tasks/<task_id>/entity-links")
@@ -847,10 +1089,13 @@ def delete_task_entity_link(task_id: str, link_id: str):
 def create_task_comment(task_id: str):
     task = _load_task(task_id)
     try:
+        author_name = request.form.get("author_name")
+        if not author_name and request.form.get("next"):
+            author_name = _web_actor_name()
         db.session.add(
             TaskComment(
                 task_id=task.id,
-                author_name=TaskService.require_text(request.form.get("author_name"), "Author", 120),
+                author_name=TaskService.require_text(author_name, "Author", 120),
                 body=TaskService.require_text(
                     request.form.get("body"),
                     "Comment",
@@ -863,7 +1108,7 @@ def create_task_comment(task_id: str):
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
-    return _task_redirect(task)
+    return _task_action_redirect(task)
 
 
 @bp.post("/tasks/<task_id>/links")

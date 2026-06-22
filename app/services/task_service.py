@@ -297,6 +297,11 @@ class TaskService:
         if any(str(row.farm_id) != str(farm_id) for row in rows):
             raise ValueError(f"Selected {label} must belong to the task farm")
 
+    @staticmethod
+    def _require_active_mobs(mobs: list[Mob]) -> None:
+        if any(mob.status != "active" for mob in mobs):
+            raise ValueError("Selected mobs must be active")
+
     @classmethod
     def add_entity_links(
         cls,
@@ -322,6 +327,7 @@ class TaskService:
         cls._require_same_farm(water_assets, farm_id, "water assets")
         cls._require_same_farm(mobs, farm_id, "mobs")
         cls._require_same_farm(fence_sections, farm_id, "fence sections")
+        cls._require_active_mobs(mobs)
 
         existing = {
             ("paddock", str(link.paddock_id))

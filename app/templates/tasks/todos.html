@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Todo List | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Todo List</h1>
+  <p>Open tasks and upcoming activities that need attention.</p>
+</section>
+
+<div class="cards">
+  <article class="card stat"><h2>Overdue</h2><p>{{ summary.overdue_count }}</p></article>
+  <article class="card stat"><h2>Today</h2><p>{{ summary.today_count }}</p></article>
+  <article class="card stat"><h2>Upcoming</h2><p>{{ summary.upcoming_count }}</p></article>
+  <article class="card stat"><h2>Unscheduled</h2><p>{{ summary.unscheduled_count }}</p></article>
+</div>
+
+<section class="card todo-filter-card">
+  <form method="get" action="{{ url_for('tasks.todo_list') }}" class="grid-form">
+    <div class="grid-three">
+      <label>Farm
+        <select name="farm_id">
+          <option value="">All farms</option>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if selected_farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Window
+        <select name="days">
+          {% for option in day_options %}
+          <option value="{{ option }}" {% if selected_days == option %}selected{% endif %}>{{ option }} days</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Type
+        <select name="item_type">
+          {% for option in item_type_options %}
+          <option value="{{ option.value }}" {% if selected_item_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply Filter</button>
+      <a class="btn btn-secondary" href="{{ url_for('tasks.todo_list') }}">Clear</a>
+      <a class="btn btn-secondary" href="{{ url_for('tasks.new_task_page', farm_id=selected_farm_id) }}">New Task</a>
+    </div>
+  </form>
+</section>
+
+{% if summary.total_count == 0 %}
+<section class="card">
+  <h2>Nothing needs attention</h2>
+  <p class="muted">No open tasks or upcoming activities match the current filters.</p>
+</section>
+{% endif %}
+
+{% for section in sections %}
+{% if section.item_rows %}
+<section class="todo-section todo-section-{{ section.id }}">
+  <div class="task-section-heading">
+    <h2>{{ section.label }}</h2>
+    <p class="muted">{{ section.item_rows|length }} item{% if section.item_rows|length != 1 %}s{% endif %}</p>
+  </div>
+  <div class="todo-list">
+    {% for item in section.item_rows %}
+    {% if item.kind == "task" %}
+    <article class="todo-item todo-task-item">
+      <div class="todo-item-main">
+        <div class="task-card-topline">
+          <div class="todo-title-stack">
+            <a class="task-key" href="{{ url_for('tasks.task_detail', task_id=item.task.id) }}">{{ item.task_card.display_key }}</a>
+            <h3><a href="{{ url_for('tasks.task_detail', task_id=item.task.id) }}">{{ item.task_card.heading }}</a></h3>
+          </div>
+          <div class="task-chip-row">
+            <span class="status-pill status-{{ item.task_card.status }}">{{ item.task_card.status_label }}</span>
+            <span class="priority-pill priority-{{ item.task_card.priority }}">{{ item.task_card.priority_label }}</span>
+            {% if item.task_card.is_overdue %}
+            <span class="priority-pill priority-high">Overdue</span>
+            {% endif %}
+          </div>
+        </div>
+        <p class="muted">
+          {{ item.task.space.farm.name }} | {{ item.task.space.key }} {{ item.task.space.name }} |
+          Due {{ item.task_card.due_date or "unscheduled" }}
+          {% if item.task_card.assignee_name %}| Assignee {{ item.task_card.assignee_name }}{% endif %}
+        </p>
+        {% if item.task_card.tags %}
+        <div class="task-chip-row">
+          {% for tag in item.task_card.tags %}
+          <span class="tag-pill">{{ tag }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if item.entity_link_rows %}
+        <ul class="todo-entity-list">
+          {% for link in item.entity_link_rows %}
+          <li><span class="link-pill">{{ link.kind }}</span><a href="{{ link.url }}">{{ link.label }}</a></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if item.latest_comment %}
+        <p class="todo-latest-note"><strong>Latest note:</strong> {{ item.latest_comment.body }}</p>
+        {% endif %}
+        <p class="muted">{{ item.comment_count }} note{% if item.comment_count != 1 %}s{% endif %} | {{ item.attachment_count }} attachment{% if item.attachment_count != 1 %}s{% endif %}</p>
+      </div>
+      <div class="todo-actions">
+        {% if item.task_card.status != "in_progress" %}
+        <form method="post" action="{{ url_for('tasks.update_task_status', task_id=item.task.id) }}">
+          <input type="hidden" name="status" value="in_progress" />
+          <input type="hidden" name="changed_by_name" value="{{ item.actor_name }}" />
+          <input type="hidden" name="note" value="" />
+          <input type="hidden" name="next" value="{{ item.return_to }}" />
+          <button type="submit" class="btn btn-secondary">Start</button>
+        </form>
+        {% endif %}
+        <details class="todo-inline-action">
+          <summary class="btn btn-secondary">Close</summary>
+          <form method="post" action="{{ url_for('tasks.update_task_status', task_id=item.task.id) }}" class="grid-form">
+            <input type="hidden" name="status" value="closed" />
+            <input type="hidden" name="changed_by_name" value="{{ item.actor_name }}" />
+            <input type="hidden" name="next" value="{{ item.return_to }}" />
+            <label>Close Note
+              <textarea name="note" rows="3" required></textarea>
+            </label>
+            <button type="submit" class="btn">Close Task</button>
+          </form>
+        </details>
+        <details class="todo-inline-action">
+          <summary class="btn btn-secondary">Add Note</summary>
+          <form method="post" action="{{ url_for('tasks.create_task_comment', task_id=item.task.id) }}" class="grid-form">
+            <input type="hidden" name="author_name" value="{{ item.actor_name }}" />
+            <input type="hidden" name="next" value="{{ item.return_to }}" />
+            <label>Note
+              <textarea name="body" rows="3" required></textarea>
+            </label>
+            <button type="submit" class="btn">Add Note</button>
+          </form>
+        </details>
+        <a class="btn" href="{{ url_for('tasks.task_detail', task_id=item.task.id) }}">Open Task</a>
+      </div>
+    </article>
+    {% else %}
+    <article class="todo-item todo-activity-item">
+      <div class="todo-item-main">
+        <div class="task-card-topline">
+          <div class="todo-title-stack">
+            <span class="link-pill">Activity</span>
+            <h3><a href="{{ item.detail_url }}">{{ item.title }}</a></h3>
+          </div>
+          <div class="task-chip-row">
+            <span class="status-pill">{{ item.badge_text }}</span>
+            {% if item.is_moved %}
+            <span class="priority-pill priority-high">Moved</span>
+            {% endif %}
+          </div>
+        </div>
+        <p class="muted">{{ item.farm_name }} | {{ item.date.isoformat() }} | {{ item.duration_text }} | {{ item.recurrence_text }}</p>
+        {% if item.description %}
+        <p class="text-body">{{ item.description }}</p>
+        {% endif %}
+      </div>
+      <div class="todo-actions">
+        <a class="btn btn-secondary" href="{{ item.detail_url }}">Open Activity</a>
+        <a class="btn" href="{{ item.create_task_url }}">Create Task From Activity</a>
+      </div>
+    </article>
+    {% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endfor %}
+{% endblock %}

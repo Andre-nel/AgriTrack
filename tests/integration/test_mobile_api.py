@@ -495,7 +495,12 @@ def test_mobile_snapshot_hides_archived_mobs_and_related_mob_links(client, app):
             due_date=date.today().isoformat(),
         )
         db.session.flush()
-        TaskService.add_entity_links(task=task, mob_ids=[active_mob.id, archived_mob.id])
+        db.session.add_all(
+            [
+                TaskEntityLink(task_id=task.id, mob_id=active_mob.id),
+                TaskEntityLink(task_id=task.id, mob_id=archived_mob.id),
+            ]
+        )
 
         farm_id = str(farm.id)
         active_mob_id = str(active_mob.id)

@@ -160,6 +160,12 @@ body {
   gap: 0.7rem;
 }
 
+.grid-three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
 .setup-form {
   display: grid;
   gap: 1rem;
@@ -1700,6 +1706,100 @@ tr.is-selected-fence {
   color: var(--muted);
 }
 
+.todo-filter-card {
+  margin-bottom: 1.1rem;
+}
+
+.todo-section {
+  margin: 1.25rem 0;
+}
+
+.todo-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.todo-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+  gap: 1rem;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 10px 24px rgba(31, 51, 45, 0.05);
+  padding: 0.95rem;
+}
+
+.todo-item-main {
+  min-width: 0;
+}
+
+.todo-title-stack {
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
+}
+
+.todo-title-stack h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.todo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 220px;
+}
+
+.todo-actions .btn {
+  text-align: center;
+}
+
+.todo-inline-action > summary.btn {
+  list-style: none;
+}
+
+.todo-inline-action > summary.btn::-webkit-details-marker {
+  display: none;
+}
+
+.todo-inline-action[open] > summary.btn {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.todo-inline-action form {
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: #fbfcfa;
+  padding: 0.7rem;
+}
+
+.todo-entity-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  list-style: none;
+  margin: 0.65rem 0;
+  padding: 0;
+}
+
+.todo-entity-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.todo-latest-note {
+  border-left: 3px solid var(--accent-soft);
+  color: var(--text);
+  margin: 0.7rem 0;
+  padding-left: 0.65rem;
+}
+
 .text-body {
   white-space: pre-wrap;
 }
@@ -2404,6 +2504,14 @@ tr.is-selected-fence {
     padding: 0 0.75rem 0.75rem;
   }
 
+  .todo-item {
+    grid-template-columns: 1fr;
+  }
+
+  .todo-actions {
+    min-width: 0;
+  }
+
   .calendar-toolbar,
   .paddock-page-header,
   .calendar-month-card-header,
@@ -2636,7 +2744,8 @@ tr.is-selected-fence {
     margin-left: 0;
   }
 
-  .grid-two {
+  .grid-two,
+  .grid-three {
     grid-template-columns: 1fr;
   }
 

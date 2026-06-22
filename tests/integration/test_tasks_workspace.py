@@ -1,7 +1,21 @@
 from datetime import date, timedelta
 
 from app.extensions import db
-from app.models import Farm, FenceSection, Mob, Paddock, Task, TaskComment, TaskEntityLink, TaskLink, TaskSpace, TaskSpaceComment, WaterAsset
+from app.models import (
+    CalendarActivity,
+    Farm,
+    FenceSection,
+    Mob,
+    Paddock,
+    Task,
+    TaskComment,
+    TaskEntityLink,
+    TaskLink,
+    TaskSpace,
+    TaskSpaceComment,
+    TaskStatusTransition,
+    WaterAsset,
+)
 from app.services.task_service import TaskService
 
 
@@ -39,8 +53,133 @@ def _create_task(space: TaskSpace, heading: str, *, status: str = "todo", priori
 def test_dashboard_renders_tasks_nav(client):
     response = client.get("/")
     assert response.status_code == 200
+    assert b'href="/todos"' in response.data
+    assert b">Todo List<" in response.data
     assert b'href="/tasks"' in response.data
     assert b">Tasks<" in response.data
+
+
+def test_todo_list_renders_attention_queue_and_filters(client, app):
+    today = date.today()
+    with app.app_context():
+        farm = _create_farm("Todo Farm")
+        other_farm = _create_farm("Other Todo Farm")
+        space = _create_space(farm, "TODO", "Todo Space")
+        other_space = _create_space(other_farm, "OTD", "Other Todo Space")
+        _create_task(space, "Fix trough leak", status="todo", priority="highest", due_date=today - timedelta(days=1))
+        _create_task(space, "Check calves", status="selected_for_execution", due_date=today)
+        _create_task(space, "Service water pump", status="todo", due_date=today + timedelta(days=3))
+        _create_task(space, "Future fence order", status="todo", due_date=today + timedelta(days=40))
+        _create_task(space, "Order mineral", status="todo")
+        closed_task = _create_task(space, "Closed field task", status="in_progress", due_date=today)
+        TaskService.apply_status_transition(closed_task, "closed", "Reporter", "Done.")
+        _create_task(other_space, "Other farm task", status="todo", due_date=today)
+        db.session.add_all(
+            [
+                CalendarActivity(
+                    farm_id=farm.id,
+                    title="Check irrigation rotation",
+                    description="Walk the pump line.",
+                    start_date=today + timedelta(days=2),
+                    duration_days=1,
+                ),
+                CalendarActivity(
+                    farm_id=farm.id,
+                    title="Far pasture walk",
+                    start_date=today + timedelta(days=40),
+                    duration_days=1,
+                ),
+                CalendarActivity(
+                    farm_id=other_farm.id,
+                    title="Other farm activity",
+                    start_date=today + timedelta(days=2),
+                    duration_days=1,
+                ),
+            ]
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    response = client.get(f"/todos?farm_id={farm_id}&days=7")
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "Todo List" in body
+    assert "Overdue" in body
+    assert "Today" in body
+    assert "Upcoming" in body
+    assert "Unscheduled Tasks" in body
+    assert "Fix trough leak" in body
+    assert "Check calves" in body
+    assert "Service water pump" in body
+    assert "Order mineral" in body
+    assert "Check irrigation rotation" in body
+    assert "Create Task From Activity" in body
+    assert "Future fence order" not in body
+    assert "Closed field task" not in body
+    assert "Far pasture walk" not in body
+    assert "Other farm task" not in body
+    assert "Other farm activity" not in body
+
+    task_only = client.get(f"/todos?farm_id={farm_id}&days=7&item_type=task")
+    task_body = task_only.data.decode("utf-8")
+    assert "Fix trough leak" in task_body
+    assert "Check irrigation rotation" not in task_body
+
+    activity_only = client.get(f"/todos?farm_id={farm_id}&days=7&item_type=activity")
+    activity_body = activity_only.data.decode("utf-8")
+    assert "Check irrigation rotation" in activity_body
+    assert "Fix trough leak" not in activity_body
+
+
+def test_todo_list_empty_state(client):
+    response = client.get("/todos?days=7")
+    assert response.status_code == 200
+    assert b"Nothing needs attention" in response.data
+
+
+def test_todo_quick_actions_redirect_back_and_default_actor(client, app):
+    today = date.today()
+    with app.app_context():
+        farm = _create_farm("Todo Actions Farm")
+        space = _create_space(farm, "ACT", "Action Space")
+        task = _create_task(space, "Patch tank float", status="todo", due_date=today)
+        db.session.commit()
+        task_id = str(task.id)
+
+    start_response = client.post(
+        f"/tasks/{task_id}/status",
+        data={"status": "in_progress", "next": "/todos?days=7"},
+    )
+    assert start_response.status_code == 302
+    assert start_response.headers["Location"] == "/todos?days=7"
+
+    note_response = client.post(
+        f"/tasks/{task_id}/comments",
+        data={"body": "Float valve ordered.", "next": "/todos?days=7"},
+    )
+    assert note_response.status_code == 302
+    assert note_response.headers["Location"] == "/todos?days=7"
+
+    close_response = client.post(
+        f"/tasks/{task_id}/status",
+        data={"status": "closed", "note": "Installed and tested.", "next": "/todos?days=7"},
+    )
+    assert close_response.status_code == 302
+    assert close_response.headers["Location"] == "/todos?days=7"
+
+    with app.app_context():
+        task = Task.query.filter_by(id=task_id).first()
+        assert task.status == "closed"
+        start_transition = TaskStatusTransition.query.filter_by(
+            task_id=task_id,
+            to_status="in_progress",
+        ).first()
+        close_transition = TaskStatusTransition.query.filter_by(task_id=task_id, to_status="closed").first()
+        comment = TaskComment.query.filter_by(task_id=task_id).first()
+        assert start_transition.changed_by_name == "Web User"
+        assert close_transition.changed_by_name == "Web User"
+        assert comment.author_name == "Web User"
+        assert comment.body == "Float valve ordered."
 
 
 def test_tasks_landing_can_create_space(client, app):
@@ -202,6 +341,65 @@ def test_task_creation_and_detail_manage_farm_entity_links(client, app):
     with app.app_context():
         assert TaskEntityLink.query.filter_by(task_id=task_id, paddock_id=paddock_id).count() == 0
         assert TaskEntityLink.query.filter_by(task_id=task_id).count() == 4
+
+
+def test_task_creation_surfaces_only_offer_active_mobs(client, app):
+    with app.app_context():
+        farm = _create_farm("Active Mob Picker Farm")
+        space = _create_space(farm, "AMP", "Active Mob Picker")
+        active_mob = Mob(farm_id=farm.id, name="Active Picker Mob", status="active")
+        inactive_mob = Mob(farm_id=farm.id, name="Archived Picker Mob", status="archived")
+        db.session.add_all([active_mob, inactive_mob])
+        db.session.commit()
+        farm_id = str(farm.id)
+        space_id = str(space.id)
+        inactive_mob_id = str(inactive_mob.id)
+
+    new_page = client.get(f"/tasks/new?farm_id={farm_id}&mob_id={inactive_mob_id}")
+    assert new_page.status_code == 200
+    assert b"Active Picker Mob" in new_page.data
+    assert b"Archived Picker Mob" not in new_page.data
+
+    space_page = client.get(f"/tasks/spaces/{space_id}")
+    assert space_page.status_code == 200
+    assert b"Active Picker Mob" in space_page.data
+    assert b"Archived Picker Mob" not in space_page.data
+
+
+def test_task_creation_rejects_inactive_mob_links(client, app):
+    with app.app_context():
+        farm = _create_farm("Inactive Mob Link Farm")
+        space = _create_space(farm, "IML", "Inactive Mob Links")
+        inactive_mob = Mob(farm_id=farm.id, name="Inactive Task Mob", status="archived")
+        db.session.add(inactive_mob)
+        db.session.commit()
+        farm_id = str(farm.id)
+        space_id = str(space.id)
+        inactive_mob_id = str(inactive_mob.id)
+
+    response = client.post(
+        "/tasks/new",
+        data={
+            "farm_id": farm_id,
+            "space_id": space_id,
+            "heading": "Try inactive mob",
+            "description": "This should not link archived mobs.",
+            "reporter_name": "Ava",
+            "assignee_name": "",
+            "status": "todo",
+            "priority": "low",
+            "original_estimate_days": "",
+            "due_date": "",
+            "tags": "",
+            "mob_ids": [inactive_mob_id],
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Selected mobs must be active" in response.data
+
+    with app.app_context():
+        assert Task.query.filter_by(heading="Try inactive mob").first() is None
 
 
 def test_new_task_page_prefills_entity_links_and_rejects_cross_farm_links(client, app):
