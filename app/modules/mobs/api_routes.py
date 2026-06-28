@@ -145,6 +145,7 @@ def move_mob(mob_id):
             mob=mob,
             allocations=allocations,
             destination_farm_id=destination_farm_id,
+            allocation_mode=payload.get("allocation_mode"),
         )
         db.session.commit()
     except IntegrityError:

@@ -68,12 +68,14 @@ class GrazingHistoryService:
         *,
         allocation_fraction: float,
         head_count: int,
+        allocated_head_count: float,
         group_lsu: float,
         allocated_lsu: float,
     ) -> bool:
         return (
             abs(float(row.allocation_fraction) - allocation_fraction) < 0.0001
             and int(row.head_count) == int(head_count)
+            and abs(float(row.allocated_head_count) - allocated_head_count) < 0.0001
             and abs(float(row.group_lsu) - group_lsu) < 0.0001
             and abs(float(row.allocated_lsu) - allocated_lsu) < 0.0001
         )
@@ -234,11 +236,12 @@ class GrazingHistoryService:
                 continue
 
             group = balance.animal_group_type
-            group_lsu = head_count * ReportingService.group_lsu_per_head(
+            lsu_per_head = ReportingService.group_lsu_per_head(
                 group.species,
                 group.sex,
                 group.age_class,
             )
+            group_lsu = head_count * lsu_per_head
             if group_lsu <= 0:
                 continue
 
@@ -246,11 +249,82 @@ class GrazingHistoryService:
                 {
                     "animal_group_type_id": str(group.id),
                     "head_count": head_count,
+                    "lsu_per_head": lsu_per_head,
                     "group_lsu": group_lsu,
                 }
             )
 
         return sorted(breakdown, key=lambda row: row["animal_group_type_id"])
+
+    @classmethod
+    def _allocation_lsu_values(
+        cls,
+        allocation: GrazingAllocation,
+        group_breakdown: list[dict],
+        mob_total_lsu: float,
+    ) -> dict:
+        assignments = [
+            assignment
+            for assignment in getattr(allocation, "group_assignments", [])
+            if int(assignment.head_count or 0) > 0
+        ]
+        if not assignments:
+            allocation_fraction = float(allocation.allocation_fraction)
+            breakdown_rows = []
+            for group_row in group_breakdown:
+                allocated_head_count = float(group_row["head_count"]) * allocation_fraction
+                allocated_lsu = float(group_row["group_lsu"]) * allocation_fraction
+                if allocated_lsu <= 0:
+                    continue
+                breakdown_rows.append(
+                    {
+                        "animal_group_type_id": group_row["animal_group_type_id"],
+                        "allocation_fraction": allocation_fraction,
+                        "head_count": group_row["head_count"],
+                        "allocated_head_count": allocated_head_count,
+                        "group_lsu": group_row["group_lsu"],
+                        "allocated_lsu": allocated_lsu,
+                    }
+                )
+            return {
+                "allocation_fraction": allocation_fraction,
+                "allocated_lsu": float(mob_total_lsu) * allocation_fraction,
+                "breakdown": breakdown_rows,
+            }
+
+        breakdown_by_group = {row["animal_group_type_id"]: row for row in group_breakdown}
+        allocated_lsu_total = 0.0
+        breakdown_rows = []
+        for assignment in assignments:
+            group_id = str(assignment.animal_group_type_id)
+            group_row = breakdown_by_group.get(group_id)
+            if group_row is None:
+                continue
+
+            group_fraction = float(assignment.group_fraction)
+            allocated_head_count = float(group_row["head_count"]) * group_fraction
+            allocated_lsu = allocated_head_count * float(group_row["lsu_per_head"])
+            if allocated_lsu <= 0:
+                continue
+
+            allocated_lsu_total += allocated_lsu
+            breakdown_rows.append(
+                {
+                    "animal_group_type_id": group_id,
+                    "allocation_fraction": group_fraction,
+                    "head_count": group_row["head_count"],
+                    "allocated_head_count": allocated_head_count,
+                    "group_lsu": group_row["group_lsu"],
+                    "allocated_lsu": allocated_lsu,
+                }
+            )
+
+        allocation_fraction = allocated_lsu_total / float(mob_total_lsu) if mob_total_lsu > 0 else 0.0
+        return {
+            "allocation_fraction": allocation_fraction,
+            "allocated_lsu": allocated_lsu_total,
+            "breakdown": breakdown_rows,
+        }
 
     @classmethod
     def sync_live_history_for_mob(cls, mob: Mob | str, effective_at: datetime | None = None) -> None:
@@ -296,6 +370,14 @@ class GrazingHistoryService:
         group_breakdown = cls._mob_lsu_breakdown_from_balances(active_session.mob)
         mob_total_lsu = sum(row["group_lsu"] for row in group_breakdown)
         allocations = list(active_session.allocations)
+        allocation_values_by_id = {
+            str(allocation.id): cls._allocation_lsu_values(
+                allocation,
+                group_breakdown,
+                mob_total_lsu,
+            )
+            for allocation in allocations
+        }
         open_rows_by_allocation = {
             str(row.grazing_allocation_id): row
             for row in open_rows
@@ -310,7 +392,7 @@ class GrazingHistoryService:
         active_breakdown_keys = {
             (str(allocation.id), row["animal_group_type_id"])
             for allocation in allocations
-            for row in group_breakdown
+            for row in allocation_values_by_id[str(allocation.id)]["breakdown"]
         }
 
         for row in open_rows:
@@ -329,8 +411,9 @@ class GrazingHistoryService:
                 cls._close_or_delete_open_row(row, sync_at)
 
         for allocation in allocations:
-            allocation_fraction = float(allocation.allocation_fraction)
-            allocated_lsu = mob_total_lsu * allocation_fraction
+            allocation_values = allocation_values_by_id[str(allocation.id)]
+            allocation_fraction = allocation_values["allocation_fraction"]
+            allocated_lsu = allocation_values["allocated_lsu"]
             existing_row = open_rows_by_allocation.get(str(allocation.id))
 
             if allocated_lsu <= 0:
@@ -383,8 +466,8 @@ class GrazingHistoryService:
                     )
                 )
 
-            for group_row in group_breakdown:
-                group_allocated_lsu = group_row["group_lsu"] * allocation_fraction
+            for group_row in allocation_values["breakdown"]:
+                group_allocated_lsu = group_row["allocated_lsu"]
                 existing_breakdown = open_breakdown_rows_by_key.get(
                     (str(allocation.id), group_row["animal_group_type_id"])
                 )
@@ -396,8 +479,9 @@ class GrazingHistoryService:
 
                 if existing_breakdown is not None and cls._breakdown_values_match(
                     existing_breakdown,
-                    allocation_fraction=allocation_fraction,
+                    allocation_fraction=group_row["allocation_fraction"],
                     head_count=group_row["head_count"],
+                    allocated_head_count=group_row["allocated_head_count"],
                     group_lsu=group_row["group_lsu"],
                     allocated_lsu=group_allocated_lsu,
                 ):
@@ -411,8 +495,9 @@ class GrazingHistoryService:
                         and sync_from is not None
                         and existing_from == sync_from
                     ):
-                        existing_breakdown.allocation_fraction = allocation_fraction
+                        existing_breakdown.allocation_fraction = group_row["allocation_fraction"]
                         existing_breakdown.head_count = group_row["head_count"]
+                        existing_breakdown.allocated_head_count = group_row["allocated_head_count"]
                         existing_breakdown.group_lsu = group_row["group_lsu"]
                         existing_breakdown.allocated_lsu = group_allocated_lsu
                         existing_breakdown.source = cls.SOURCE_LIVE
@@ -428,8 +513,9 @@ class GrazingHistoryService:
                         grazing_allocation_id=allocation.id,
                         animal_group_type_id=group_row["animal_group_type_id"],
                         effective_from=sync_at,
-                        allocation_fraction=allocation_fraction,
+                        allocation_fraction=group_row["allocation_fraction"],
                         head_count=group_row["head_count"],
+                        allocated_head_count=group_row["allocated_head_count"],
                         group_lsu=group_row["group_lsu"],
                         allocated_lsu=group_allocated_lsu,
                         source=cls.SOURCE_LIVE,
@@ -532,15 +618,15 @@ class GrazingHistoryService:
             if head_count <= 0:
                 continue
             group = group_meta[group_id]
-            group_lsu = head_count * ReportingService.group_lsu_per_head(
-                group.species, group.sex, group.age_class
-            )
+            lsu_per_head = ReportingService.group_lsu_per_head(group.species, group.sex, group.age_class)
+            group_lsu = head_count * lsu_per_head
             if group_lsu <= 0:
                 continue
             breakdown.append(
                 {
                     "animal_group_type_id": str(group_id),
                     "head_count": int(head_count),
+                    "lsu_per_head": lsu_per_head,
                     "group_lsu": group_lsu,
                 }
             )
@@ -579,15 +665,19 @@ class GrazingHistoryService:
                 session = allocation.grazing_session
                 session_start = cls._normalize_datetime(session.start_at)
                 session_end = cls._normalize_datetime(session.end_at)
-                allocation_fraction = float(allocation.allocation_fraction)
-
                 for interval in intervals:
                     overlap_start = max(session_start, interval["start"])
                     overlap_end = cls._min_datetime(session_end, interval["end"])
                     if overlap_end is not None and overlap_end <= overlap_start:
                         continue
 
-                    allocated_lsu = interval["mob_total_lsu"] * allocation_fraction
+                    allocation_values = cls._allocation_lsu_values(
+                        allocation,
+                        interval.get("breakdown", []),
+                        interval["mob_total_lsu"],
+                    )
+                    allocation_fraction = allocation_values["allocation_fraction"]
+                    allocated_lsu = allocation_values["allocated_lsu"]
                     if allocated_lsu <= 0:
                         continue
 
@@ -608,8 +698,8 @@ class GrazingHistoryService:
                     )
                     rows_created += 1
 
-                    for group_row in interval.get("breakdown", []):
-                        group_allocated_lsu = group_row["group_lsu"] * allocation_fraction
+                    for group_row in allocation_values["breakdown"]:
+                        group_allocated_lsu = group_row["allocated_lsu"]
                         if group_allocated_lsu <= 0:
                             continue
                         db.session.add(
@@ -622,8 +712,9 @@ class GrazingHistoryService:
                                 animal_group_type_id=group_row["animal_group_type_id"],
                                 effective_from=overlap_start,
                                 effective_to=overlap_end,
-                                allocation_fraction=allocation_fraction,
+                                allocation_fraction=group_row["allocation_fraction"],
                                 head_count=group_row["head_count"],
+                                allocated_head_count=group_row["allocated_head_count"],
                                 group_lsu=group_row["group_lsu"],
                                 allocated_lsu=group_allocated_lsu,
                                 source=cls.SOURCE_BACKFILL,

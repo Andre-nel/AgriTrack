@@ -47,12 +47,48 @@ class GrazingAllocation(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         back_populates="grazing_allocation",
         cascade="all, delete-orphan",
     )
+    group_assignments = db.relationship(
+        "GrazingAllocationGroupAssignment",
+        back_populates="grazing_allocation",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         db.CheckConstraint(
             "allocation_fraction > 0 and allocation_fraction <= 1", name="ck_allocation_fraction"
         ),
         db.UniqueConstraint("grazing_session_id", "paddock_id", name="uq_session_paddock"),
+    )
+
+
+class GrazingAllocationGroupAssignment(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "grazing_allocation_group_assignments"
+
+    grazing_allocation_id = db.Column(
+        db.String(36), db.ForeignKey("grazing_allocations.id"), nullable=False, index=True
+    )
+    animal_group_type_id = db.Column(
+        db.String(36), db.ForeignKey("animal_group_types.id"), nullable=False, index=True
+    )
+    head_count = db.Column(db.Integer, nullable=False)
+    group_fraction = db.Column(db.Numeric(8, 6), nullable=False)
+    assigned_lsu = db.Column(db.Numeric(12, 4), nullable=False)
+
+    grazing_allocation = db.relationship("GrazingAllocation", back_populates="group_assignments")
+    animal_group_type = db.relationship("AnimalGroupType")
+
+    __table_args__ = (
+        db.CheckConstraint("head_count > 0", name="ck_grazing_group_assignment_head_count_positive"),
+        db.CheckConstraint(
+            "group_fraction > 0 and group_fraction <= 1",
+            name="ck_grazing_group_assignment_fraction",
+        ),
+        db.CheckConstraint("assigned_lsu >= 0", name="ck_grazing_group_assignment_lsu_non_negative"),
+        db.UniqueConstraint(
+            "grazing_allocation_id",
+            "animal_group_type_id",
+            name="uq_grazing_group_assignment_allocation_group",
+        ),
     )
 
 
@@ -123,6 +159,7 @@ class GrazingAllocationLsuBreakdownHistory(UUIDPrimaryKeyMixin, TimestampMixin, 
     effective_to = db.Column(db.DateTime(timezone=True), index=True)
     allocation_fraction = db.Column(db.Numeric(5, 4), nullable=False)
     head_count = db.Column(db.Integer, nullable=False)
+    allocated_head_count = db.Column(db.Numeric(12, 4), nullable=False)
     group_lsu = db.Column(db.Numeric(12, 4), nullable=False)
     allocated_lsu = db.Column(db.Numeric(12, 4), nullable=False)
     source = db.Column(db.String(20), nullable=False, default="live")

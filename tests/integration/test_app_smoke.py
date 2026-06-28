@@ -9,6 +9,8 @@ from app.models import (
     Farm,
     FenceSection,
     GrazingAllocation,
+    GrazingAllocationGroupAssignment,
+    GrazingAllocationLsuBreakdownHistory,
     GrazingAllocationLsuHistory,
     GrazingSession,
     JournalEntry,
@@ -25,6 +27,7 @@ from app.models.movement import MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
 from app.services.gate_service import GateService
 from app.services.movement_service import MovementService
+from app.services.reporting_service import ReportingService
 
 
 def _write_farm_kml(app, farm_name: str, placemark_name: str):
@@ -799,6 +802,105 @@ def test_import_farm_transfers_missing_paddock_history_by_overlap_ratio(client, 
     assert "West Target" in farm_body
     assert "East Target" in farm_body
     assert "Split Source" not in farm_body
+
+def test_count_based_mob_move_persists_group_assignments_and_lsu_history(client, app):
+    with app.app_context():
+        farm = Farm(name="Count Allocation Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        north = Paddock(farm_id=farm.id, name="North Counts", area_ha=10, grazeable_area_ha=10)
+        south = Paddock(farm_id=farm.id, name="South Counts", area_ha=10, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="Mixed Count Mob", status="active")
+        cattle = AnimalGroupType(species="Cattle", breed="Bonsmara", sex="cow", age_class="adult")
+        sheep = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add_all([north, south, mob, cattle, sheep])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=cattle.id, head_count=5),
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=sheep.id, head_count=12),
+            ]
+        )
+        db.session.flush()
+
+        MovementService.move_mob(
+            mob=mob,
+            destination_farm_id=str(farm.id),
+            when=datetime(2026, 6, 20, 8, 0, tzinfo=timezone.utc),
+            allocation_mode="counts",
+            allocations=[
+                {
+                    "paddock_id": str(north.id),
+                    "group_counts": [{"animal_group_type_id": str(sheep.id), "head_count": 12}],
+                },
+                {
+                    "paddock_id": str(south.id),
+                    "group_counts": [{"animal_group_type_id": str(cattle.id), "head_count": 5}],
+                },
+            ],
+        )
+        db.session.commit()
+
+        session = GrazingSession.query.filter_by(mob_id=mob.id, end_at=None).one()
+        allocations = {str(row.paddock_id): row for row in session.allocations}
+        assert float(allocations[str(north.id)].allocation_fraction) == 0.2857
+        assert float(allocations[str(south.id)].allocation_fraction) == 0.7143
+
+        assignments = GrazingAllocationGroupAssignment.query.all()
+        assert {(str(row.animal_group_type_id), int(row.head_count)) for row in assignments} == {
+            (str(sheep.id), 12),
+            (str(cattle.id), 5),
+        }
+
+        aggregate_history = {
+            str(row.paddock_id): float(row.allocated_lsu)
+            for row in GrazingAllocationLsuHistory.query.filter_by(grazing_session_id=session.id).all()
+        }
+        assert aggregate_history[str(north.id)] == 2.0
+        assert aggregate_history[str(south.id)] == 5.0
+
+        breakdown = {
+            (str(row.paddock_id), str(row.animal_group_type_id)): float(row.allocated_head_count)
+            for row in GrazingAllocationLsuBreakdownHistory.query.filter_by(grazing_session_id=session.id).all()
+        }
+        assert breakdown[(str(north.id), str(sheep.id))] == 12.0
+        assert breakdown[(str(south.id), str(cattle.id))] == 5.0
+
+        north_stock = ReportingService.paddock_current_stock(str(north.id))
+        south_stock = ReportingService.paddock_current_stock(str(south.id))
+        assert north_stock[str(sheep.id)] == 12.0
+        assert south_stock[str(cattle.id)] == 5.0
+
+
+def test_count_based_mob_move_requires_whole_mob_coverage(client, app):
+    with app.app_context():
+        farm = Farm(name="Count Validation Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        paddock = Paddock(farm_id=farm.id, name="Only Counts", area_ha=10, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="Partial Count Mob", status="active")
+        group = AnimalGroupType(species="Goat", breed="Boer", sex="ewe", age_class="adult")
+        db.session.add_all([paddock, mob, group])
+        db.session.flush()
+        db.session.add(AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=8))
+        db.session.flush()
+
+        try:
+            MovementService.move_mob(
+                mob=mob,
+                destination_farm_id=str(farm.id),
+                allocation_mode="counts",
+                allocations=[
+                    {
+                        "paddock_id": str(paddock.id),
+                        "group_counts": [{"animal_group_type_id": str(group.id), "head_count": 7}],
+                    }
+                ],
+            )
+        except ValueError as exc:
+            assert "cover the whole mob" in str(exc)
+        else:
+            raise AssertionError("Partial count allocation should fail")
 
 
 def test_farm_detail_marks_unallocated_mobs_in_red(client, app):

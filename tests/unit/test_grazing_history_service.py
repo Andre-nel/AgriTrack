@@ -326,6 +326,7 @@ def test_sync_live_history_for_archived_mob_closes_open_rows_at_archive_time(app
                 effective_to=None,
                 allocation_fraction=1,
                 head_count=8,
+                allocated_head_count=8,
                 group_lsu=1,
                 allocated_lsu=1,
                 source=GrazingHistoryService.SOURCE_LIVE,

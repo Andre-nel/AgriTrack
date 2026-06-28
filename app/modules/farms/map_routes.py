@@ -103,9 +103,9 @@ def _active_grazing_snapshot_by_paddock(farm_id: str) -> dict[str, dict]:
             {"current_lsu": 0.0, "mobs": [], "species_heads": {}},
         )
 
-        fraction = float(allocation.allocation_fraction)
         mob = allocation.grazing_session.mob
-        allocated_lsu = ReportingService.mob_total_lsu(mob) * fraction
+        fraction = ReportingService.allocation_effective_fraction(allocation)
+        allocated_lsu = ReportingService.allocation_lsu(allocation)
         snapshot["current_lsu"] += allocated_lsu
         snapshot["mobs"].append(
             {
@@ -116,12 +116,10 @@ def _active_grazing_snapshot_by_paddock(farm_id: str) -> dict[str, dict]:
             }
         )
 
-        for balance in mob.balances:
-            species = balance.animal_group_type.species
+        for group_row in ReportingService.allocation_group_head_rows(allocation):
+            species = group_row["animal_group_type"].species
             current_head = snapshot["species_heads"].get(species, 0.0)
-            snapshot["species_heads"][species] = current_head + (
-                float(balance.head_count) * fraction
-            )
+            snapshot["species_heads"][species] = current_head + group_row["head_count"]
 
     for snapshot in by_paddock.values():
         snapshot["mobs"].sort(key=lambda item: item["allocated_lsu"], reverse=True)

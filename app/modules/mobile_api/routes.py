@@ -46,6 +46,7 @@ from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
 from app.services.paddock_event_service import PaddockEventService
+from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
 from app.services.task_service import (
     TASK_PRIORITIES,
@@ -298,6 +299,37 @@ def _serialize_mob(mob: Mob) -> dict:
     }
 
 
+def _serialize_grazing_allocation(allocation) -> dict:
+    row = {
+        "paddock_id": str(allocation.paddock_id),
+        "allocation_fraction": float(ReportingService.allocation_effective_fraction(allocation)),
+    }
+    assignments = [
+        assignment
+        for assignment in allocation.group_assignments
+        if int(assignment.head_count or 0) > 0
+    ]
+    if assignments:
+        row["group_counts"] = [
+            {
+                "animal_group_type_id": str(assignment.animal_group_type_id),
+                "head_count": int(assignment.head_count),
+                "group_fraction": float(assignment.group_fraction),
+                "assigned_lsu": float(assignment.assigned_lsu),
+            }
+            for assignment in sorted(
+                assignments,
+                key=lambda item: (
+                    item.animal_group_type.species,
+                    item.animal_group_type.breed,
+                    item.animal_group_type.sex,
+                    item.animal_group_type.age_class,
+                ),
+            )
+        ]
+    return row
+
+
 def _serialize_grazing_session(session: GrazingSession) -> dict:
     return {
         "id": str(session.id),
@@ -306,10 +338,7 @@ def _serialize_grazing_session(session: GrazingSession) -> dict:
         "start_at": _iso_datetime(session.start_at),
         "end_at": _iso_datetime(session.end_at),
         "allocations": [
-            {
-                "paddock_id": str(allocation.paddock_id),
-                "allocation_fraction": float(allocation.allocation_fraction),
-            }
+            _serialize_grazing_allocation(allocation)
             for allocation in sorted(session.allocations, key=lambda item: item.paddock.name.lower())
         ],
     }
@@ -607,7 +636,7 @@ def _active_grazing_by_paddock(active_grazing: list[GrazingSession]) -> dict[str
                     "total_head": 0.0,
                 },
             )
-            fraction = float(allocation.allocation_fraction)
+            fraction = ReportingService.allocation_effective_fraction(allocation)
             row["mobs"].append(
                 {
                     "mob_id": str(mob.id),
@@ -617,16 +646,16 @@ def _active_grazing_by_paddock(active_grazing: list[GrazingSession]) -> dict[str
                     "allocation_pct": round(fraction * 100.0, 2),
                 }
             )
-            for balance in mob.balances:
-                species = balance.animal_group_type.species
-                head = float(balance.head_count) * fraction
+            for group_head in ReportingService.allocation_group_head_rows(allocation):
+                species = group_head["animal_group_type"].species
+                head = group_head["head_count"]
                 row["species_heads"][species] = row["species_heads"].get(species, 0.0) + head
-                group_id = str(balance.animal_group_type_id)
+                group_id = str(group_head["animal_group_type_id"])
                 group_row = row["group_heads"].setdefault(
                     group_id,
                     {
                         "animal_group_type_id": group_id,
-                        "animal_group_type": _serialize_animal_group_type(balance.animal_group_type),
+                        "animal_group_type": _serialize_animal_group_type(group_head["animal_group_type"]),
                         "head": 0.0,
                     },
                 )
@@ -730,7 +759,7 @@ def _decision_feed(
             paddock = allocation.paddock
             if paddock is None:
                 continue
-            allocation_pct = round(float(allocation.allocation_fraction) * 100.0, 2)
+            allocation_pct = round(ReportingService.allocation_effective_fraction(allocation) * 100.0, 2)
             items.append(
                 {
                     "severity": "high",
@@ -1747,6 +1776,7 @@ def _handle_mob_move(farm: Farm, payload: dict) -> dict:
         allocations=payload.get("allocations") or [],
         destination_farm_id=str(destination_farm_id),
         when=_parse_iso_datetime(payload.get("event_time"), "event_time"),
+        allocation_mode=payload.get("allocation_mode"),
     )
     db.session.flush()
     return {"grazing_session_id": str(session.id)}

@@ -301,7 +301,7 @@ def register_legacy_routes(bp) -> None:
                 {
                     "mob_id": mob_id,
                     "mob_name": mob.name,
-                    "allocation_pct": float(allocation.allocation_fraction) * 100.0,
+                    "allocation_pct": ReportingService.allocation_effective_fraction(allocation) * 100.0,
                     "default_destination_farm_id": str(mob.farm_id),
                 }
             )
@@ -313,6 +313,7 @@ def register_legacy_routes(bp) -> None:
             history.append(
                 {
                     "allocation": allocation,
+                    "allocation_pct": ReportingService.allocation_effective_fraction(allocation) * 100.0,
                     "allocated_lsu": allocated_lsu,
                     "mob_name": session.mob.name,
                 }

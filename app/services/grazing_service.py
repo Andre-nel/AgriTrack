@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from app.extensions import db
-from app.models import GrazingAllocation, GrazingSession
+from app.models import GrazingAllocation, GrazingAllocationGroupAssignment, GrazingSession
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.validation_service import ValidationService
 
@@ -21,13 +21,23 @@ class GrazingService:
         db.session.flush()
 
         for item in allocations:
-            db.session.add(
-                GrazingAllocation(
-                    grazing_session_id=session.id,
-                    paddock_id=item["paddock_id"],
-                    allocation_fraction=Decimal(str(item["allocation_fraction"])),
-                )
+            allocation = GrazingAllocation(
+                grazing_session_id=session.id,
+                paddock_id=item["paddock_id"],
+                allocation_fraction=Decimal(str(item["allocation_fraction"])),
             )
+            db.session.add(allocation)
+            db.session.flush()
+            for group_count in item.get("group_counts", []):
+                db.session.add(
+                    GrazingAllocationGroupAssignment(
+                        grazing_allocation_id=allocation.id,
+                        animal_group_type_id=group_count["animal_group_type_id"],
+                        head_count=int(group_count["head_count"]),
+                        group_fraction=Decimal(str(group_count["group_fraction"])),
+                        assigned_lsu=Decimal(str(group_count["assigned_lsu"])),
+                    )
+                )
 
         db.session.flush()
         GrazingHistoryService.sync_live_history_for_mob(mob_id, effective_at=start_at)

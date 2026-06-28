@@ -94,6 +94,8 @@ import com.agritrack.mobile.data.MapFeatureSummary
 import com.agritrack.mobile.data.MobileFormOptions
 import com.agritrack.mobile.data.MobileOption
 import com.agritrack.mobile.data.MobFilterState
+import com.agritrack.mobile.data.MobMoveCountAllocation
+import com.agritrack.mobile.data.MobMoveGroupCount
 import com.agritrack.mobile.data.MobSummary
 import com.agritrack.mobile.data.MobileApiClient
 import com.agritrack.mobile.data.MobileRepository
@@ -517,7 +519,9 @@ class MainActivity : ComponentActivity() {
                     },
                     onQueueRainfall = { queueAndMaybeSync(queueRainfall(uiState, repository())) },
                     onQueueMobCreate = { queueAndMaybeSync(queueMobCreate(uiState, repository())) },
-                    onQueueMobMove = { allocations -> queueAndMaybeSync(queueMobMove(uiState, repository(), allocations)) },
+                    onQueueMobMove = { mode, allocations, countAllocations ->
+                        queueAndMaybeSync(queueMobMove(uiState, repository(), mode, allocations, countAllocations))
+                    },
                     onQueueStockCount = { rows, newGroup -> queueAndMaybeSync(queueStockCount(uiState, repository(), rows, newGroup)) },
                     onQueueMobTransfer = { queueAndMaybeSync(queueMobTransfer(uiState, repository())) },
                     onQueuePaddockUpdate = { queueAndMaybeSync(queuePaddockUpdate(uiState, repository())) },
@@ -802,6 +806,16 @@ private data class MoveAllocationDraft(
     val allocationPct: String = "",
 )
 
+private enum class MoveAllocationMode {
+    Percentage,
+    Counts,
+}
+
+private data class CountMoveAllocationDraft(
+    val paddockId: String = "",
+    val groupCounts: Map<String, String> = emptyMap(),
+)
+
 private data class StockCountRowDraft(
     val animalGroupTypeId: String,
     val label: String,
@@ -919,7 +933,7 @@ private fun AgriTrackApp(
     onStartTaskForEntity: (String, String, String) -> Unit,
     onQueueRainfall: () -> Unit,
     onQueueMobCreate: () -> Unit,
-    onQueueMobMove: (List<MoveAllocationDraft>) -> Unit,
+    onQueueMobMove: (MoveAllocationMode, List<MoveAllocationDraft>, List<CountMoveAllocationDraft>) -> Unit,
     onQueueStockCount: (List<StockCountRowDraft>, NewStockGroupDraft) -> Unit,
     onQueueMobTransfer: () -> Unit,
     onQueuePaddockUpdate: () -> Unit,
@@ -3587,65 +3601,174 @@ private fun MoveMobScreen(
     onMobSelected: (String) -> Unit,
     onPaddockSelected: (String) -> Unit,
     onMoveNoteChange: (String) -> Unit,
-    onQueueMobMove: (List<MoveAllocationDraft>) -> Unit,
+    onQueueMobMove: (MoveAllocationMode, List<MoveAllocationDraft>, List<CountMoveAllocationDraft>) -> Unit,
 ) {
     FormScaffold("Move Mob", onBackHome) {
         val snapshot = state.snapshot
         val paddocks = snapshot?.paddocks.orEmpty()
+        val mob = selectedMob(state)
+        val balanceKey = mob?.balances?.joinToString("|") { "${it.animalGroupTypeId}:${it.headCount}" }.orEmpty()
         var allocations by remember(state.selectedMobId, snapshot?.farm?.id) {
             mutableStateOf(initialMoveAllocations(snapshot, state.selectedMobId, state.selectedPaddockId))
         }
+        var countAllocations by remember(state.selectedMobId, snapshot?.farm?.id, balanceKey) {
+            mutableStateOf(initialCountMoveAllocations(snapshot, state.selectedPaddockId, mob))
+        }
+        var allocationMode by remember(state.selectedMobId, snapshot?.farm?.id) {
+            mutableStateOf(MoveAllocationMode.Percentage)
+        }
         val totalPct = allocations.sumOf { it.allocationPct.toDoubleOrNull() ?: 0.0 }
         MobPicker(state.snapshot?.mobs.orEmpty(), state.selectedMobId, onMobSelected)
-        SectionCard("Paddock Allocations") {
-            allocations.forEachIndexed { index, allocation ->
-                SectionDivider()
-                PaddockPicker(paddocks, allocation.paddockId, { paddockId ->
-                    onPaddockSelected(paddockId)
-                    allocations = allocations.toMutableList().also { rows ->
-                        rows[index] = rows[index].copy(paddockId = paddockId)
-                    }
-                })
-                OutlinedTextField(
-                    allocation.allocationPct,
-                    { value ->
-                        allocations = allocations.toMutableList().also { rows ->
-                            rows[index] = rows[index].copy(allocationPct = value)
-                        }
-                    },
-                    label = { Text("Allocation %") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedButton(
-                    onClick = {
-                        if (allocations.size > 1) {
-                            allocations = allocations.toMutableList().also { it.removeAt(index) }
-                        }
-                    },
-                    enabled = allocations.size > 1,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Remove Allocation")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            if (allocationMode == MoveAllocationMode.Percentage) {
+                Button(onClick = { allocationMode = MoveAllocationMode.Percentage }, modifier = Modifier.weight(1f)) {
+                    Text("Percent")
+                }
+            } else {
+                OutlinedButton(onClick = { allocationMode = MoveAllocationMode.Percentage }, modifier = Modifier.weight(1f)) {
+                    Text("Percent")
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(
-                    onClick = {
-                        val used = allocations.map { it.paddockId }.toSet()
-                        val nextPaddock = paddocks.firstOrNull { it.id !in used }?.id.orEmpty()
-                        allocations = allocations + MoveAllocationDraft(nextPaddock, "")
-                    },
-                    enabled = paddocks.isNotEmpty(),
+            if (allocationMode == MoveAllocationMode.Counts) {
+                Button(
+                    onClick = { allocationMode = MoveAllocationMode.Counts },
+                    enabled = mob?.balances.orEmpty().isNotEmpty(),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Add Allocation")
+                    Text("Counts")
                 }
-                Text("Total ${"%.2f".format(totalPct)}%", modifier = Modifier.weight(1f))
+            } else {
+                OutlinedButton(
+                    onClick = { allocationMode = MoveAllocationMode.Counts },
+                    enabled = mob?.balances.orEmpty().isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Counts")
+                }
+            }
+        }
+        if (allocationMode == MoveAllocationMode.Percentage) {
+            SectionCard("Paddock Allocations") {
+                allocations.forEachIndexed { index, allocation ->
+                    SectionDivider()
+                    PaddockPicker(paddocks, allocation.paddockId, { paddockId ->
+                        onPaddockSelected(paddockId)
+                        allocations = allocations.toMutableList().also { rows ->
+                            rows[index] = rows[index].copy(paddockId = paddockId)
+                        }
+                    })
+                    OutlinedTextField(
+                        allocation.allocationPct,
+                        { value ->
+                            allocations = allocations.toMutableList().also { rows ->
+                                rows[index] = rows[index].copy(allocationPct = value)
+                            }
+                        },
+                        label = { Text("Allocation %") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            if (allocations.size > 1) {
+                                allocations = allocations.toMutableList().also { it.removeAt(index) }
+                            }
+                        },
+                        enabled = allocations.size > 1,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Remove Allocation")
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = {
+                            val used = allocations.map { it.paddockId }.toSet()
+                            val nextPaddock = paddocks.firstOrNull { it.id !in used }?.id.orEmpty()
+                            allocations = allocations + MoveAllocationDraft(nextPaddock, "")
+                        },
+                        enabled = paddocks.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Add Allocation")
+                    }
+                    Text("Total ${"%.2f".format(totalPct)}%", modifier = Modifier.weight(1f))
+                }
+            }
+        } else {
+            SectionCard("Animal Count Allocations") {
+                if (mob == null || mob.balances.isEmpty()) {
+                    Text("No animal groups available for this mob.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+                }
+                countAllocations.forEachIndexed { index, allocation ->
+                    SectionDivider()
+                    PaddockPicker(paddocks, allocation.paddockId, { paddockId ->
+                        onPaddockSelected(paddockId)
+                        countAllocations = countAllocations.toMutableList().also { rows ->
+                            rows[index] = rows[index].copy(paddockId = paddockId)
+                        }
+                    })
+                    mob?.balances.orEmpty().forEach { balance ->
+                        OutlinedTextField(
+                            allocation.groupCounts[balance.animalGroupTypeId].orEmpty(),
+                            { value ->
+                                countAllocations = countAllocations.toMutableList().also { rows ->
+                                    val nextCounts = rows[index].groupCounts.toMutableMap()
+                                    nextCounts[balance.animalGroupTypeId] = value
+                                    rows[index] = rows[index].copy(groupCounts = nextCounts)
+                                }
+                            },
+                            label = { Text(balance.animalGroupType.label) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Text(
+                        "Calculated ${formatHeadCount(countAllocationPct(allocation, mob))}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF516052),
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            if (countAllocations.size > 1) {
+                                countAllocations = countAllocations.toMutableList().also { it.removeAt(index) }
+                            }
+                        },
+                        enabled = countAllocations.size > 1,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Remove Allocation")
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = {
+                            val used = countAllocations.map { it.paddockId }.toSet()
+                            val nextPaddock = paddocks.firstOrNull { it.id !in used }?.id.orEmpty()
+                            countAllocations = countAllocations + CountMoveAllocationDraft(
+                                paddockId = nextPaddock,
+                                groupCounts = mob?.balances.orEmpty().associate { it.animalGroupTypeId to "0" },
+                            )
+                        },
+                        enabled = paddocks.isNotEmpty() && mob?.balances.orEmpty().isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Add Row")
+                    }
+                    Text(
+                        countRemainingLabel(mob, countAllocations),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
         OutlinedTextField(state.moveNote, onMoveNoteChange, label = { Text("Move note") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { onQueueMobMove(allocations) }, enabled = state.snapshot != null, modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = { onQueueMobMove(allocationMode, allocations, countAllocations) },
+            enabled = state.snapshot != null,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             Text("Queue Move")
         }
     }
@@ -4618,6 +4741,55 @@ private fun initialMoveAllocations(
     return listOf(MoveAllocationDraft(paddockId = paddockId, allocationPct = "100"))
 }
 
+private fun initialCountMoveAllocations(
+    snapshot: FarmSnapshot?,
+    fallbackPaddockId: String,
+    mob: MobSummary?,
+): List<CountMoveAllocationDraft> {
+    val selectedMob = mob ?: snapshot?.mobs?.firstOrNull()
+    if (selectedMob == null) {
+        return listOf(CountMoveAllocationDraft(fallbackPaddockId))
+    }
+    val active = snapshot?.activeGrazing?.firstOrNull { it.mobId == selectedMob.id }
+    val countAllocations = active?.allocations.orEmpty().filter { it.groupCounts.isNotEmpty() }
+    if (countAllocations.isNotEmpty()) {
+        return countAllocations.map { allocation ->
+            CountMoveAllocationDraft(
+                paddockId = allocation.paddockId,
+                groupCounts = allocation.groupCounts.associate { it.animalGroupTypeId to it.headCount.toString() },
+            )
+        }
+    }
+    val paddockId = fallbackPaddockId.ifBlank { snapshot?.paddocks?.firstOrNull()?.id.orEmpty() }
+    return listOf(
+        CountMoveAllocationDraft(
+            paddockId = paddockId,
+            groupCounts = selectedMob.balances.associate { it.animalGroupTypeId to it.headCount.toString() },
+        )
+    )
+}
+
+private fun countAllocationPct(draft: CountMoveAllocationDraft, mob: MobSummary?): Double {
+    val totalLsu = mob?.totalLsu ?: 0.0
+    if (totalLsu <= 0.0 || mob == null) return 0.0
+    val assignedLsu = mob.balances.sumOf { balance ->
+        val quantity = draft.groupCounts[balance.animalGroupTypeId]?.trim()?.toDoubleOrNull() ?: 0.0
+        quantity * balance.animalGroupType.lsuPerHead
+    }
+    return (assignedLsu / totalLsu) * 100.0
+}
+
+private fun countRemainingLabel(mob: MobSummary?, drafts: List<CountMoveAllocationDraft>): String {
+    if (mob == null || mob.balances.isEmpty()) return "No stock"
+    val remaining = mob.balances.map { balance ->
+        val assigned = drafts.sumOf { draft ->
+            draft.groupCounts[balance.animalGroupTypeId]?.trim()?.toIntOrNull() ?: 0
+        }
+        "${balance.animalGroupType.label}: ${balance.headCount - assigned}"
+    }
+    return remaining.joinToString(" | ")
+}
+
 private fun normalizeMoveAllocations(drafts: List<MoveAllocationDraft>): Result<List<Pair<String, Double>>> {
     val allocations = mutableListOf<Pair<String, Double>>()
     val seenPaddocks = mutableSetOf<String>()
@@ -4650,6 +4822,70 @@ private fun normalizeMoveAllocations(drafts: List<MoveAllocationDraft>): Result<
     }
     if (abs(totalPct - 100.0) > 0.01) {
         return Result.failure(IllegalArgumentException("Allocation percentages must add up to 100."))
+    }
+    return Result.success(allocations)
+}
+
+private fun normalizeCountMoveAllocations(
+    drafts: List<CountMoveAllocationDraft>,
+    mob: MobSummary?,
+): Result<List<MobMoveCountAllocation>> {
+    mob ?: return Result.failure(IllegalArgumentException("Choose a mob."))
+    if (mob.balances.isEmpty()) {
+        return Result.failure(IllegalArgumentException("The selected mob has no animal groups to allocate."))
+    }
+    if (mob.totalLsu <= 0.0) {
+        return Result.failure(IllegalArgumentException("Count allocation requires the mob to have positive LSU."))
+    }
+
+    val allocations = mutableListOf<MobMoveCountAllocation>()
+    val seenPaddocks = mutableSetOf<String>()
+    val totals = mob.balances.associate { it.animalGroupTypeId to 0 }.toMutableMap()
+
+    drafts.forEach { draft ->
+        val paddockId = draft.paddockId.trim()
+        val hasAnyText = draft.groupCounts.values.any { it.trim().isNotBlank() }
+        if (paddockId.isBlank() && !hasAnyText) {
+            return@forEach
+        }
+        if (paddockId.isBlank()) {
+            return Result.failure(IllegalArgumentException("Each count allocation needs a paddock."))
+        }
+        if (!seenPaddocks.add(paddockId)) {
+            return Result.failure(IllegalArgumentException("Each paddock can only be listed once."))
+        }
+
+        val groupCounts = mutableListOf<MobMoveGroupCount>()
+        mob.balances.forEach { balance ->
+            val text = draft.groupCounts[balance.animalGroupTypeId]?.trim().orEmpty()
+            val quantity = if (text.isBlank()) 0 else text.toIntOrNull()
+                ?: return Result.failure(IllegalArgumentException("Count allocations must be whole numbers."))
+            if (quantity < 0) {
+                return Result.failure(IllegalArgumentException("Count allocations cannot be negative."))
+            }
+            if (quantity > 0) {
+                totals[balance.animalGroupTypeId] = (totals[balance.animalGroupTypeId] ?: 0) + quantity
+                groupCounts.add(MobMoveGroupCount(balance.animalGroupTypeId, quantity))
+            }
+        }
+        if (groupCounts.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Each count allocation needs at least one animal."))
+        }
+        allocations.add(MobMoveCountAllocation(paddockId, groupCounts))
+    }
+
+    if (allocations.isEmpty()) {
+        return Result.failure(IllegalArgumentException("Add at least one count allocation."))
+    }
+    mob.balances.forEach { balance ->
+        val assigned = totals[balance.animalGroupTypeId] ?: 0
+        if (assigned != balance.headCount) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "${balance.animalGroupType.label} must total ${balance.headCount}; currently $assigned."
+                )
+            )
+        }
     }
     return Result.success(allocations)
 }
@@ -4689,14 +4925,22 @@ private fun queueMobCreate(state: FieldUiState, repo: MobileRepository): FieldUi
 private fun queueMobMove(
     state: FieldUiState,
     repo: MobileRepository,
+    allocationMode: MoveAllocationMode,
     allocationDrafts: List<MoveAllocationDraft>,
+    countAllocationDrafts: List<CountMoveAllocationDraft>,
 ): FieldUiState {
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a mob move.")
     val mobId = state.selectedMobId.ifBlank { state.snapshot?.mobs?.firstOrNull()?.id.orEmpty() }
     if (mobId.isBlank()) return state.copy(statusMessage = "Choose a mob.")
-    val allocations = normalizeMoveAllocations(allocationDrafts)
-        .getOrElse { return state.copy(statusMessage = it.message ?: "Check paddock allocations.") }
-    repo.queueMobMove(farm.id, mobId, allocations, state.moveNote)
+    if (allocationMode == MoveAllocationMode.Counts) {
+        val allocations = normalizeCountMoveAllocations(countAllocationDrafts, selectedMob(state))
+            .getOrElse { return state.copy(statusMessage = it.message ?: "Check count allocations.") }
+        repo.queueMobMoveCounts(farm.id, mobId, allocations, state.moveNote)
+    } else {
+        val allocations = normalizeMoveAllocations(allocationDrafts)
+            .getOrElse { return state.copy(statusMessage = it.message ?: "Check paddock allocations.") }
+        repo.queueMobMove(farm.id, mobId, allocations, state.moveNote)
+    }
     return state.copy(currentScreen = AppScreen.Home, moveNote = "", statusMessage = "Queued mob move.")
 }
 

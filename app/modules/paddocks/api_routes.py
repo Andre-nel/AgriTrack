@@ -237,7 +237,7 @@ def paddock_history(paddock_id):
                 "mob_id": a.grazing_session.mob_id,
                 "start_at": a.grazing_session.start_at.isoformat(),
                 "end_at": a.grazing_session.end_at.isoformat() if a.grazing_session.end_at else None,
-                "allocation_fraction": float(a.allocation_fraction),
+                "allocation_fraction": float(ReportingService.allocation_effective_fraction(a)),
             }
             for a in rows
         ]

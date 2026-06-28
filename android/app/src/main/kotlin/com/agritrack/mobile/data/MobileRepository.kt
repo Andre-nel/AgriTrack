@@ -96,6 +96,25 @@ class MobileRepository(
         }
     }
 
+    fun queueMobMoveCounts(
+        farmId: String,
+        mobId: String,
+        allocations: List<MobMoveCountAllocation>,
+        note: String,
+    ) {
+        fieldStore.enqueue(MobileCommand.mobMoveCountAllocations(farmId, mobId, allocations))
+        if (note.isNotBlank()) {
+            fieldStore.enqueue(
+                MobileCommand.mobNote(
+                    farmId = farmId,
+                    mobId = mobId,
+                    description = note,
+                    tags = listOf("move"),
+                )
+            )
+        }
+    }
+
     fun queuePaddockNote(farmId: String, paddockId: String, description: String, tags: List<String>) {
         fieldStore.enqueue(MobileCommand.paddockNote(farmId, paddockId, description, tags))
     }

@@ -4,6 +4,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+data class MobMoveGroupCount(
+    val animalGroupTypeId: String,
+    val headCount: Int,
+)
+
+data class MobMoveCountAllocation(
+    val paddockId: String,
+    val groupCounts: List<MobMoveGroupCount>,
+)
+
 data class MobileCommand(
     val clientCommandId: String,
     val type: String,
@@ -107,6 +117,45 @@ data class MobileCommand(
                                 JSONObject()
                                     .put("paddock_id", paddockId)
                                     .put("allocation_fraction", allocationFraction)
+                            )
+                        }
+                    }
+                )
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "mob.move",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun mobMoveCountAllocations(
+            farmId: String,
+            mobId: String,
+            allocations: List<MobMoveCountAllocation>,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("mob_id", mobId)
+                .put("allocation_mode", "counts")
+                .put(
+                    "allocations",
+                    JSONArray().apply {
+                        allocations.forEach { allocation ->
+                            put(
+                                JSONObject()
+                                    .put("paddock_id", allocation.paddockId)
+                                    .put(
+                                        "group_counts",
+                                        JSONArray().apply {
+                                            allocation.groupCounts.forEach { group ->
+                                                put(
+                                                    JSONObject()
+                                                        .put("animal_group_type_id", group.animalGroupTypeId)
+                                                        .put("head_count", group.headCount)
+                                                )
+                                            }
+                                        }
+                                    )
                             )
                         }
                     }

@@ -6,6 +6,7 @@ from app.models.finance import CashTransaction, CashTransactionLine
 from app.models.gate import PaddockGate
 from app.models.grazing import (
     GrazingAllocation,
+    GrazingAllocationGroupAssignment,
     GrazingAllocationLsuBreakdownHistory,
     GrazingAllocationLsuHistory,
     GrazingSession,
@@ -48,6 +49,7 @@ __all__ = [
     "FenceEventMaterial",
     "FenceSection",
     "GrazingAllocation",
+    "GrazingAllocationGroupAssignment",
     "GrazingAllocationLsuBreakdownHistory",
     "GrazingAllocationLsuHistory",
     "GrazingSession",

@@ -142,6 +142,39 @@ class OfflineCommandQueueTest {
     }
 
     @Test
+    fun mobMoveCommandSupportsCountAllocations() {
+        val command = MobileCommand.mobMoveCountAllocations(
+            farmId = "farm-1",
+            mobId = "mob-1",
+            allocations = listOf(
+                MobMoveCountAllocation(
+                    paddockId = "paddock-1",
+                    groupCounts = listOf(MobMoveGroupCount("group-sheep", 12)),
+                ),
+                MobMoveCountAllocation(
+                    paddockId = "paddock-2",
+                    groupCounts = listOf(MobMoveGroupCount("group-cattle", 5)),
+                ),
+            ),
+        )
+
+        val payload = command.toJson().getJSONObject("payload")
+        val allocations = payload.getJSONArray("allocations")
+
+        assertEquals("mob.move", command.toJson().getString("type"))
+        assertEquals("counts", payload.getString("allocation_mode"))
+        assertEquals("paddock-1", allocations.getJSONObject(0).getString("paddock_id"))
+        assertEquals(
+            "group-sheep",
+            allocations.getJSONObject(0).getJSONArray("group_counts").getJSONObject(0).getString("animal_group_type_id"),
+        )
+        assertEquals(
+            5,
+            allocations.getJSONObject(1).getJSONArray("group_counts").getJSONObject(0).getInt("head_count"),
+        )
+    }
+
+    @Test
     fun paddockNoteCommandShapesSupportedSyncPayload() {
         val command = MobileCommand.paddockNote(
             farmId = "farm-1",

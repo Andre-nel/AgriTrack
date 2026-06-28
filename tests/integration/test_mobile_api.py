@@ -11,6 +11,7 @@ from app.models import (
     FenceEvent,
     FenceSection,
     GrazingAllocation,
+    GrazingAllocationGroupAssignment,
     GrazingSession,
     MobileAuthToken,
     MobileSyncCommand,
@@ -1250,6 +1251,84 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
     assert history_payload[0]["water_level"] == "full"
     assert snapshot_payload["fence_sections"][0]["condition"] == "fair"
     assert snapshot_payload["fence_events"][0]["materials"][0]["material_type"] == "stone"
+
+
+def test_mobile_mob_move_supports_count_allocations(client, app):
+    with app.app_context():
+        farm = Farm(name="Mobile Count Move Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        north = Paddock(farm_id=farm.id, name="North Counts", area_ha=10, grazeable_area_ha=10)
+        south = Paddock(farm_id=farm.id, name="South Counts", area_ha=10, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="Mobile Count Mob", status="active")
+        cattle = AnimalGroupType(species="Cattle", breed="Bonsmara", sex="cow", age_class="adult")
+        sheep = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add_all([north, south, mob, cattle, sheep])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=cattle.id, head_count=5),
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=sheep.id, head_count=12),
+            ]
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        mob_id = str(mob.id)
+        north_id = str(north.id)
+        south_id = str(south.id)
+        cattle_id = str(cattle.id)
+        sheep_id = str(sheep.id)
+
+    token = _login(client)
+    response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={
+            "commands": [
+                {
+                    "client_command_id": "count-move-1",
+                    "type": "mob.move",
+                    "farm_id": farm_id,
+                    "payload": {
+                        "mob_id": mob_id,
+                        "allocation_mode": "counts",
+                        "allocations": [
+                            {
+                                "paddock_id": north_id,
+                                "group_counts": [
+                                    {"animal_group_type_id": sheep_id, "head_count": 12}
+                                ],
+                            },
+                            {
+                                "paddock_id": south_id,
+                                "group_counts": [
+                                    {"animal_group_type_id": cattle_id, "head_count": 5}
+                                ],
+                            },
+                        ],
+                    },
+                }
+            ]
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    assert response.get_json()["results"][0]["status"] == "applied"
+
+    with app.app_context():
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {str(row.paddock_id): float(row.allocation_fraction) for row in session.allocations}
+        assert allocations == {north_id: 0.2857, south_id: 0.7143}
+        assert GrazingAllocationGroupAssignment.query.count() == 2
+
+    snapshot = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+    assert snapshot.status_code == 200
+    payload = snapshot.get_json()
+    active_allocations = payload["active_grazing"][0]["allocations"]
+    assert any(row.get("group_counts") for row in active_allocations)
+    by_paddock = {row["paddock_id"]: row for row in payload["active_grazing_by_paddock"]}
+    assert by_paddock[north_id]["group_heads"][0]["head"] == 12.0
+    assert by_paddock[south_id]["group_heads"][0]["head"] == 5.0
 
 
 def test_mobile_snapshot_includes_gates_and_gate_update_command(client, app):

@@ -256,22 +256,66 @@
         {% endfor %}
       </select>
     </label>
-    <div id="allocationRows">
-      <div class="allocation-row">
-        <label>Paddock
-          <select name="paddock_id" class="allocation-paddock-select" required>
-            <option value="">Choose paddock</option>
-          </select>
-        </label>
-        <label>Allocation %
-          <input type="number" name="allocation_pct" min="0.01" max="100" step="0.01" required />
-        </label>
-        <button type="button" class="btn btn-secondary row-remove">Remove</button>
+    <label>Allocation Mode
+      <select name="allocation_mode" id="allocationMode">
+        <option value="percentage" selected>Percentage</option>
+        <option value="counts" {% if not split_group_options %}disabled{% endif %}>Animal counts</option>
+      </select>
+    </label>
+
+    <div id="percentageAllocationPanel" data-allocation-panel="percentage">
+      <div id="allocationRows">
+        <div class="allocation-row">
+          <label>Paddock
+            <select name="paddock_id" class="allocation-paddock-select" required>
+              <option value="">Choose paddock</option>
+            </select>
+          </label>
+          <label>Allocation %
+            <input type="number" name="allocation_pct" min="0.01" max="100" step="0.01" required />
+          </label>
+          <button type="button" class="btn btn-secondary row-remove">Remove</button>
+        </div>
+      </div>
+      <div class="row-actions">
+        <button type="button" id="addAllocationRow" class="btn btn-secondary">Add Allocation Row</button>
+        <span id="allocationTotal" class="muted">Total: 0.00%</span>
       </div>
     </div>
-    <div class="row-actions">
-      <button type="button" id="addAllocationRow" class="btn btn-secondary">Add Allocation Row</button>
-      <span id="allocationTotal" class="muted">Total: 0.00%</span>
+
+    <div id="countAllocationPanel" data-allocation-panel="counts" hidden>
+      {% if split_group_options %}
+      <div id="countAllocationRows">
+        <div class="allocation-row count-allocation-row">
+          <label>Paddock
+            <select name="count_paddock_id" class="count-allocation-paddock-select" required>
+              <option value="">Choose paddock</option>
+            </select>
+          </label>
+          {% for option in split_group_options %}
+          <label>{{ option.species }} {{ option.breed }} {{ option.sex }} {{ option.age_class }}
+            <input
+              type="number"
+              min="0"
+              step="1"
+              name="count_group_count:{{ option.id }}"
+              value="0"
+              data-group-id="{{ option.id }}"
+            />
+            <span class="muted">Available: {{ option.head_count }}</span>
+          </label>
+          {% endfor %}
+          <p class="muted count-row-pct">Calculated: 0.00%</p>
+          <button type="button" class="btn btn-secondary count-row-remove">Remove</button>
+        </div>
+      </div>
+      <div class="row-actions">
+        <button type="button" id="addCountAllocationRow" class="btn btn-secondary">Add Count Row</button>
+        <span id="countAllocationTotal" class="muted">Remaining: all stock</span>
+      </div>
+      {% else %}
+      <p>No active animal groups are available for count allocation.</p>
+      {% endif %}
     </div>
     <button type="submit" class="btn">Move Mob</button>
   </form>
@@ -288,7 +332,32 @@
       <button type="button" class="btn btn-secondary row-remove">Remove</button>
     </div>
   </template>
+  <template id="countAllocationRowTemplate">
+    <div class="allocation-row count-allocation-row">
+      <label>Paddock
+        <select name="count_paddock_id" class="count-allocation-paddock-select" required>
+          <option value="">Choose paddock</option>
+        </select>
+      </label>
+      {% for option in split_group_options %}
+      <label>{{ option.species }} {{ option.breed }} {{ option.sex }} {{ option.age_class }}
+        <input
+          type="number"
+          min="0"
+          step="1"
+          name="count_group_count:{{ option.id }}"
+          value="0"
+          data-group-id="{{ option.id }}"
+        />
+        <span class="muted">Available: {{ option.head_count }}</span>
+      </label>
+      {% endfor %}
+      <p class="muted count-row-pct">Calculated: 0.00%</p>
+      <button type="button" class="btn btn-secondary count-row-remove">Remove</button>
+    </div>
+  </template>
   <script id="movePaddocksByFarm" type="application/json">{{ move_paddocks_by_farm | tojson }}</script>
+  <script id="moveGroupOptions" type="application/json">{{ split_group_options | tojson }}</script>
   {% else %}
   <p>No paddocks are available yet. Add paddocks to a farm first.</p>
   {% endif %}
@@ -612,39 +681,65 @@
       }
     }
 
-    if (rowsContainer && addBtn && template && totalEl && destinationFarmSelect) {
-      function updatePaddockSelectOptions(selectEl, farmId, selectedValue) {
-        if (!selectEl) return;
-        const options = movePaddocksByFarm[farmId] || [];
-        const nextSelected = selectedValue || "";
-
-        selectEl.innerHTML = "";
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = options.length ? "Choose paddock" : "No paddocks available";
-        selectEl.appendChild(placeholder);
-
-        options.forEach((paddock) => {
-          const option = document.createElement("option");
-          option.value = paddock.id;
-          option.textContent = paddock.name;
-          selectEl.appendChild(option);
-        });
-
-        if (nextSelected && options.some((paddock) => paddock.id === nextSelected)) {
-          selectEl.value = nextSelected;
-        } else {
-          selectEl.value = "";
-        }
-        selectEl.disabled = options.length === 0;
+    const allocationModeSelect = document.getElementById("allocationMode");
+    const percentagePanel = document.getElementById("percentageAllocationPanel");
+    const countPanel = document.getElementById("countAllocationPanel");
+    const countRowsContainer = document.getElementById("countAllocationRows");
+    const addCountBtn = document.getElementById("addCountAllocationRow");
+    const countTemplate = document.getElementById("countAllocationRowTemplate");
+    const countTotalEl = document.getElementById("countAllocationTotal");
+    const moveGroupOptionsEl = document.getElementById("moveGroupOptions");
+    let moveGroupOptions = [];
+    if (moveGroupOptionsEl) {
+      try {
+        moveGroupOptions = JSON.parse(moveGroupOptionsEl.textContent || "[]");
+      } catch (error) {
+        moveGroupOptions = [];
       }
+    }
 
-      function syncPaddockOptions() {
-        const farmId = destinationFarmSelect.value;
+    function updatePaddockSelectOptions(selectEl, farmId, selectedValue) {
+      if (!selectEl) return;
+      const options = movePaddocksByFarm[farmId] || [];
+      const nextSelected = selectedValue || "";
+
+      selectEl.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = options.length ? "Choose paddock" : "No paddocks available";
+      selectEl.appendChild(placeholder);
+
+      options.forEach((paddock) => {
+        const option = document.createElement("option");
+        option.value = paddock.id;
+        option.textContent = paddock.name;
+        selectEl.appendChild(option);
+      });
+
+      if (nextSelected && options.some((paddock) => paddock.id === nextSelected)) {
+        selectEl.value = nextSelected;
+      } else {
+        selectEl.value = "";
+      }
+      selectEl.disabled = options.length === 0;
+    }
+
+    function syncPaddockOptions() {
+      if (!destinationFarmSelect) return;
+      const farmId = destinationFarmSelect.value;
+      if (rowsContainer) {
         rowsContainer.querySelectorAll("select[name='paddock_id']").forEach((selectEl) => {
           updatePaddockSelectOptions(selectEl, farmId, selectEl.value);
         });
       }
+      if (countRowsContainer) {
+        countRowsContainer.querySelectorAll("select[name='count_paddock_id']").forEach((selectEl) => {
+          updatePaddockSelectOptions(selectEl, farmId, selectEl.value);
+        });
+      }
+    }
+
+    if (rowsContainer && addBtn && template && totalEl && destinationFarmSelect) {
 
       function recalcTotal() {
         let total = 0;
@@ -686,11 +781,110 @@
         bindRow(clone);
       });
 
-      destinationFarmSelect.addEventListener("change", syncPaddockOptions);
       rowsContainer.querySelectorAll(".allocation-row").forEach(bindRow);
-      syncPaddockOptions();
       recalcTotal();
     }
+
+    function setPanelInputsEnabled(panel, enabled) {
+      if (!panel) return;
+      panel.querySelectorAll("input, select").forEach((input) => {
+        input.disabled = !enabled;
+      });
+    }
+
+    function recalcCountTotals() {
+      if (!countRowsContainer || !countTotalEl) return;
+      const totals = {};
+      moveGroupOptions.forEach((group) => {
+        totals[group.id] = 0;
+      });
+      const totalLsu = moveGroupOptions.reduce(
+        (sum, group) => sum + (Number(group.head_count || 0) * Number(group.lsu_per_head || 0)),
+        0
+      );
+
+      countRowsContainer.querySelectorAll(".count-allocation-row").forEach((row) => {
+        let rowLsu = 0;
+        row.querySelectorAll("input[data-group-id]").forEach((input) => {
+          const groupId = input.dataset.groupId || "";
+          const group = moveGroupOptions.find((item) => item.id === groupId);
+          const quantity = Math.max(0, Number(input.value || 0));
+          if (!Number.isNaN(quantity)) {
+            totals[groupId] = (totals[groupId] || 0) + quantity;
+            rowLsu += quantity * Number(group ? group.lsu_per_head || 0 : 0);
+          }
+        });
+        const pctEl = row.querySelector(".count-row-pct");
+        if (pctEl) {
+          const pct = totalLsu > 0 ? (rowLsu / totalLsu) * 100 : 0;
+          pctEl.textContent = `Calculated: ${pct.toFixed(2)}%`;
+        }
+      });
+
+      const remaining = moveGroupOptions.map((group) => {
+        const available = Number(group.head_count || 0);
+        const assigned = Number(totals[group.id] || 0);
+        return {
+          label: group.label || group.id,
+          remaining: available - assigned,
+        };
+      });
+      const allCovered = remaining.every((row) => row.remaining === 0);
+      countTotalEl.textContent = remaining
+        .map((row) => `${row.label}: ${row.remaining} remaining`)
+        .join(" | ");
+      countTotalEl.classList.toggle("error-text", !allCovered);
+    }
+
+    function bindCountRow(row) {
+      const removeBtn = row.querySelector(".count-row-remove");
+      const paddockSelect = row.querySelector("select[name='count_paddock_id']");
+      if (paddockSelect && destinationFarmSelect) {
+        updatePaddockSelectOptions(paddockSelect, destinationFarmSelect.value, paddockSelect.value);
+      }
+      row.querySelectorAll("input[data-group-id]").forEach((input) => {
+        input.addEventListener("input", recalcCountTotals);
+      });
+      if (removeBtn) {
+        removeBtn.addEventListener("click", () => {
+          if (countRowsContainer && countRowsContainer.children.length > 1) {
+            row.remove();
+            recalcCountTotals();
+          }
+        });
+      }
+    }
+
+    if (countRowsContainer && addCountBtn && countTemplate) {
+      addCountBtn.addEventListener("click", () => {
+        const clone = countTemplate.content.firstElementChild.cloneNode(true);
+        countRowsContainer.appendChild(clone);
+        bindCountRow(clone);
+        recalcCountTotals();
+      });
+      countRowsContainer.querySelectorAll(".count-allocation-row").forEach(bindCountRow);
+      recalcCountTotals();
+    }
+
+    function syncAllocationMode() {
+      const mode = allocationModeSelect ? allocationModeSelect.value : "percentage";
+      const countsActive = mode === "counts";
+      if (percentagePanel) percentagePanel.hidden = countsActive;
+      if (countPanel) countPanel.hidden = !countsActive;
+      syncPaddockOptions();
+      setPanelInputsEnabled(percentagePanel, !countsActive);
+      setPanelInputsEnabled(countPanel, countsActive);
+      recalcCountTotals();
+    }
+
+    if (destinationFarmSelect) {
+      destinationFarmSelect.addEventListener("change", syncAllocationMode);
+    }
+    if (allocationModeSelect) {
+      allocationModeSelect.addEventListener("change", syncAllocationMode);
+    }
+    syncPaddockOptions();
+    syncAllocationMode();
 
     const transferFarmSelect = document.getElementById("transferDestinationFarm");
     const transferMobSelect = document.getElementById("transferDestinationMob");

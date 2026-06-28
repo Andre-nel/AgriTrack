@@ -39,10 +39,9 @@ class ReportingService:
 
         totals = {}
         for allocation in rows:
-            fraction = float(allocation.allocation_fraction)
-            for balance in allocation.grazing_session.mob.balances:
-                key = balance.animal_group_type_id
-                totals[key] = totals.get(key, 0.0) + (balance.head_count * fraction)
+            for group_row in ReportingService.allocation_group_head_rows(allocation):
+                key = group_row["animal_group_type_id"]
+                totals[key] = totals.get(key, 0.0) + group_row["head_count"]
         return totals
 
     @staticmethod
@@ -60,16 +59,15 @@ class ReportingService:
 
         totals: dict[tuple[str, str, str, str], float] = {}
         for allocation in rows:
-            fraction = float(allocation.allocation_fraction)
-            for balance in allocation.grazing_session.mob.balances:
-                group = balance.animal_group_type
+            for group_row in ReportingService.allocation_group_head_rows(allocation):
+                group = group_row["animal_group_type"]
                 key = (
                     group.species,
                     group.breed,
                     group.sex,
                     group.age_class,
                 )
-                totals[key] = totals.get(key, 0.0) + (float(balance.head_count) * fraction)
+                totals[key] = totals.get(key, 0.0) + group_row["head_count"]
 
         return [
             {
@@ -126,7 +124,80 @@ class ReportingService:
         return total
 
     @classmethod
+    def allocation_group_head_rows(cls, allocation: GrazingAllocation) -> list[dict]:
+        mob = allocation.grazing_session.mob
+        balances_by_group = {str(balance.animal_group_type_id): balance for balance in mob.balances}
+        assignments = [
+            assignment
+            for assignment in getattr(allocation, "group_assignments", [])
+            if int(assignment.head_count or 0) > 0
+        ]
+        rows = []
+
+        if assignments:
+            for assignment in assignments:
+                balance = balances_by_group.get(str(assignment.animal_group_type_id))
+                if balance is None:
+                    continue
+                group = balance.animal_group_type
+                head_count = float(balance.head_count or 0) * float(assignment.group_fraction)
+                if head_count <= 0:
+                    continue
+                rows.append(
+                    {
+                        "animal_group_type_id": str(balance.animal_group_type_id),
+                        "animal_group_type": group,
+                        "head_count": head_count,
+                        "allocated_lsu": head_count
+                        * cls.group_lsu_per_head(group.species, group.sex, group.age_class),
+                        "group_fraction": float(assignment.group_fraction),
+                        "assigned_head_count": int(assignment.head_count),
+                    }
+                )
+            return rows
+
+        fraction = float(allocation.allocation_fraction)
+        for balance in mob.balances:
+            group = balance.animal_group_type
+            head_count = float(balance.head_count or 0) * fraction
+            if head_count <= 0:
+                continue
+            rows.append(
+                {
+                    "animal_group_type_id": str(balance.animal_group_type_id),
+                    "animal_group_type": group,
+                    "head_count": head_count,
+                    "allocated_lsu": head_count
+                    * cls.group_lsu_per_head(group.species, group.sex, group.age_class),
+                    "group_fraction": fraction,
+                    "assigned_head_count": None,
+                }
+            )
+        return rows
+
+    @classmethod
+    def allocation_effective_fraction(cls, allocation: GrazingAllocation) -> float:
+        assignments = [
+            assignment
+            for assignment in getattr(allocation, "group_assignments", [])
+            if int(assignment.head_count or 0) > 0
+        ]
+        if not assignments:
+            return float(allocation.allocation_fraction)
+        mob_total = cls.mob_total_lsu(allocation.grazing_session.mob)
+        if mob_total <= 0:
+            return float(allocation.allocation_fraction)
+        return cls.allocation_lsu(allocation) / mob_total
+
+    @classmethod
     def allocation_lsu(cls, allocation: GrazingAllocation) -> float:
+        assignments = [
+            assignment
+            for assignment in getattr(allocation, "group_assignments", [])
+            if int(assignment.head_count or 0) > 0
+        ]
+        if assignments:
+            return sum(row["allocated_lsu"] for row in cls.allocation_group_head_rows(allocation))
         mob_total = cls.mob_total_lsu(allocation.grazing_session.mob)
         return mob_total * float(allocation.allocation_fraction)
 
@@ -179,7 +250,7 @@ class ReportingService:
                 {
                     "mob_id": str(allocation.grazing_session.mob_id),
                     "mob_name": allocation.grazing_session.mob.name,
-                    "allocation_fraction": float(allocation.allocation_fraction),
+                    "allocation_fraction": cls.allocation_effective_fraction(allocation),
                     "allocated_lsu": allocated_lsu,
                 }
             )

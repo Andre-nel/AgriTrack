@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from collections import defaultdict
+from decimal import Decimal, ROUND_HALF_UP
 
 from app.extensions import db
 from app.models import Farm, Mob, MobEvent, MovementEvent, MovementEventMob, Paddock
@@ -9,11 +10,15 @@ from app.models.stock_ledger import StockEventType
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.grazing_service import GrazingService
 from app.services.mob_service import MobService
+from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
 from app.services.validation_service import ValidationService
 
 
 class MovementService:
+    FRACTION_QUANT = Decimal("0.0001")
+    GROUP_FRACTION_QUANT = Decimal("0.000001")
+
     @staticmethod
     def _resolve_move_destination_farm_id(
         mob: Mob,
@@ -125,9 +130,172 @@ class MovementService:
         return normalized
 
     @staticmethod
-    def move_mob(mob: Mob, allocations: list[dict], destination_farm_id: str | None = None, when=None):
-        when = when or datetime.now(timezone.utc)
+    def _normalize_allocation_mode(allocation_mode: str | None, allocations: list[dict]) -> str:
+        mode = (allocation_mode or "").strip().lower()
+        if not mode:
+            mode = "counts" if any(item.get("group_counts") for item in allocations or []) else "percentage"
+        if mode not in {"percentage", "counts"}:
+            raise ValueError("allocation_mode must be either 'percentage' or 'counts'")
+        return mode
+
+    @staticmethod
+    def _source_balance_context(mob: Mob) -> dict[str, dict]:
+        context = {}
+        for balance in mob.balances:
+            head_count = int(balance.head_count or 0)
+            if head_count <= 0:
+                continue
+            group = balance.animal_group_type
+            lsu_per_head = Decimal(
+                str(ReportingService.group_lsu_per_head(group.species, group.sex, group.age_class))
+            )
+            context[str(balance.animal_group_type_id)] = {
+                "head_count": head_count,
+                "lsu_per_head": lsu_per_head,
+                "label": f"{group.species} {group.breed} {group.sex} {group.age_class}",
+            }
+        return context
+
+    @staticmethod
+    def _parse_count_quantity(value) -> int:
+        if value is None or value == "":
+            return 0
+        try:
+            quantity = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("Count allocations must be whole numbers")
+        if quantity < 0:
+            raise ValueError("Count allocations cannot be negative")
+        return quantity
+
+    @staticmethod
+    def _normalize_count_allocations(mob: Mob, allocations: list[dict]) -> list[dict]:
+        if not allocations:
+            raise ValueError("At least one paddock allocation is required")
+
+        source_balances = MovementService._source_balance_context(mob)
+        if not source_balances:
+            raise ValueError("Source mob has no stock to allocate by count")
+
+        mob_total_lsu = sum(
+            row["lsu_per_head"] * Decimal(row["head_count"]) for row in source_balances.values()
+        )
+        if mob_total_lsu <= 0:
+            raise ValueError("Count-based allocation requires the mob to have positive LSU")
+
+        group_totals = {group_id: 0 for group_id in source_balances}
+        normalized_rows = []
+        used_paddocks = set()
+
+        for item in allocations:
+            paddock_id = str(item.get("paddock_id") or "").strip()
+            if not paddock_id:
+                raise ValueError("Each count allocation row requires a paddock")
+            if paddock_id in used_paddocks:
+                raise ValueError("Duplicate paddock rows are not allowed")
+            used_paddocks.add(paddock_id)
+
+            seen_groups = set()
+            row_group_counts = []
+            assigned_lsu = Decimal("0")
+            for group_count in item.get("group_counts") or []:
+                group_id = str(group_count.get("animal_group_type_id") or "").strip()
+                if not group_id:
+                    raise ValueError("Each count allocation requires an animal group")
+                if group_id in seen_groups:
+                    raise ValueError("Duplicate animal groups are not allowed within a count row")
+                seen_groups.add(group_id)
+                if group_id not in source_balances:
+                    raise ValueError("Count allocation contains an invalid animal group for this mob")
+
+                quantity = MovementService._parse_count_quantity(group_count.get("head_count"))
+                if quantity == 0:
+                    continue
+
+                source = source_balances[group_id]
+                group_totals[group_id] += quantity
+                group_fraction = (
+                    Decimal(quantity) / Decimal(source["head_count"])
+                ).quantize(MovementService.GROUP_FRACTION_QUANT, rounding=ROUND_HALF_UP)
+                group_lsu = Decimal(quantity) * source["lsu_per_head"]
+                assigned_lsu += group_lsu
+                row_group_counts.append(
+                    {
+                        "animal_group_type_id": group_id,
+                        "head_count": quantity,
+                        "group_fraction": str(group_fraction),
+                        "assigned_lsu": str(group_lsu),
+                    }
+                )
+
+            if not row_group_counts:
+                raise ValueError("Each count allocation row must assign at least one animal")
+
+            normalized_rows.append(
+                {
+                    "paddock_id": paddock_id,
+                    "assigned_lsu": assigned_lsu,
+                    "group_counts": row_group_counts,
+                }
+            )
+
+        for group_id, source in source_balances.items():
+            allocated = group_totals[group_id]
+            available = source["head_count"]
+            if allocated != available:
+                raise ValueError(
+                    "Count allocations must cover the whole mob "
+                    f"({source['label']}: allocated {allocated}, available {available})"
+                )
+
+        for row in normalized_rows:
+            row["allocation_fraction"] = (
+                row["assigned_lsu"] / mob_total_lsu
+            ).quantize(MovementService.FRACTION_QUANT, rounding=ROUND_HALF_UP)
+
+        total_fraction = sum(row["allocation_fraction"] for row in normalized_rows)
+        delta = Decimal("1") - total_fraction
+        if delta:
+            largest = max(normalized_rows, key=lambda row: row["assigned_lsu"])
+            largest["allocation_fraction"] += delta
+            if largest["allocation_fraction"] <= 0:
+                raise ValueError("Count allocations cannot be converted to valid percentages")
+
+        return [
+            {
+                "paddock_id": row["paddock_id"],
+                "allocation_fraction": str(row["allocation_fraction"]),
+                "group_counts": row["group_counts"],
+            }
+            for row in normalized_rows
+        ]
+
+    @staticmethod
+    def _normalize_move_allocations(
+        mob: Mob,
+        allocations: list[dict],
+        allocation_mode: str | None = None,
+    ) -> list[dict]:
+        mode = MovementService._normalize_allocation_mode(allocation_mode, allocations)
+        if mode == "counts":
+            return MovementService._normalize_count_allocations(mob, allocations)
         ValidationService.validate_allocations(allocations)
+        return allocations
+
+    @staticmethod
+    def move_mob(
+        mob: Mob,
+        allocations: list[dict],
+        destination_farm_id: str | None = None,
+        when=None,
+        allocation_mode: str | None = None,
+    ):
+        when = when or datetime.now(timezone.utc)
+        allocations = MovementService._normalize_move_allocations(
+            mob=mob,
+            allocations=allocations,
+            allocation_mode=allocation_mode,
+        )
         resolved_destination_farm_id = MovementService._resolve_move_destination_farm_id(
             mob=mob,
             allocations=allocations,

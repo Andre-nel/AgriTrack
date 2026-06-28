@@ -4,6 +4,7 @@ from app.models import Farm, Mob, MobEvent, Paddock
 from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.models.stock_ledger import StockEventType
 from app.services.mob_event_service import MobEventService
+from app.services.reporting_service import ReportingService
 
 
 def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
@@ -29,7 +30,7 @@ def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
     allocation_total_pct = Decimal("0")
     if active_session:
         for allocation in sorted(active_session.allocations, key=lambda a: a.paddock.name.lower()):
-            pct = Decimal(str(allocation.allocation_fraction)) * Decimal("100")
+            pct = Decimal(str(ReportingService.allocation_effective_fraction(allocation))) * Decimal("100")
             allocation_total_pct += pct
             current_allocations.append(
                 {
@@ -52,6 +53,7 @@ def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
         if int(balance.head_count) <= 0:
             continue
         group = balance.animal_group_type
+        lsu_per_head = ReportingService.group_lsu_per_head(group.species, group.sex, group.age_class)
         split_group_options.append(
             {
                 "id": str(balance.animal_group_type_id),
@@ -60,6 +62,7 @@ def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
                 "sex": group.sex,
                 "age_class": group.age_class,
                 "head_count": int(balance.head_count),
+                "lsu_per_head": lsu_per_head,
                 "label": (
                     f"{group.species} | {group.breed} | {group.sex} | {group.age_class} "
                     f"(available: {int(balance.head_count)})"

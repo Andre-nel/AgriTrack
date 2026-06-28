@@ -345,7 +345,7 @@
         <td><a href="{{ url_for('web.mob_detail', mob_id=row.allocation.grazing_session.mob_id) }}">{{ row.mob_name }}</a></td>
         <td>{{ row.allocation.grazing_session.start_at }}</td>
         <td>{{ row.allocation.grazing_session.end_at or 'Open' }}</td>
-        <td>{{ "%.2f"|format(row.allocation.allocation_fraction * 100) }}%</td>
+        <td>{{ "%.2f"|format(row.allocation_pct) }}%</td>
         <td>{{ "%.2f"|format(row.allocated_lsu) }}</td>
       </tr>
       {% else %}

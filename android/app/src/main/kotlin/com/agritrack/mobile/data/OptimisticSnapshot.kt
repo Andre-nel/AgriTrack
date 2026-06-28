@@ -253,6 +253,16 @@ private fun applyMobMove(json: JSONObject, command: JSONObject, payload: JSONObj
     if (mobId.isBlank() || allocations.length() == 0) {
         return false
     }
+    val sessionAllocations = copyArray(allocations)
+    if (payload.optString("allocation_mode") == "counts") {
+        val mob = findObjectById(json.optJSONArray("mobs"), mobId)
+        if (mob != null) {
+            for (index in 0 until sessionAllocations.length()) {
+                val allocation = sessionAllocations.optJSONObject(index) ?: continue
+                allocation.put("allocation_fraction", optimisticAllocationFraction(allocation, mob))
+            }
+        }
+    }
     val retained = mutableListOf<JSONObject>()
     val activeGrazing = ensureArray(json, "active_grazing")
     for (index in 0 until activeGrazing.length()) {
@@ -266,7 +276,7 @@ private fun applyMobMove(json: JSONObject, command: JSONObject, payload: JSONObj
         .put("farm_id", command.optString("farm_id"))
         .put("mob_id", mobId)
         .putOptional("start_at", payload.optionalString("event_time"))
-        .put("allocations", copyArray(allocations))
+        .put("allocations", sessionAllocations)
         .put("pending_sync", true)
     retained.add(0, session)
     json.put("active_grazing", JSONArray().apply { retained.forEach(::put) })
@@ -968,7 +978,7 @@ private fun rebuildGrazingByPaddock(json: JSONObject) {
             if (paddockId.isBlank()) {
                 continue
             }
-            val fraction = allocation.optDouble("allocation_fraction", 1.0)
+            val fraction = optimisticAllocationFraction(allocation, mob)
             val row = rows.getOrPut(paddockId) { OptimisticGrazingRow(paddockId) }
             row.mobs.add(
                 JSONObject()
@@ -978,22 +988,41 @@ private fun rebuildGrazingByPaddock(json: JSONObject) {
                     .put("allocation_fraction", fraction)
                     .put("allocation_pct", roundHead(fraction * 100.0)),
             )
-            val balances = mob.optJSONArray("balances") ?: JSONArray()
-            for (balanceIndex in 0 until balances.length()) {
-                val balance = balances.optJSONObject(balanceIndex) ?: continue
-                val head = balance.optDouble("head_count", 0.0) * fraction
-                if (head <= 0.0) {
-                    continue
+            val explicitGroupCounts = allocation.optJSONArray("group_counts")
+            if (explicitGroupCounts != null && explicitGroupCounts.length() > 0) {
+                for (groupIndex in 0 until explicitGroupCounts.length()) {
+                    val groupCount = explicitGroupCounts.optJSONObject(groupIndex) ?: continue
+                    val groupId = groupCount.optString("animal_group_type_id")
+                    if (groupId.isBlank()) continue
+                    val balance = findBalance(mob, groupId)
+                    val sourceHead = balance?.optDouble("head_count", 0.0) ?: 0.0
+                    val groupFraction = if (groupCount.has("group_fraction") && !groupCount.isNull("group_fraction")) {
+                        groupCount.optDouble("group_fraction")
+                    } else {
+                        Double.NaN
+                    }
+                    val head = if (!groupFraction.isNaN() && sourceHead > 0.0) {
+                        sourceHead * groupFraction
+                    } else {
+                        groupCount.optDouble("head_count", 0.0)
+                    }
+                    val group = balance?.optJSONObject("animal_group_type")?.deepCopy()
+                        ?: animalGroupTypeForId(json, groupId)
+                        ?: JSONObject().put("id", groupId)
+                    addOptimisticGroupHead(row, groupId, group, head)
                 }
-                val group = balance.optJSONObject("animal_group_type") ?: JSONObject()
-                val species = group.optString("species", "Stock").ifBlank { "Stock" }
-                row.speciesHeads[species] = (row.speciesHeads[species] ?: 0.0) + head
-                val groupId = balance.optString("animal_group_type_id", group.optString("id"))
-                val groupHead = row.groupHeads.getOrPut(groupId) {
-                    OptimisticGroupHead(groupId, group.deepCopy(), 0.0)
+            } else {
+                val balances = mob.optJSONArray("balances") ?: JSONArray()
+                for (balanceIndex in 0 until balances.length()) {
+                    val balance = balances.optJSONObject(balanceIndex) ?: continue
+                    val head = balance.optDouble("head_count", 0.0) * fraction
+                    if (head <= 0.0) {
+                        continue
+                    }
+                    val group = balance.optJSONObject("animal_group_type") ?: JSONObject()
+                    val groupId = balance.optString("animal_group_type_id", group.optString("id"))
+                    addOptimisticGroupHead(row, groupId, group, head)
                 }
-                groupHead.head += head
-                row.totalHead += head
             }
         }
     }
@@ -1185,6 +1214,91 @@ private fun labelFromValue(value: String): String =
     value.replace("_", " ").replaceFirstChar(Char::titlecase)
 
 private fun roundHead(value: Double): Double = round(value * 100.0) / 100.0
+
+private fun addOptimisticGroupHead(
+    row: OptimisticGrazingRow,
+    groupId: String,
+    group: JSONObject,
+    head: Double,
+) {
+    if (head <= 0.0) return
+    val species = group.optString("species", "Stock").ifBlank { "Stock" }
+    row.speciesHeads[species] = (row.speciesHeads[species] ?: 0.0) + head
+    val groupHead = row.groupHeads.getOrPut(groupId) {
+        OptimisticGroupHead(groupId, group.deepCopy(), 0.0)
+    }
+    groupHead.head += head
+    row.totalHead += head
+}
+
+private fun optimisticAllocationFraction(allocation: JSONObject, mob: JSONObject): Double {
+    if (allocation.has("allocation_fraction") && !allocation.isNull("allocation_fraction")) {
+        return allocation.optDouble("allocation_fraction", 1.0)
+    }
+    val groupCounts = allocation.optJSONArray("group_counts") ?: return 1.0
+    val totalLsu = optimisticMobTotalLsu(mob)
+    if (totalLsu <= 0.0) return 1.0
+    var assignedLsu = 0.0
+    for (index in 0 until groupCounts.length()) {
+        val groupCount = groupCounts.optJSONObject(index) ?: continue
+        val groupId = groupCount.optString("animal_group_type_id")
+        val balance = findBalance(mob, groupId)
+        val group = balance?.optJSONObject("animal_group_type") ?: JSONObject().put("id", groupId)
+        val sourceHead = balance?.optDouble("head_count", 0.0) ?: 0.0
+        val groupFraction = if (groupCount.has("group_fraction") && !groupCount.isNull("group_fraction")) {
+            groupCount.optDouble("group_fraction")
+        } else {
+            Double.NaN
+        }
+        val head = if (!groupFraction.isNaN() && sourceHead > 0.0) {
+            sourceHead * groupFraction
+        } else {
+            groupCount.optDouble("head_count", 0.0)
+        }
+        assignedLsu += head * optimisticLsuPerHead(group)
+    }
+    return assignedLsu / totalLsu
+}
+
+private fun optimisticMobTotalLsu(mob: JSONObject): Double {
+    var total = 0.0
+    val balances = mob.optJSONArray("balances") ?: JSONArray()
+    for (index in 0 until balances.length()) {
+        val balance = balances.optJSONObject(index) ?: continue
+        val group = balance.optJSONObject("animal_group_type") ?: JSONObject()
+        total += balance.optDouble("head_count", 0.0) * optimisticLsuPerHead(group)
+    }
+    return total
+}
+
+private fun optimisticLsuPerHead(group: JSONObject): Double {
+    val speciesKey = group.optString("species").trim().lowercase()
+    val sexKey = group.optString("sex").trim().lowercase()
+    val ageKey = group.optString("age_class").trim().lowercase()
+    val base = when (speciesKey) {
+        "cattle" -> 1.0
+        "sheep" -> 1.0 / 6.0
+        "goat" -> 1.0 / 8.0
+        else -> 1.0
+    }
+    val juvenileLabels = when (speciesKey) {
+        "cattle" -> setOf("calf")
+        "sheep" -> setOf("lamb")
+        "goat" -> setOf("kid")
+        else -> emptySet()
+    }
+    val ageMultiplier = when {
+        ageKey in juvenileLabels -> 0.3
+        ageKey == "young" -> 0.8
+        else -> 1.0
+    }
+    val sexMultiplier = when {
+        sexKey in setOf("ram", "bul", "bull") && ageKey in setOf("adult", "old") -> 1.75
+        sexKey in setOf("ram", "bul", "bull") && ageKey == "young" -> 1.2
+        else -> 1.0
+    }
+    return base * ageMultiplier * sexMultiplier
+}
 
 private data class OptimisticGrazingRow(
     val paddockId: String,

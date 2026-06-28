@@ -5,7 +5,12 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import Farm, Mob, Paddock
-from app.modules.mobs.forms import parse_move_allocations, parse_split_rows, parse_transfer_rows
+from app.modules.mobs.forms import (
+    parse_count_move_allocations,
+    parse_move_allocations,
+    parse_split_rows,
+    parse_transfer_rows,
+)
 from app.modules.mobs.presenters import build_mob_detail_context
 from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_balance_line_from_form
 from app.services.mob_event_service import MobEventService
@@ -107,8 +112,7 @@ def register_legacy_routes(bp) -> None:
     def mob_move_form(mob_id):
         mob = _get_active_mob_or_404(mob_id)
         destination_farm_id = (request.form.get("destination_farm_id") or str(mob.farm_id)).strip()
-        paddock_ids = request.form.getlist("paddock_id")
-        allocation_pcts = request.form.getlist("allocation_pct")
+        allocation_mode = (request.form.get("allocation_mode") or "percentage").strip().lower()
 
         try:
             if not destination_farm_id:
@@ -119,16 +123,34 @@ def register_legacy_routes(bp) -> None:
             valid_paddock_ids = {
                 str(p.id) for p in Paddock.query.filter_by(farm_id=destination_farm_id).all()
             }
-            allocations = parse_move_allocations(
-                paddock_ids=paddock_ids,
-                allocation_pcts=allocation_pcts,
-                valid_paddock_ids=valid_paddock_ids,
-            )
+            if allocation_mode == "counts":
+                group_ids = [
+                    str(balance.animal_group_type_id)
+                    for balance in mob.balances
+                    if int(balance.head_count or 0) > 0
+                ]
+                group_counts_by_id = {
+                    group_id: request.form.getlist(f"count_group_count:{group_id}")
+                    for group_id in group_ids
+                }
+                allocations = parse_count_move_allocations(
+                    paddock_ids=request.form.getlist("count_paddock_id"),
+                    group_counts_by_id=group_counts_by_id,
+                    valid_paddock_ids=valid_paddock_ids,
+                )
+            else:
+                allocation_mode = "percentage"
+                allocations = parse_move_allocations(
+                    paddock_ids=request.form.getlist("paddock_id"),
+                    allocation_pcts=request.form.getlist("allocation_pct"),
+                    valid_paddock_ids=valid_paddock_ids,
+                )
 
             MovementService.move_mob(
                 mob=mob,
                 allocations=allocations,
                 destination_farm_id=destination_farm_id,
+                allocation_mode=allocation_mode,
             )
             db.session.commit()
             flash("Mob moved", "success")

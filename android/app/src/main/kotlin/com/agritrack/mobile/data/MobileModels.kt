@@ -117,6 +117,14 @@ data class MobSummary(
 data class GrazingAllocationSummary(
     val paddockId: String,
     val allocationFraction: Double,
+    val groupCounts: List<GrazingAllocationGroupCountSummary> = emptyList(),
+)
+
+data class GrazingAllocationGroupCountSummary(
+    val animalGroupTypeId: String,
+    val headCount: Int,
+    val groupFraction: Double? = null,
+    val assignedLsu: Double? = null,
 )
 
 data class ActiveGrazingSummary(
@@ -563,10 +571,25 @@ data class FarmSnapshot(
                 val allocations = buildList {
                     for (allocationIndex in 0 until allocationsJson.length()) {
                         val allocation = allocationsJson.getJSONObject(allocationIndex)
+                        val groupCountsJson = allocation.optJSONArray("group_counts") ?: JSONArray()
+                        val groupCounts = buildList {
+                            for (groupIndex in 0 until groupCountsJson.length()) {
+                                val group = groupCountsJson.getJSONObject(groupIndex)
+                                add(
+                                    GrazingAllocationGroupCountSummary(
+                                        animalGroupTypeId = group.optString("animal_group_type_id"),
+                                        headCount = group.optInt("head_count", 0),
+                                        groupFraction = group.optNullableDouble("group_fraction"),
+                                        assignedLsu = group.optNullableDouble("assigned_lsu"),
+                                    )
+                                )
+                            }
+                        }
                         add(
                             GrazingAllocationSummary(
                                 paddockId = allocation.optString("paddock_id"),
                                 allocationFraction = allocation.optDouble("allocation_fraction", 1.0),
+                                groupCounts = groupCounts,
                             )
                         )
                     }

@@ -46,6 +46,51 @@ def parse_move_allocations(
     return allocations
 
 
+def parse_count_move_allocations(
+    paddock_ids: list[str],
+    group_counts_by_id: dict[str, list[str]],
+    valid_paddock_ids: set[str],
+) -> list[dict]:
+    allocations = []
+    used_paddocks = set()
+
+    for index, paddock_id_raw in enumerate(paddock_ids):
+        paddock_id = (paddock_id_raw or "").strip()
+        group_counts = []
+        has_any_count_text = False
+
+        for group_id, values in group_counts_by_id.items():
+            raw_value = values[index] if index < len(values) else ""
+            qty_text = (raw_value or "").strip()
+            if qty_text:
+                has_any_count_text = True
+            try:
+                quantity = int(qty_text) if qty_text else 0
+            except ValueError:
+                raise ValueError("Count allocations must be whole numbers")
+            if quantity < 0:
+                raise ValueError("Count allocations cannot be negative")
+            group_counts.append({"animal_group_type_id": group_id, "head_count": quantity})
+
+        if not paddock_id and not has_any_count_text:
+            continue
+        if not paddock_id:
+            raise ValueError("Each count allocation row requires a paddock")
+        if paddock_id not in valid_paddock_ids:
+            raise ValueError("Selected paddock is invalid for the chosen destination farm")
+        if paddock_id in used_paddocks:
+            raise ValueError("Duplicate paddock rows are not allowed")
+        if not any(item["head_count"] > 0 for item in group_counts):
+            raise ValueError("Each count allocation row must assign at least one animal")
+
+        used_paddocks.add(paddock_id)
+        allocations.append({"paddock_id": paddock_id, "group_counts": group_counts})
+
+    if not allocations:
+        raise ValueError("At least one count allocation row is required")
+    return allocations
+
+
 def parse_transfer_rows(group_ids: list[str], quantities: list[str]) -> list[dict[str, int]]:
     transfer_totals: dict[str, int] = {}
     for group_id_raw, qty_raw in zip(group_ids, quantities):

@@ -123,6 +123,37 @@ class OptimisticSnapshotTest {
         assertEquals(7.5, paddockGrazing(optimistic, "paddock-2")?.totalHead ?: 0.0, 0.0)
     }
 
+    @Test
+    fun pendingCountMoveUsesExactGroupCountsForPaddockGrazing() {
+        val base = fieldSnapshot()
+        val commands = JSONArray()
+            .put(
+                MobileCommand.mobMoveCountAllocations(
+                    farmId = "farm-1",
+                    mobId = "mob-1",
+                    allocations = listOf(
+                        MobMoveCountAllocation(
+                            paddockId = "paddock-1",
+                            groupCounts = listOf(MobMoveGroupCount("group-1", 4)),
+                        ),
+                        MobMoveCountAllocation(
+                            paddockId = "paddock-2",
+                            groupCounts = listOf(MobMoveGroupCount("group-1", 6)),
+                        ),
+                    ),
+                ).toJson()
+            )
+
+        val optimistic = base.withOptimisticCommands(commands)
+        val allocations = optimistic.activeGrazing.first { it.mobId == "mob-1" }.allocations
+            .associate { it.paddockId to it.allocationFraction }
+
+        assertEquals(0.4, allocations["paddock-1"] ?: 0.0, 0.0)
+        assertEquals(0.6, allocations["paddock-2"] ?: 0.0, 0.0)
+        assertEquals(4.0, paddockGrazing(optimistic, "paddock-1")?.totalHead ?: 0.0, 0.0)
+        assertEquals(6.0, paddockGrazing(optimistic, "paddock-2")?.totalHead ?: 0.0, 0.0)
+    }
+
     private fun fieldSnapshot(): FarmSnapshot =
         FarmSnapshot.fromJson(
             JSONObject()

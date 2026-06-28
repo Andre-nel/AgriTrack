@@ -683,8 +683,7 @@ def build_lsu_paddock_tracking_report(
                 "start": _normalize_datetime(row.effective_from),
                 "end": _normalize_datetime(row.effective_to),
                 "allocated_lsu": float(row.allocated_lsu),
-                "allocated_head_count": float(row.head_count or 0)
-                * float(row.allocation_fraction),
+                "allocated_head_count": float(row.allocated_head_count),
             }
         )
 
