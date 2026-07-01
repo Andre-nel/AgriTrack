@@ -1296,7 +1296,13 @@ def test_mobile_mob_move_supports_count_allocations(client, app):
                             {
                                 "paddock_id": north_id,
                                 "group_counts": [
-                                    {"animal_group_type_id": sheep_id, "head_count": 12}
+                                    {"animal_group_type_id": sheep_id, "head_count": 5}
+                                ],
+                            },
+                            {
+                                "paddock_id": north_id,
+                                "group_counts": [
+                                    {"animal_group_type_id": sheep_id, "head_count": 7}
                                 ],
                             },
                             {

@@ -872,6 +872,90 @@ def test_count_based_mob_move_persists_group_assignments_and_lsu_history(client,
         assert south_stock[str(cattle.id)] == 5.0
 
 
+def test_count_based_mob_move_merges_duplicate_destination_paddocks(client, app):
+    with app.app_context():
+        farm = Farm(name="Count Merge Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        north = Paddock(farm_id=farm.id, name="North Merge", area_ha=10, grazeable_area_ha=10)
+        south = Paddock(farm_id=farm.id, name="South Merge", area_ha=10, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="Merged Count Mob", status="active")
+        cattle = AnimalGroupType(species="Cattle", breed="Bonsmara", sex="cow", age_class="adult")
+        sheep = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add_all([north, south, mob, cattle, sheep])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=cattle.id, head_count=5),
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=sheep.id, head_count=12),
+            ]
+        )
+        db.session.flush()
+
+        MovementService.move_mob(
+            mob=mob,
+            destination_farm_id=str(farm.id),
+            when=datetime(2026, 6, 20, 8, 0, tzinfo=timezone.utc),
+            allocation_mode="counts",
+            allocations=[
+                {
+                    "paddock_id": str(north.id),
+                    "group_counts": [{"animal_group_type_id": str(sheep.id), "head_count": 5}],
+                },
+                {
+                    "paddock_id": str(north.id),
+                    "group_counts": [{"animal_group_type_id": str(sheep.id), "head_count": 7}],
+                },
+                {
+                    "paddock_id": str(south.id),
+                    "group_counts": [{"animal_group_type_id": str(cattle.id), "head_count": 5}],
+                },
+            ],
+        )
+        db.session.commit()
+
+        session = GrazingSession.query.filter_by(mob_id=mob.id, end_at=None).one()
+        allocations = {str(row.paddock_id): row for row in session.allocations}
+        assert set(allocations) == {str(north.id), str(south.id)}
+        assert float(allocations[str(north.id)].allocation_fraction) == 0.2857
+        assert float(allocations[str(south.id)].allocation_fraction) == 0.7143
+
+        assignments = {
+            (str(row.grazing_allocation.paddock_id), str(row.animal_group_type_id)): int(row.head_count)
+            for row in GrazingAllocationGroupAssignment.query.all()
+        }
+        assert assignments == {
+            (str(north.id), str(sheep.id)): 12,
+            (str(south.id), str(cattle.id)): 5,
+        }
+
+
+def test_percentage_mob_move_still_rejects_duplicate_destination_paddocks(client, app):
+    with app.app_context():
+        farm = Farm(name="Percentage Duplicate Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+        paddock = Paddock(farm_id=farm.id, name="One Paddock", area_ha=10, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="Percentage Duplicate Mob", status="active")
+        db.session.add_all([paddock, mob])
+        db.session.flush()
+
+        try:
+            MovementService.move_mob(
+                mob=mob,
+                destination_farm_id=str(farm.id),
+                allocation_mode="percentage",
+                allocations=[
+                    {"paddock_id": str(paddock.id), "allocation_fraction": "0.5"},
+                    {"paddock_id": str(paddock.id), "allocation_fraction": "0.5"},
+                ],
+            )
+        except ValueError as exc:
+            assert "Duplicate paddock rows are not allowed" in str(exc)
+        else:
+            raise AssertionError("Duplicate percentage destination rows should fail")
+
+
 def test_count_based_mob_move_requires_whole_mob_coverage(client, app):
     with app.app_context():
         farm = Farm(name="Count Validation Farm", timezone="UTC")
@@ -1695,3 +1779,62 @@ def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
     assert 'option value="adjustment_in" selected' in body
     assert "count (set final total)" in body
     assert "Use count only when you want to set the final head count for this exact line." in body
+
+
+def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):
+    with app.app_context():
+        farm = Farm(name="Mob Detail Count Farm", timezone="UTC")
+        db.session.add(farm)
+        db.session.flush()
+
+        paddock = Paddock(
+            farm_id=farm.id,
+            name="Exact North Camp",
+            area_ha=12,
+            grazeable_area_ha=10,
+        )
+        mob = Mob(farm_id=farm.id, name="Detail Count Mob", status="active")
+        group = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add_all([paddock, mob, group])
+        db.session.flush()
+        db.session.add(AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=12))
+        session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
+        db.session.add(session)
+        db.session.flush()
+        allocation = GrazingAllocation(
+            grazing_session_id=session.id,
+            paddock_id=paddock.id,
+            allocation_fraction="1.0",
+        )
+        db.session.add(allocation)
+        db.session.flush()
+        db.session.add(
+            GrazingAllocationGroupAssignment(
+                grazing_allocation_id=allocation.id,
+                animal_group_type_id=group.id,
+                head_count=12,
+                group_fraction="1.0",
+                assigned_lsu="2.0",
+            )
+        )
+        db.session.commit()
+
+        mob_id = str(mob.id)
+        paddock_id = str(paddock.id)
+        group_id = str(group.id)
+
+    response = client.get(f"/mobs/{mob_id}")
+    assert response.status_code == 200
+
+    body = response.data.decode("utf-8")
+    assert "Animal Groups" in body
+    assert "Sheep | Merino | ewe | adult:" in body
+    assert "12 head" in body
+    assert "(exact count)" in body
+    assert f'data-selected-value="{paddock_id}"' in body
+    assert f'name="count_group_count:{group_id}"' in body
+    assert 'value="12"' in body

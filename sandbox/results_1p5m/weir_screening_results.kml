@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+    <kml xmlns="http://www.opengis.net/kml/2.2">
+      <Document>
+        <name>Weir screening results</name>
+        <Style id="candidate">
+          <IconStyle><color>ffb5699b</color><scale>1.15</scale></IconStyle>
+        </Style>
+        <Style id="water">
+          <LineStyle><color>ffc58217</color><width>6</width></LineStyle>
+        </Style>
+        
+        <Placemark>
+          <name>Candidate 1: 1.73 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 1<br>Ponded channel length: 1734.2 m<br>Bed elevation: 692.00 m<br>Crest elevation: 693.50 m]]></description>
+          <Point><coordinates>25.4444717,-32.9340453,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 2: 1.66 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 2<br>Ponded channel length: 1662.9 m<br>Bed elevation: 684.00 m<br>Crest elevation: 685.50 m]]></description>
+          <Point><coordinates>25.4559473,-32.9434137,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 3: 1.62 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 3<br>Ponded channel length: 1617.2 m<br>Bed elevation: 659.00 m<br>Crest elevation: 660.50 m]]></description>
+          <Point><coordinates>25.4653099,-32.9573991,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 4: 0.93 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 4<br>Ponded channel length: 928.1 m<br>Bed elevation: 638.00 m<br>Crest elevation: 639.50 m]]></description>
+          <Point><coordinates>25.4763269,-32.9721219,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 5: 0.86 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 5<br>Ponded channel length: 857.9 m<br>Bed elevation: 704.00 m<br>Crest elevation: 705.50 m]]></description>
+          <Point><coordinates>25.4262295,-32.9329255,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 6: 0.84 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 6<br>Ponded channel length: 836.0 m<br>Bed elevation: 661.00 m<br>Crest elevation: 662.50 m]]></description>
+          <Point><coordinates>25.4519694,-32.9661850,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 7: 0.81 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 7<br>Ponded channel length: 805.7 m<br>Bed elevation: 681.00 m<br>Crest elevation: 682.50 m]]></description>
+          <Point><coordinates>25.4547230,-32.9421960,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 8: 0.76 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 8<br>Ponded channel length: 757.7 m<br>Bed elevation: 705.00 m<br>Crest elevation: 706.50 m]]></description>
+          <Point><coordinates>25.4247841,-32.9305723,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 9: 0.72 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 9<br>Ponded channel length: 715.2 m<br>Bed elevation: 701.00 m<br>Crest elevation: 702.50 m]]></description>
+          <Point><coordinates>25.4298998,-32.9382089,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 10: 0.71 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 10<br>Ponded channel length: 713.9 m<br>Bed elevation: 662.00 m<br>Crest elevation: 663.50 m]]></description>
+          <Point><coordinates>25.4494193,-32.9661893,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 11: 0.69 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 11<br>Ponded channel length: 688.9 m<br>Bed elevation: 689.00 m<br>Crest elevation: 690.50 m]]></description>
+          <Point><coordinates>25.4429145,-32.9355930,0</coordinates></Point>
+        </Placemark>
+        <Placemark>
+          <name>Candidate 12: 0.63 km ponded channel</name>
+          <styleUrl>#candidate</styleUrl>
+          <description><![CDATA[Rank 12<br>Ponded channel length: 628.8 m<br>Bed elevation: 669.00 m<br>Crest elevation: 670.50 m]]></description>
+          <Point><coordinates>25.4504702,-32.9570970,0</coordinates></Point>
+        </Placemark>
+    <Placemark>
+      <name>Selected weir inundated centreline</name>
+      <styleUrl>#water</styleUrl>
+      <description><![CDATA[One-dimensional connected channel inundation only.]]></description>
+      <LineString><tessellate>1</tessellate><coordinates>25.4356128,-32.9421278,0 25.4358821,-32.9422748,0 25.4361356,-32.9424397,0 25.4363784,-32.9426165,0 25.4366344,-32.9427793,0 25.4369025,-32.9429269,0 25.4371844,-32.9430563,0 25.4374761,-32.9431674,0 25.4377762,-32.9432630,0 25.4380735,-32.9433648,0 25.4383726,-32.9434367,0 25.4386830,-32.9433682,0 25.4389920,-32.9432976,0 25.4392138,-32.9431021,0 25.4394303,-32.9429025,0 25.4396404,-32.9426981,0 25.4398785,-32.9425184,0 25.4401311,-32.9423516,0 25.4404081,-32.9422158,0 25.4406734,-32.9420694,0 25.4408738,-32.9418582,0 25.4410919,-32.9416598,0 25.4413126,-32.9414634,0 25.4414856,-32.9412376,0 25.4416334,-32.9409976,0 25.4417734,-32.9407541,0 25.4419082,-32.9405087,0 25.4420231,-32.9402563,0 25.4421213,-32.9399995,0 25.4421570,-32.9397306,0 25.4421819,-32.9394610,0 25.4422142,-32.9391924,0 25.4422766,-32.9389270,0 25.4424135,-32.9386824,0 25.4425105,-32.9384257,0 25.4425936,-32.9381645,0 25.4426872,-32.9379058,0 25.4427446,-32.9376396,0 25.4428402,-32.9373819,0 25.4429430,-32.9371257,0 25.4430429,-32.9368686,0 25.4431355,-32.9366096,0 25.4432191,-32.9363484,0 25.4431780,-32.9360811,0 25.4430656,-32.9358316,0 25.4429145,-32.9355930,0 25.4428081,-32.9353390,0 25.4427178,-32.9350793,0 25.4426385,-32.9348173,0 25.4425593,-32.9345554,0 25.4424384,-32.9343048,0 25.4423553,-32.9340644,0 25.4426256,-32.9339186,0 25.4428991,-32.9337858,0 25.4432164,-32.9338256,0 25.4435338,-32.9338655,0 25.4438486,-32.9339162,0 25.4441601,-32.9339808,0 25.4444717,-32.9340453,0</coordinates></LineString>
+    </Placemark>
+      </Document>
+    </kml>

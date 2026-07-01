@@ -184,20 +184,19 @@ class MovementService:
             raise ValueError("Count-based allocation requires the mob to have positive LSU")
 
         group_totals = {group_id: 0 for group_id in source_balances}
-        normalized_rows = []
-        used_paddocks = set()
+        paddock_order: list[str] = []
+        row_totals_by_paddock: dict[str, dict[str, int]] = {}
 
         for item in allocations:
             paddock_id = str(item.get("paddock_id") or "").strip()
             if not paddock_id:
                 raise ValueError("Each count allocation row requires a paddock")
-            if paddock_id in used_paddocks:
-                raise ValueError("Duplicate paddock rows are not allowed")
-            used_paddocks.add(paddock_id)
+            if paddock_id not in row_totals_by_paddock:
+                row_totals_by_paddock[paddock_id] = {}
+                paddock_order.append(paddock_id)
 
             seen_groups = set()
-            row_group_counts = []
-            assigned_lsu = Decimal("0")
+            row_has_positive_count = False
             for group_count in item.get("group_counts") or []:
                 group_id = str(group_count.get("animal_group_type_id") or "").strip()
                 if not group_id:
@@ -212,8 +211,29 @@ class MovementService:
                 if quantity == 0:
                     continue
 
-                source = source_balances[group_id]
+                row_has_positive_count = True
                 group_totals[group_id] += quantity
+                row_totals = row_totals_by_paddock[paddock_id]
+                row_totals[group_id] = row_totals.get(group_id, 0) + quantity
+
+            if not row_has_positive_count:
+                raise ValueError("Each count allocation row must assign at least one animal")
+
+        for group_id, source in source_balances.items():
+            allocated = group_totals[group_id]
+            available = source["head_count"]
+            if allocated != available:
+                raise ValueError(
+                    "Count allocations must cover the whole mob "
+                    f"({source['label']}: allocated {allocated}, available {available})"
+                )
+
+        normalized_rows = []
+        for paddock_id in paddock_order:
+            row_group_counts = []
+            assigned_lsu = Decimal("0")
+            for group_id, quantity in row_totals_by_paddock[paddock_id].items():
+                source = source_balances[group_id]
                 group_fraction = (
                     Decimal(quantity) / Decimal(source["head_count"])
                 ).quantize(MovementService.GROUP_FRACTION_QUANT, rounding=ROUND_HALF_UP)
@@ -228,9 +248,6 @@ class MovementService:
                     }
                 )
 
-            if not row_group_counts:
-                raise ValueError("Each count allocation row must assign at least one animal")
-
             normalized_rows.append(
                 {
                     "paddock_id": paddock_id,
@@ -238,15 +255,6 @@ class MovementService:
                     "group_counts": row_group_counts,
                 }
             )
-
-        for group_id, source in source_balances.items():
-            allocated = group_totals[group_id]
-            available = source["head_count"]
-            if allocated != available:
-                raise ValueError(
-                    "Count allocations must cover the whole mob "
-                    f"({source['label']}: allocated {allocated}, available {available})"
-                )
 
         for row in normalized_rows:
             row["allocation_fraction"] = (

@@ -811,7 +811,7 @@ private enum class MoveAllocationMode {
     Counts,
 }
 
-private data class CountMoveAllocationDraft(
+internal data class CountMoveAllocationDraft(
     val paddockId: String = "",
     val groupCounts: Map<String, String> = emptyMap(),
 )
@@ -1683,6 +1683,34 @@ private fun mapFeatureDetail(feature: MapFeatureSummary): String =
 
 private fun formatHeadCount(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else "%.2f".format(value)
+
+private fun mobPaddockAllocationCountLines(
+    snapshot: FarmSnapshot,
+    mob: MobSummary,
+    paddockId: String,
+    allocationPct: Double,
+): List<String> {
+    val balancesById = mob.balances.associateBy { it.animalGroupTypeId }
+    val allocation = snapshot.activeGrazing
+        .firstOrNull { it.mobId == mob.id }
+        ?.allocations
+        ?.firstOrNull { it.paddockId == paddockId }
+
+    if (allocation?.groupCounts.orEmpty().isNotEmpty()) {
+        return allocation?.groupCounts.orEmpty().map { group ->
+            val label = balancesById[group.animalGroupTypeId]?.animalGroupType?.label
+                ?: group.animalGroupTypeId
+            "$label: ${group.headCount} head (exact count)"
+        }
+    }
+
+    val fraction = allocation?.allocationFraction ?: allocationPct / 100.0
+    return mob.balances.mapNotNull { balance ->
+        val head = balance.headCount * fraction
+        if (head <= 0.0) return@mapNotNull null
+        "${balance.animalGroupType.label}: ${formatHeadCount(head)} head (percentage-derived)"
+    }
+}
 
 private fun formatFenceLength(value: Double?): String =
     value?.let { "${formatHeadCount(it)} m" } ?: "length unknown"
@@ -3047,6 +3075,12 @@ private fun MobDetailScreen(
                 Text("No active paddock allocations", color = Color(0xFF516052))
             }
             paddocks.forEach { paddock ->
+                val countLines = mobPaddockAllocationCountLines(
+                    snapshot,
+                    mob,
+                    paddock.paddockId,
+                    paddock.allocationPct,
+                )
                 OutlinedButton(
                     onClick = {
                         onPaddockSelected(paddock.paddockId)
@@ -3060,6 +3094,13 @@ private fun MobDetailScreen(
                             "${formatHeadCount(paddock.allocationPct)}% allocation | ${grazingDurationLabel(paddock.startAt)}",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        countLines.forEach { line ->
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF516052),
+                            )
+                        }
                     }
                 }
             }
@@ -4826,7 +4867,7 @@ private fun normalizeMoveAllocations(drafts: List<MoveAllocationDraft>): Result<
     return Result.success(allocations)
 }
 
-private fun normalizeCountMoveAllocations(
+internal fun normalizeCountMoveAllocations(
     drafts: List<CountMoveAllocationDraft>,
     mob: MobSummary?,
 ): Result<List<MobMoveCountAllocation>> {
@@ -4838,8 +4879,7 @@ private fun normalizeCountMoveAllocations(
         return Result.failure(IllegalArgumentException("Count allocation requires the mob to have positive LSU."))
     }
 
-    val allocations = mutableListOf<MobMoveCountAllocation>()
-    val seenPaddocks = mutableSetOf<String>()
+    val allocationsByPaddock = linkedMapOf<String, MutableMap<String, Int>>()
     val totals = mob.balances.associate { it.animalGroupTypeId to 0 }.toMutableMap()
 
     drafts.forEach { draft ->
@@ -4851,9 +4891,6 @@ private fun normalizeCountMoveAllocations(
         if (paddockId.isBlank()) {
             return Result.failure(IllegalArgumentException("Each count allocation needs a paddock."))
         }
-        if (!seenPaddocks.add(paddockId)) {
-            return Result.failure(IllegalArgumentException("Each paddock can only be listed once."))
-        }
 
         val groupCounts = mutableListOf<MobMoveGroupCount>()
         mob.balances.forEach { balance ->
@@ -4864,17 +4901,21 @@ private fun normalizeCountMoveAllocations(
                 return Result.failure(IllegalArgumentException("Count allocations cannot be negative."))
             }
             if (quantity > 0) {
-                totals[balance.animalGroupTypeId] = (totals[balance.animalGroupTypeId] ?: 0) + quantity
                 groupCounts.add(MobMoveGroupCount(balance.animalGroupTypeId, quantity))
             }
         }
         if (groupCounts.isEmpty()) {
             return Result.failure(IllegalArgumentException("Each count allocation needs at least one animal."))
         }
-        allocations.add(MobMoveCountAllocation(paddockId, groupCounts))
+        val paddockTotals = allocationsByPaddock.getOrPut(paddockId) { linkedMapOf() }
+        groupCounts.forEach { group ->
+            totals[group.animalGroupTypeId] = (totals[group.animalGroupTypeId] ?: 0) + group.headCount
+            paddockTotals[group.animalGroupTypeId] =
+                (paddockTotals[group.animalGroupTypeId] ?: 0) + group.headCount
+        }
     }
 
-    if (allocations.isEmpty()) {
+    if (allocationsByPaddock.isEmpty()) {
         return Result.failure(IllegalArgumentException("Add at least one count allocation."))
     }
     mob.balances.forEach { balance ->
@@ -4886,6 +4927,12 @@ private fun normalizeCountMoveAllocations(
                 )
             )
         }
+    }
+    val allocations = allocationsByPaddock.map { (paddockId, groupTotals) ->
+        MobMoveCountAllocation(
+            paddockId,
+            groupTotals.map { (groupId, quantity) -> MobMoveGroupCount(groupId, quantity) },
+        )
     }
     return Result.success(allocations)
 }

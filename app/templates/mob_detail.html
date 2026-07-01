@@ -160,15 +160,28 @@
 <section class="card">
   <h2>Current Paddock Allocation</h2>
   <table>
-    <thead><tr><th>Paddock</th><th>Allocation %</th></tr></thead>
+    <thead><tr><th>Paddock</th><th>Allocation %</th><th>Animal Groups</th></tr></thead>
     <tbody>
       {% for allocation in current_allocations %}
       <tr>
         <td><a href="{{ url_for('web.paddock_detail', paddock_id=allocation.paddock_id) }}">{{ allocation.paddock_name }}</a></td>
         <td>{{ "%.2f"|format(allocation.allocation_pct) }}%</td>
+        <td>
+          {% if allocation.group_rows %}
+            {% for group in allocation.group_rows %}
+            <div>
+              {{ group.label }}:
+              {{ group.head_count_display }} head
+              <span class="muted">({{ group.source_label }})</span>
+            </div>
+            {% endfor %}
+          {% else %}
+            <span class="muted">No animal groups recorded.</span>
+          {% endif %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="2">No active paddock allocation.</td></tr>
+      <tr><td colspan="3">No active paddock allocation.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -286,9 +299,15 @@
     <div id="countAllocationPanel" data-allocation-panel="counts" hidden>
       {% if split_group_options %}
       <div id="countAllocationRows">
+        {% for initial_row in initial_count_allocation_rows %}
         <div class="allocation-row count-allocation-row">
           <label>Paddock
-            <select name="count_paddock_id" class="count-allocation-paddock-select" required>
+            <select
+              name="count_paddock_id"
+              class="count-allocation-paddock-select"
+              data-selected-value="{{ initial_row.paddock_id }}"
+              required
+            >
               <option value="">Choose paddock</option>
             </select>
           </label>
@@ -299,7 +318,7 @@
               min="0"
               step="1"
               name="count_group_count:{{ option.id }}"
-              value="0"
+              value="{{ initial_row.group_counts.get(option.id, 0) }}"
               data-group-id="{{ option.id }}"
             />
             <span class="muted">Available: {{ option.head_count }}</span>
@@ -308,6 +327,7 @@
           <p class="muted count-row-pct">Calculated: 0.00%</p>
           <button type="button" class="btn btn-secondary count-row-remove">Remove</button>
         </div>
+        {% endfor %}
       </div>
       <div class="row-actions">
         <button type="button" id="addCountAllocationRow" class="btn btn-secondary">Add Count Row</button>
@@ -724,17 +744,25 @@
       selectEl.disabled = options.length === 0;
     }
 
+    function selectedPaddockValue(selectEl) {
+      const selectedValue = selectEl.dataset.selectedValue || selectEl.value;
+      if (selectEl.dataset.selectedValue) {
+        delete selectEl.dataset.selectedValue;
+      }
+      return selectedValue;
+    }
+
     function syncPaddockOptions() {
       if (!destinationFarmSelect) return;
       const farmId = destinationFarmSelect.value;
       if (rowsContainer) {
         rowsContainer.querySelectorAll("select[name='paddock_id']").forEach((selectEl) => {
-          updatePaddockSelectOptions(selectEl, farmId, selectEl.value);
+          updatePaddockSelectOptions(selectEl, farmId, selectedPaddockValue(selectEl));
         });
       }
       if (countRowsContainer) {
         countRowsContainer.querySelectorAll("select[name='count_paddock_id']").forEach((selectEl) => {
-          updatePaddockSelectOptions(selectEl, farmId, selectEl.value);
+          updatePaddockSelectOptions(selectEl, farmId, selectedPaddockValue(selectEl));
         });
       }
     }
@@ -759,7 +787,7 @@
           updatePaddockSelectOptions(
             paddockSelect,
             destinationFarmSelect.value,
-            paddockSelect.value
+            selectedPaddockValue(paddockSelect)
           );
         }
         if (removeBtn) {
@@ -840,7 +868,11 @@
       const removeBtn = row.querySelector(".count-row-remove");
       const paddockSelect = row.querySelector("select[name='count_paddock_id']");
       if (paddockSelect && destinationFarmSelect) {
-        updatePaddockSelectOptions(paddockSelect, destinationFarmSelect.value, paddockSelect.value);
+        updatePaddockSelectOptions(
+          paddockSelect,
+          destinationFarmSelect.value,
+          selectedPaddockValue(paddockSelect)
+        );
       }
       row.querySelectorAll("input[data-group-id]").forEach((input) => {
         input.addEventListener("input", recalcCountTotals);

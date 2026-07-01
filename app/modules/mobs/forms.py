@@ -51,8 +51,8 @@ def parse_count_move_allocations(
     group_counts_by_id: dict[str, list[str]],
     valid_paddock_ids: set[str],
 ) -> list[dict]:
-    allocations = []
-    used_paddocks = set()
+    allocations_by_paddock: dict[str, dict[str, int]] = {}
+    paddock_order: list[str] = []
 
     for index, paddock_id_raw in enumerate(paddock_ids):
         paddock_id = (paddock_id_raw or "").strip()
@@ -78,17 +78,32 @@ def parse_count_move_allocations(
             raise ValueError("Each count allocation row requires a paddock")
         if paddock_id not in valid_paddock_ids:
             raise ValueError("Selected paddock is invalid for the chosen destination farm")
-        if paddock_id in used_paddocks:
-            raise ValueError("Duplicate paddock rows are not allowed")
         if not any(item["head_count"] > 0 for item in group_counts):
             raise ValueError("Each count allocation row must assign at least one animal")
 
-        used_paddocks.add(paddock_id)
-        allocations.append({"paddock_id": paddock_id, "group_counts": group_counts})
+        if paddock_id not in allocations_by_paddock:
+            allocations_by_paddock[paddock_id] = {}
+            paddock_order.append(paddock_id)
+        totals = allocations_by_paddock[paddock_id]
+        for item in group_counts:
+            quantity = item["head_count"]
+            if quantity <= 0:
+                continue
+            group_id = item["animal_group_type_id"]
+            totals[group_id] = totals.get(group_id, 0) + quantity
 
-    if not allocations:
+    if not paddock_order:
         raise ValueError("At least one count allocation row is required")
-    return allocations
+    return [
+        {
+            "paddock_id": paddock_id,
+            "group_counts": [
+                {"animal_group_type_id": group_id, "head_count": quantity}
+                for group_id, quantity in allocations_by_paddock[paddock_id].items()
+            ],
+        }
+        for paddock_id in paddock_order
+    ]
 
 
 def parse_transfer_rows(group_ids: list[str], quantities: list[str]) -> list[dict[str, int]]:

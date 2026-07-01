@@ -1,6 +1,11 @@
 import pytest
 
-from app.modules.mobs.forms import parse_move_allocations, parse_split_rows, parse_transfer_rows
+from app.modules.mobs.forms import (
+    parse_count_move_allocations,
+    parse_move_allocations,
+    parse_split_rows,
+    parse_transfer_rows,
+)
 
 
 def test_parse_move_allocations_builds_fraction_rows():
@@ -21,6 +26,38 @@ def test_parse_move_allocations_requires_total_100():
             allocation_pcts=["50"],
             valid_paddock_ids={"north"},
         )
+
+
+def test_parse_move_allocations_rejects_duplicate_paddocks():
+    with pytest.raises(ValueError, match="Duplicate paddock rows are not allowed"):
+        parse_move_allocations(
+            paddock_ids=["north", "north"],
+            allocation_pcts=["50", "50"],
+            valid_paddock_ids={"north"},
+        )
+
+
+def test_parse_count_move_allocations_merges_duplicate_destination_paddocks():
+    assert parse_count_move_allocations(
+        paddock_ids=["north", "north", "south"],
+        group_counts_by_id={
+            "ewes": ["2", "3", "0"],
+            "lambs": ["1", "0", "4"],
+        },
+        valid_paddock_ids={"north", "south"},
+    ) == [
+        {
+            "paddock_id": "north",
+            "group_counts": [
+                {"animal_group_type_id": "ewes", "head_count": 5},
+                {"animal_group_type_id": "lambs", "head_count": 1},
+            ],
+        },
+        {
+            "paddock_id": "south",
+            "group_counts": [{"animal_group_type_id": "lambs", "head_count": 4}],
+        },
+    ]
 
 
 def test_parse_transfer_rows_combines_duplicate_groups():
