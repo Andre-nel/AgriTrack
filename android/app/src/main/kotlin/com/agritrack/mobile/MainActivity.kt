@@ -104,6 +104,9 @@ import com.agritrack.mobile.data.PaddockFilterState
 import com.agritrack.mobile.data.PaddockMobSummary
 import com.agritrack.mobile.data.PaddockSummary
 import com.agritrack.mobile.data.SecureTokenStore
+import com.agritrack.mobile.data.ShearerSummary
+import com.agritrack.mobile.data.ShearingBaleCodeSummary
+import com.agritrack.mobile.data.ShearingSessionSummary
 import com.agritrack.mobile.data.SyncResult
 import com.agritrack.mobile.data.SyncSummary
 import com.agritrack.mobile.data.TaskSummary
@@ -488,6 +491,40 @@ class MainActivity : ComponentActivity() {
                     onFenceConditionChange = { uiState = uiState.copy(fenceCondition = it) },
                     onFenceNotesChange = { uiState = uiState.copy(fenceNotes = it) },
                     onFenceElectricWireChange = { uiState = uiState.copy(fenceElectricWire = it) },
+                    onShearerNameChange = { uiState = uiState.copy(shearerName = it) },
+                    onShearingSessionNameChange = { uiState = uiState.copy(shearingSessionName = it) },
+                    onShearingSpeciesChange = { uiState = uiState.copy(shearingSpecies = it) },
+                    onShearingStartDateChange = { uiState = uiState.copy(shearingStartDate = it) },
+                    onShearingEndDateChange = { uiState = uiState.copy(shearingEndDate = it) },
+                    onShearingLootjieRateChange = { uiState = uiState.copy(shearingLootjieRate = it) },
+                    onShearingNotesChange = { uiState = uiState.copy(shearingNotes = it) },
+                    onShearingSessionSelected = { sessionId -> uiState = selectShearingSessionForDetail(uiState, sessionId) },
+                    onShearerSelected = { uiState = uiState.copy(selectedShearerId = it) },
+                    onShearingWorkDateChange = { uiState = uiState.copy(shearingWorkDate = it) },
+                    onShearingQuantityChange = { uiState = uiState.copy(shearingQuantity = it) },
+                    onShearingNoteChange = { uiState = uiState.copy(shearingNote = it) },
+                    onShearingBaleCodeSelected = { uiState = uiState.copy(selectedShearingBaleCodeId = it) },
+    onBaleCodeSpeciesChange = { uiState = uiState.copy(baleCodeSpecies = it) },
+    onBaleCodeCodeChange = { uiState = uiState.copy(baleCodeCode = it) },
+    onBaleCodeLineTypeChange = { uiState = uiState.copy(baleCodeLineType = it) },
+    onBaleCodeAgeGroupChange = { uiState = uiState.copy(baleCodeAgeGroup = it) },
+    onBaleCodeFinenessGradeChange = { uiState = uiState.copy(baleCodeFinenessGrade = it) },
+    onBaleCodeLengthCodeChange = { uiState = uiState.copy(baleCodeLengthCode = it) },
+    onBaleCodeFinenessMicronChange = { uiState = uiState.copy(baleCodeFinenessMicron = it) },
+    onBaleCodeCleanYieldChange = { uiState = uiState.copy(baleCodeCleanYieldPercent = it) },
+    onBaleCodeColorChange = { uiState = uiState.copy(baleCodeColor = it) },
+    onBaleCodeVegetableMatterChange = { uiState = uiState.copy(baleCodeVegetableMatter = it) },
+    onBaleCodeStyleCharacterChange = { uiState = uiState.copy(baleCodeStyleCharacter = it) },
+    onBaleCodeConsistencyChange = { uiState = uiState.copy(baleCodeConsistency = it) },
+    onBaleCodeFaultChange = { uiState = uiState.copy(baleCodeFault = it) },
+    onBaleCodeDescriptionChange = { uiState = uiState.copy(baleCodeDescription = it) },
+                    onBaleCodeNotesChange = { uiState = uiState.copy(baleCodeNotes = it) },
+                    onBaleNumberChange = { uiState = uiState.copy(baleNumber = it) },
+                    onBaleCodeTextChange = { uiState = uiState.copy(baleCodeText = it) },
+                    onBaleWeightChange = { uiState = uiState.copy(baleWeightKg = it) },
+                    onBalePricePerKgChange = { uiState = uiState.copy(balePricePerKg = it) },
+                    onBaleTotalPriceChange = { uiState = uiState.copy(baleTotalPrice = it) },
+                    onBaleNotesChange = { uiState = uiState.copy(baleNotes = it) },
                     onTaskHeadingChange = { uiState = uiState.copy(taskHeading = it) },
                     onTaskDescriptionChange = { uiState = uiState.copy(taskDescription = it) },
                     onTaskDueDateChange = { uiState = uiState.copy(taskDueDate = it) },
@@ -533,6 +570,17 @@ class MainActivity : ComponentActivity() {
                     onQueueFenceUpdate = { queueAndMaybeSync(queueFenceUpdate(uiState, repository())) },
                     onQueueGateUpdate = { gateId, status ->
                         queueAndMaybeSync(queueGateUpdate(uiState, repository(), gateId, status))
+                    },
+                    onQueueShearerCreate = { queueAndMaybeSync(queueShearerCreate(uiState, repository())) },
+                    onQueueShearingSessionCreate = { queueAndMaybeSync(queueShearingSessionCreate(uiState, repository())) },
+                    onQueueShearingEntry = { newGroup -> queueAndMaybeSync(queueShearingEntry(uiState, repository(), newGroup)) },
+                    onQueueShearingSessionStatus = { status ->
+                        queueAndMaybeSync(queueShearingSessionStatus(uiState, repository(), status))
+                    },
+                    onQueueShearingBaleCode = { queueAndMaybeSync(queueShearingBaleCode(uiState, repository())) },
+                    onQueueShearingBale = { queueAndMaybeSync(queueShearingBale(uiState, repository())) },
+                    onQueueShearingBaleDelete = { baleId ->
+                        queueAndMaybeSync(queueShearingBaleDelete(uiState, repository(), baleId))
                     },
                     onQueueTaskCreate = { queueAndMaybeSync(queueTaskCreate(uiState, repository())) },
                     onQueueTaskStatus = { task, status ->
@@ -690,7 +738,10 @@ private data class FieldUiState(
     val selectedPaddockId: String = "",
     val selectedWaterAssetId: String = "",
     val selectedFenceSectionId: String = "",
+    val selectedShearingSessionId: String = "",
+    val selectedShearerId: String = "",
     val selectedAnimalGroupTypeId: String = "",
+    val selectedShearingBaleCodeId: String = "",
     val moveNote: String = "",
     val stockQuantity: String = "",
     val stockNote: String = "",
@@ -706,6 +757,37 @@ private data class FieldUiState(
     val fenceCondition: String = "",
     val fenceNotes: String = "",
     val fenceElectricWire: Boolean = false,
+    val shearerName: String = "",
+    val shearingSessionName: String = "",
+    val shearingSpecies: String = "Sheep",
+    val shearingStartDate: String = LocalDate.now().toString(),
+    val shearingEndDate: String = "",
+    val shearingLootjieRate: String = "",
+    val shearingNotes: String = "",
+    val shearingWorkDate: String = LocalDate.now().toString(),
+    val shearingQuantity: String = "",
+    val shearingNote: String = "",
+    val baleCodeSpecies: String = "Sheep",
+    val baleCodeCode: String = "",
+    val baleCodeLineType: String = "",
+    val baleCodeAgeGroup: String = "",
+    val baleCodeFinenessGrade: String = "",
+    val baleCodeLengthCode: String = "",
+    val baleCodeFinenessMicron: String = "",
+    val baleCodeCleanYieldPercent: String = "",
+    val baleCodeColor: String = "",
+    val baleCodeVegetableMatter: String = "",
+    val baleCodeStyleCharacter: String = "",
+    val baleCodeConsistency: String = "",
+    val baleCodeFault: String = "",
+    val baleCodeDescription: String = "",
+    val baleCodeNotes: String = "",
+    val baleNumber: String = "",
+    val baleCodeText: String = "",
+    val baleWeightKg: String = "",
+    val balePricePerKg: String = "",
+    val baleTotalPrice: String = "",
+    val baleNotes: String = "",
     val taskEntityType: String = "farm",
     val taskEntityId: String = "",
     val taskHeading: String = "",
@@ -732,6 +814,10 @@ private data class FieldUiState(
             val firstPaddock = snapshot?.paddocks?.firstOrNull()
             val firstWater = snapshot?.waterAssets?.firstOrNull()
             val firstFence = snapshot?.fenceSections?.firstOrNull()
+            val firstShearer = snapshot?.shearers?.firstOrNull { it.active } ?: snapshot?.shearers?.firstOrNull()
+            val firstShearingSession = snapshot?.shearingSessions?.firstOrNull()
+            val firstBaleCode = snapshot?.shearingBaleCodes?.firstOrNull { it.active && it.species == firstShearingSession?.species }
+                ?: snapshot?.shearingBaleCodes?.firstOrNull { it.active }
             val firstBalance = firstMob?.balances?.firstOrNull()
             val selectedFarm = activeFarm ?: snapshot?.let { farmWithRole(it.farm, availableFarms) }
             val cachedSnapshots = mergeFarmSnapshots(emptyMap(), farmSnapshots, snapshot)
@@ -751,7 +837,11 @@ private data class FieldUiState(
                 selectedPaddockId = firstPaddock?.id.orEmpty(),
                 selectedWaterAssetId = firstWater?.id.orEmpty(),
                 selectedFenceSectionId = firstFence?.id.orEmpty(),
+                selectedShearingSessionId = firstShearingSession?.id.orEmpty(),
+                selectedShearerId = firstShearer?.id.orEmpty(),
                 selectedAnimalGroupTypeId = firstBalance?.animalGroupTypeId.orEmpty(),
+                selectedShearingBaleCodeId = firstBaleCode?.id.orEmpty(),
+                baleCodeSpecies = firstShearingSession?.species ?: firstBaleCode?.species ?: "Sheep",
                 stockQuantity = firstBalance?.headCount?.toString().orEmpty(),
                 transferDestinationMobId = snapshot?.mobs?.drop(1)?.firstOrNull()?.id.orEmpty(),
                 paddockStatus = firstPaddock?.status.orEmpty(),
@@ -851,6 +941,13 @@ private enum class AppScreen {
     WaterAssetDetail,
     Fences,
     FenceDetail,
+    Shearing,
+    ShearingSessionCreate,
+    ShearingSessionDetail,
+    ShearerCreate,
+    ShearingEntry,
+    ShearingBaleCodeCreate,
+    ShearingBaleRecord,
     Rainfall,
     MoveMob,
     StockCount,
@@ -919,6 +1016,40 @@ private fun AgriTrackApp(
     onFenceConditionChange: (String) -> Unit,
     onFenceNotesChange: (String) -> Unit,
     onFenceElectricWireChange: (Boolean) -> Unit,
+    onShearerNameChange: (String) -> Unit,
+    onShearingSessionNameChange: (String) -> Unit,
+    onShearingSpeciesChange: (String) -> Unit,
+    onShearingStartDateChange: (String) -> Unit,
+    onShearingEndDateChange: (String) -> Unit,
+    onShearingLootjieRateChange: (String) -> Unit,
+    onShearingNotesChange: (String) -> Unit,
+    onShearingSessionSelected: (String) -> Unit,
+    onShearerSelected: (String) -> Unit,
+    onShearingWorkDateChange: (String) -> Unit,
+    onShearingQuantityChange: (String) -> Unit,
+    onShearingNoteChange: (String) -> Unit,
+    onShearingBaleCodeSelected: (String) -> Unit,
+    onBaleCodeSpeciesChange: (String) -> Unit,
+    onBaleCodeCodeChange: (String) -> Unit,
+    onBaleCodeLineTypeChange: (String) -> Unit,
+    onBaleCodeAgeGroupChange: (String) -> Unit,
+    onBaleCodeFinenessGradeChange: (String) -> Unit,
+    onBaleCodeLengthCodeChange: (String) -> Unit,
+    onBaleCodeFinenessMicronChange: (String) -> Unit,
+    onBaleCodeCleanYieldChange: (String) -> Unit,
+    onBaleCodeColorChange: (String) -> Unit,
+    onBaleCodeVegetableMatterChange: (String) -> Unit,
+    onBaleCodeStyleCharacterChange: (String) -> Unit,
+    onBaleCodeConsistencyChange: (String) -> Unit,
+    onBaleCodeFaultChange: (String) -> Unit,
+    onBaleCodeDescriptionChange: (String) -> Unit,
+    onBaleCodeNotesChange: (String) -> Unit,
+    onBaleNumberChange: (String) -> Unit,
+    onBaleCodeTextChange: (String) -> Unit,
+    onBaleWeightChange: (String) -> Unit,
+    onBalePricePerKgChange: (String) -> Unit,
+    onBaleTotalPriceChange: (String) -> Unit,
+    onBaleNotesChange: (String) -> Unit,
     onTaskHeadingChange: (String) -> Unit,
     onTaskDescriptionChange: (String) -> Unit,
     onTaskDueDateChange: (String) -> Unit,
@@ -944,6 +1075,13 @@ private fun AgriTrackApp(
     onQueueFenceNote: () -> Unit,
     onQueueFenceUpdate: () -> Unit,
     onQueueGateUpdate: (String, String) -> Unit,
+    onQueueShearerCreate: () -> Unit,
+    onQueueShearingSessionCreate: () -> Unit,
+    onQueueShearingEntry: (NewStockGroupDraft) -> Unit,
+    onQueueShearingSessionStatus: (String) -> Unit,
+    onQueueShearingBaleCode: () -> Unit,
+    onQueueShearingBale: () -> Unit,
+    onQueueShearingBaleDelete: (String) -> Unit,
     onQueueTaskCreate: () -> Unit,
     onQueueTaskStatus: (TaskSummary, String) -> Unit,
     onQueueTaskComment: (TaskSummary) -> Unit,
@@ -1109,6 +1247,78 @@ private fun AgriTrackApp(
                     onEntityNoteChange,
                     onEntityNoteTagsChange,
                     onQueueFenceNote,
+                )
+                AppScreen.Shearing -> ShearingScreen(
+                    state,
+                    onBackHome,
+                    onShearingSessionSelected,
+                    onOpenScreen,
+                )
+                AppScreen.ShearingSessionCreate -> ShearingSessionCreateScreen(
+                    state,
+                    { onOpenScreen(AppScreen.Shearing) },
+                    onShearingSessionNameChange,
+                    onShearingSpeciesChange,
+                    onShearingStartDateChange,
+                    onShearingEndDateChange,
+                    onShearingLootjieRateChange,
+                    onShearingNotesChange,
+                    onQueueShearingSessionCreate,
+                )
+                AppScreen.ShearingSessionDetail -> ShearingSessionDetailScreen(
+                    state,
+                    { onOpenScreen(AppScreen.Shearing) },
+                    onOpenScreen,
+                    onQueueShearingSessionStatus,
+                    onQueueShearingBaleDelete,
+                )
+                AppScreen.ShearerCreate -> ShearerCreateScreen(
+                    state,
+                    { onOpenScreen(AppScreen.Shearing) },
+                    onShearerNameChange,
+                    onQueueShearerCreate,
+                )
+                AppScreen.ShearingEntry -> ShearingEntryScreen(
+                    state,
+                    { onOpenScreen(AppScreen.ShearingSessionDetail) },
+                    onShearerSelected,
+                    onAnimalGroupSelected,
+                    onShearingWorkDateChange,
+                    onShearingQuantityChange,
+                    onShearingNoteChange,
+                    onQueueShearingEntry,
+                )
+                AppScreen.ShearingBaleCodeCreate -> ShearingBaleCodeCreateScreen(
+                    state,
+                    { onOpenScreen(AppScreen.Shearing) },
+                    onBaleCodeSpeciesChange,
+                    onBaleCodeCodeChange,
+                    onBaleCodeLineTypeChange,
+                    onBaleCodeAgeGroupChange,
+                    onBaleCodeFinenessGradeChange,
+                    onBaleCodeLengthCodeChange,
+                    onBaleCodeFinenessMicronChange,
+                    onBaleCodeCleanYieldChange,
+                    onBaleCodeColorChange,
+                    onBaleCodeVegetableMatterChange,
+                    onBaleCodeStyleCharacterChange,
+                    onBaleCodeConsistencyChange,
+                    onBaleCodeFaultChange,
+                    onBaleCodeDescriptionChange,
+                    onBaleCodeNotesChange,
+                    onQueueShearingBaleCode,
+                )
+                AppScreen.ShearingBaleRecord -> ShearingBaleRecordScreen(
+                    state,
+                    { onOpenScreen(AppScreen.ShearingSessionDetail) },
+                    onShearingBaleCodeSelected,
+                    onBaleNumberChange,
+                    onBaleCodeTextChange,
+                    onBaleWeightChange,
+                    onBalePricePerKgChange,
+                    onBaleTotalPriceChange,
+                    onBaleNotesChange,
+                    onQueueShearingBale,
                 )
                 AppScreen.Rainfall -> RainfallScreen(
                     state,
@@ -1392,6 +1602,9 @@ private fun DashboardMenu(state: FieldUiState, onOpenScreen: (AppScreen) -> Unit
         }
         DashboardButton("Fences", "Inspect condition, notes, and linked tasks", state.snapshot?.fenceSections?.isNotEmpty() == true) {
             onOpenScreen(AppScreen.Fences)
+        }
+        DashboardButton("Shearing", "Sessions, shearers, daily counts, and payouts", state.snapshot != null) {
+            onOpenScreen(AppScreen.Shearing)
         }
         DashboardButton("Rainfall", "View recent rain and record a reading", state.snapshot != null) {
             onOpenScreen(AppScreen.Rainfall)
@@ -1683,6 +1896,10 @@ private fun mapFeatureDetail(feature: MapFeatureSummary): String =
 
 private fun formatHeadCount(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else "%.2f".format(value)
+
+private fun formatMoney(value: Double): String = "R %.2f".format(value)
+
+private fun formatKg(value: Double): String = "%.3f kg".format(value)
 
 private fun mobPaddockAllocationCountLines(
     snapshot: FarmSnapshot,
@@ -3607,6 +3824,393 @@ private fun FenceEditScreen(
 }
 
 @Composable
+private fun ShearingScreen(
+    state: FieldUiState,
+    onBackHome: () -> Unit,
+    onShearingSessionSelected: (String) -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+) {
+    val snapshot = state.snapshot
+    FormScaffold("Shearing", onBackHome) {
+        if (snapshot == null) {
+            Text("Load a farm snapshot before opening shearing.", color = Color(0xFF516052))
+            return@FormScaffold
+        }
+        MetricRows(
+            listOf(
+                "Sessions" to snapshot.shearingSessionCount.toString(),
+                "Shearers" to snapshot.shearerCount.toString(),
+                "Bale codes" to snapshot.shearingBaleCodeCount.toString(),
+                "Revenue" to formatMoney(snapshot.shearingSessions.sumOf { it.baleMoneyTotals.totalPrice }),
+            )
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { onOpenScreen(AppScreen.ShearingSessionCreate) }, modifier = Modifier.weight(1f)) {
+                Text("New Session")
+            }
+            OutlinedButton(onClick = { onOpenScreen(AppScreen.ShearerCreate) }, modifier = Modifier.weight(1f)) {
+                Text("New Shearer")
+            }
+        }
+        OutlinedButton(onClick = { onOpenScreen(AppScreen.ShearingBaleCodeCreate) }, modifier = Modifier.fillMaxWidth()) {
+            Text("New Bale Code")
+        }
+        listOf("Sheep", "Goat").forEach { species ->
+            SectionCard("$species Sessions") {
+                val sessions = snapshot.shearingSessions.filter { it.species == species }
+                sessions.forEach { session ->
+                    ClickableEntityCard(
+                        session.name,
+                        "${session.startDate}${session.endDate?.let { " to $it" } ?: ""} | ${formatKg(session.baleMoneyTotals.totalKg)} | ${formatMoney(session.baleMoneyTotals.totalPrice)} | ${session.totalQuantity} shorn",
+                    ) { onShearingSessionSelected(session.id) }
+                }
+                if (sessions.isEmpty()) {
+                    Text("No ${species.lowercase()} sessions in this farm snapshot.", color = Color(0xFF516052))
+                }
+            }
+        }
+        SectionCard("Shearers") {
+            snapshot.shearers.forEach { shearer ->
+                EntityCard(shearer.name, if (shearer.active) "Active" else "Inactive")
+            }
+            if (snapshot.shearers.isEmpty()) {
+                Text("No shearers saved yet.", color = Color(0xFF516052))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShearingSessionCreateScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onNameChange: (String) -> Unit,
+    onSpeciesChange: (String) -> Unit,
+    onStartDateChange: (String) -> Unit,
+    onEndDateChange: (String) -> Unit,
+    onLootjieRateChange: (String) -> Unit,
+    onNotesChange: (String) -> Unit,
+    onQueue: () -> Unit,
+) {
+    FormScaffold("New Shearing Session", onBackToList) {
+        SectionCard("Session") {
+            OutlinedTextField(state.shearingSessionName, onNameChange, label = { Text("Session name") }, modifier = Modifier.fillMaxWidth())
+            OptionPicker(
+                "Species",
+                state.shearingSpecies,
+                listOf(MobileOption("Sheep", "Sheep"), MobileOption("Goat", "Goat")),
+                onSpeciesChange,
+            )
+            OutlinedTextField(state.shearingStartDate, onStartDateChange, label = { Text("Start date") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.shearingEndDate, onEndDateChange, label = { Text("End date") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                state.shearingLootjieRate,
+                onLootjieRateChange,
+                label = { Text("Lootjie rate") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(state.shearingNotes, onNotesChange, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth())
+            Button(onClick = onQueue, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                Text("Queue Session")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShearerCreateScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onNameChange: (String) -> Unit,
+    onQueue: () -> Unit,
+) {
+    FormScaffold("New Shearer", onBackToList) {
+        SectionCard("Shearer") {
+            OutlinedTextField(state.shearerName, onNameChange, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+            Button(onClick = onQueue, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                Text("Queue Shearer")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShearingSessionDetailScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onOpenScreen: (AppScreen) -> Unit,
+    onQueueStatus: (String) -> Unit,
+    onQueueBaleDelete: (String) -> Unit,
+) {
+    val session = selectedShearingSession(state)
+    FormScaffold("Shearing Detail", onBackToList) {
+        if (session == null) {
+            Text("Choose a shearing session.", color = Color(0xFF516052))
+            return@FormScaffold
+        }
+        SectionCard(session.name) {
+            Text("${session.species} | ${session.startDate}${session.endDate?.let { " to $it" } ?: ""}")
+            MetricRows(
+                listOf(
+                    "Shorn" to session.totalQuantity.toString(),
+                    "Payout" to formatMoney(session.totalAmount),
+                    "Bale kg" to formatKg(session.baleMoneyTotals.totalKg),
+                    "Revenue" to formatMoney(session.baleMoneyTotals.totalPrice),
+                    "Avg P/kg" to (session.baleMoneyTotals.averagePricePerKg?.let(::formatMoney) ?: "-"),
+                    "Lootjie" to formatMoney(session.lootjieRate),
+                    "Status" to session.statusLabel,
+                )
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { onOpenScreen(AppScreen.ShearingEntry) }, modifier = Modifier.weight(1f)) {
+                    Text("Record Count")
+                }
+                OutlinedButton(onClick = { onOpenScreen(AppScreen.ShearingBaleRecord) }, modifier = Modifier.weight(1f)) {
+                    Text("Record Bale")
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { onQueueStatus(if (session.status == "open") "closed" else "open") },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (session.status == "open") "Close" else "Reopen")
+                }
+            }
+        }
+        SectionCard("Money By Code") {
+            session.baleSummaryByCode.forEach { row ->
+                EntityCard(
+                    row.code,
+                    "${row.baleCount} bales | ${formatKg(row.kg)} | ${formatMoney(row.totalPrice)} | Avg ${row.averagePricePerKg?.let(::formatMoney) ?: "-"}",
+                )
+            }
+            if (session.baleSummaryByCode.isEmpty()) {
+                Text("No bale money captured yet.", color = Color(0xFF516052))
+            }
+        }
+        SectionCard("Bales") {
+            session.bales.forEach { bale ->
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    EntityCard(
+                        bale.baleNumber?.takeIf { it.isNotBlank() } ?: bale.codeText,
+                        "${bale.codeText} | ${formatKg(bale.weightKg)} | ${bale.totalPrice?.let(::formatMoney) ?: "Unpriced"}",
+                    )
+                    OutlinedButton(onClick = { onQueueBaleDelete(bale.id) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Delete Bale")
+                    }
+                }
+            }
+            if (session.bales.isEmpty()) {
+                Text("No bales captured yet.", color = Color(0xFF516052))
+            }
+        }
+        SectionCard("Shearer Payouts") {
+            session.byShearer.forEach { row ->
+                EntityCard(row.shearerName, "${row.quantity} | ${formatMoney(row.amount)}")
+            }
+            if (session.byShearer.isEmpty()) {
+                Text("No payout rows yet.", color = Color(0xFF516052))
+            }
+        }
+        SectionCard("Animal Types") {
+            session.byAnimalType.forEach { row ->
+                EntityCard(row.animalGroupType.label, "${row.quantity} | ${formatMoney(row.amount)}")
+            }
+            if (session.byAnimalType.isEmpty()) {
+                Text("No animal type rows yet.", color = Color(0xFF516052))
+            }
+        }
+        SectionCard("Entries") {
+            session.entries.take(20).forEach { entry ->
+                EntityCard(
+                    "${entry.workDate} | ${entry.shearerName}",
+                    "${entry.animalGroupType.label} | ${entry.quantity} | ${formatMoney(entry.lineAmount)}",
+                )
+            }
+            if (session.entries.isEmpty()) {
+                Text("No daily counts recorded yet.", color = Color(0xFF516052))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShearingEntryScreen(
+    state: FieldUiState,
+    onBackToDetail: () -> Unit,
+    onShearerSelected: (String) -> Unit,
+    onAnimalGroupSelected: (String) -> Unit,
+    onWorkDateChange: (String) -> Unit,
+    onQuantityChange: (String) -> Unit,
+    onNoteChange: (String) -> Unit,
+    onQueue: (NewStockGroupDraft) -> Unit,
+) {
+    val session = selectedShearingSession(state)
+    val snapshot = state.snapshot
+    var newGroup by remember(session?.species) {
+        mutableStateOf(defaultNewStockGroupDraft(state.formOptions).copy(species = session?.species ?: "Sheep", ageClass = "adult"))
+    }
+    val animalGroups = shearingAnimalGroupOptions(state, session?.species.orEmpty())
+    FormScaffold("Record Shearing Count", onBackToDetail) {
+        if (session == null || snapshot == null) {
+            Text("Choose a shearing session first.", color = Color(0xFF516052))
+            return@FormScaffold
+        }
+        SectionCard(session.name) {
+            ShearerPicker(snapshot.shearers.filter { it.active }, state.selectedShearerId, onShearerSelected)
+            CheckboxRow("Create new animal type", newGroup.enabled) { enabled -> newGroup = newGroup.copy(enabled = enabled) }
+            if (newGroup.enabled) {
+                BreedEntry(newGroup.breed, breedSuggestionsForSpecies(snapshot, session.species)) { breed -> newGroup = newGroup.copy(breed = breed) }
+                OptionPicker("Sex", newGroup.sex, stockSexOptions(state.formOptions, session.species)) { sex -> newGroup = newGroup.copy(sex = sex) }
+                OptionPicker("Age class", newGroup.ageClass, stockAgeClassOptions(state.formOptions, session.species)) { ageClass -> newGroup = newGroup.copy(ageClass = ageClass) }
+            } else {
+                AnimalGroupPicker(animalGroups, state.selectedAnimalGroupTypeId, onAnimalGroupSelected)
+            }
+            OutlinedTextField(state.shearingWorkDate, onWorkDateChange, label = { Text("Work date") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                state.shearingQuantity,
+                onQuantityChange,
+                label = { Text("Count") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(state.shearingNote, onNoteChange, label = { Text("Note") }, modifier = Modifier.fillMaxWidth())
+            Button(onClick = { onQueue(newGroup) }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                Text("Queue Count")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShearingBaleCodeCreateScreen(
+    state: FieldUiState,
+    onBackToList: () -> Unit,
+    onSpeciesChange: (String) -> Unit,
+    onCodeChange: (String) -> Unit,
+    onLineTypeChange: (String) -> Unit,
+    onAgeGroupChange: (String) -> Unit,
+    onFinenessGradeChange: (String) -> Unit,
+    onLengthCodeChange: (String) -> Unit,
+    onFinenessMicronChange: (String) -> Unit,
+    onCleanYieldChange: (String) -> Unit,
+    onColorChange: (String) -> Unit,
+    onVegetableMatterChange: (String) -> Unit,
+    onStyleCharacterChange: (String) -> Unit,
+    onConsistencyChange: (String) -> Unit,
+    onFaultChange: (String) -> Unit,
+    onDescriptionChange: (String) -> Unit,
+    onNotesChange: (String) -> Unit,
+    onQueue: () -> Unit,
+) {
+    FormScaffold("New Bale Code", onBackToList) {
+        SectionCard("Code") {
+            OptionPicker(
+                "Species",
+                state.baleCodeSpecies,
+                listOf(MobileOption("Sheep", "Sheep / Wool"), MobileOption("Goat", "Goat / Mohair")),
+                onSpeciesChange,
+            )
+            OutlinedTextField(state.baleCodeCode, onCodeChange, label = { Text("Code") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeLineType, onLineTypeChange, label = { Text("Line type") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeAgeGroup, onAgeGroupChange, label = { Text("Age group") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeFinenessGrade, onFinenessGradeChange, label = { Text("Fineness grade") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeLengthCode, onLengthCodeChange, label = { Text("Length code") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                state.baleCodeFinenessMicron,
+                onFinenessMicronChange,
+                label = { Text("Fineness micron") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                state.baleCodeCleanYieldPercent,
+                onCleanYieldChange,
+                label = { Text("Clean yield %") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(state.baleCodeStyleCharacter, onStyleCharacterChange, label = { Text("Style and character") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeConsistency, onConsistencyChange, label = { Text("Consistency") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeColor, onColorChange, label = { Text("Color") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeVegetableMatter, onVegetableMatterChange, label = { Text("Vegetable matter") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeFault, onFaultChange, label = { Text("Fault / outsort") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeDescription, onDescriptionChange, label = { Text("Description") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleCodeNotes, onNotesChange, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth())
+            Button(onClick = onQueue, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                Text("Queue Bale Code")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShearingBaleRecordScreen(
+    state: FieldUiState,
+    onBackToDetail: () -> Unit,
+    onBaleCodeSelected: (String) -> Unit,
+    onBaleNumberChange: (String) -> Unit,
+    onCodeTextChange: (String) -> Unit,
+    onWeightChange: (String) -> Unit,
+    onPricePerKgChange: (String) -> Unit,
+    onTotalPriceChange: (String) -> Unit,
+    onNotesChange: (String) -> Unit,
+    onQueue: () -> Unit,
+) {
+    val session = selectedShearingSession(state)
+    val snapshot = state.snapshot
+    FormScaffold("Record Bale", onBackToDetail) {
+        if (session == null || snapshot == null) {
+            Text("Choose a shearing session first.", color = Color(0xFF516052))
+            return@FormScaffold
+        }
+        SectionCard(session.name) {
+            BaleCodePicker(
+                snapshot.shearingBaleCodes.filter { it.species == session.species && it.active },
+                state.selectedShearingBaleCodeId,
+                onBaleCodeSelected,
+            )
+            OutlinedTextField(state.baleCodeText, onCodeTextChange, label = { Text("Ad-hoc / captured code") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.baleNumber, onBaleNumberChange, label = { Text("Bale number") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                state.baleWeightKg,
+                onWeightChange,
+                label = { Text("Weight kg") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                state.balePricePerKg,
+                onPricePerKgChange,
+                label = { Text("Price per kg") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                state.baleTotalPrice,
+                onTotalPriceChange,
+                label = { Text("Total price") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(state.baleNotes, onNotesChange, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth())
+            Button(onClick = onQueue, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                Text("Queue Bale")
+            }
+        }
+    }
+}
+
+@Composable
 private fun RainfallScreen(
     state: FieldUiState,
     onBackHome: () -> Unit,
@@ -4054,6 +4658,29 @@ private fun MobPicker(
 }
 
 @Composable
+private fun ShearerPicker(
+    shearers: List<ShearerSummary>,
+    selectedShearerId: String,
+    onShearerSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = shearers.firstOrNull { it.id == selectedShearerId } ?: shearers.firstOrNull()
+    Picker("Shearer", selected?.name ?: "No active shearers", shearers.isNotEmpty(), expanded, { expanded = it }) {
+        shearers.forEach { shearer ->
+            DropdownMenuItem(text = { Text(shearer.name) }, onClick = { expanded = false; onShearerSelected(shearer.id) })
+        }
+    }
+}
+
+@Composable
+private fun CheckboxRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        Text(label)
+    }
+}
+
+@Composable
 private fun PaddockPicker(
     paddocks: List<PaddockSummary>,
     selectedPaddockId: String,
@@ -4127,6 +4754,22 @@ private fun AnimalGroupPicker(
     Picker("Animal group", selected?.label ?: "No animal groups", animalGroupTypes.isNotEmpty(), expanded, { expanded = it }) {
         animalGroupTypes.forEach { group ->
             DropdownMenuItem(text = { Text(group.label) }, onClick = { expanded = false; onAnimalGroupSelected(group.id) })
+        }
+    }
+}
+
+@Composable
+private fun BaleCodePicker(
+    baleCodes: List<ShearingBaleCodeSummary>,
+    selectedBaleCodeId: String,
+    onBaleCodeSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = baleCodes.firstOrNull { it.id == selectedBaleCodeId }
+    Picker("Bale code", selected?.label ?: "Ad-hoc code", true, expanded, { expanded = it }) {
+        DropdownMenuItem(text = { Text("Ad-hoc code") }, onClick = { expanded = false; onBaleCodeSelected("") })
+        baleCodes.forEach { code ->
+            DropdownMenuItem(text = { Text(code.label) }, onClick = { expanded = false; onBaleCodeSelected(code.id) })
         }
     }
 }
@@ -5140,6 +5783,224 @@ private fun queueFenceUpdate(state: FieldUiState, repo: MobileRepository): Field
     return state.copy(currentScreen = AppScreen.Home, statusMessage = "Queued fence update.")
 }
 
+private fun queueShearerCreate(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before creating a shearer.")
+    val name = state.shearerName.trim()
+    if (name.isBlank()) return state.copy(statusMessage = "Shearer name is required.")
+    val shearerId = repo.queueShearerCreate(farm.id, name)
+    return state.copy(
+        currentScreen = AppScreen.Shearing,
+        selectedShearerId = shearerId,
+        shearerName = "",
+        statusMessage = "Queued shearer.",
+    )
+}
+
+private fun queueShearingSessionCreate(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before creating a shearing session.")
+    val name = state.shearingSessionName.trim()
+    if (name.isBlank()) return state.copy(statusMessage = "Session name is required.")
+    val startDate = runCatching { LocalDate.parse(state.shearingStartDate).toString() }
+        .getOrElse { return state.copy(statusMessage = "Start date must use YYYY-MM-DD.") }
+    val endDate = state.shearingEndDate.trim().takeIf { it.isNotBlank() }?.let { raw ->
+        runCatching { LocalDate.parse(raw).toString() }
+            .getOrElse { return state.copy(statusMessage = "End date must use YYYY-MM-DD.") }
+    }.orEmpty()
+    val rate = state.shearingLootjieRate.toDoubleOrNull()
+        ?: return state.copy(statusMessage = "Lootjie rate must be a number.")
+    if (rate < 0.0) return state.copy(statusMessage = "Lootjie rate must be zero or more.")
+    val sessionId = repo.queueShearingSessionCreate(
+        farm.id,
+        name,
+        state.shearingSpecies,
+        startDate,
+        endDate,
+        rate,
+        state.shearingNotes,
+    )
+    return state.copy(
+        currentScreen = AppScreen.ShearingSessionDetail,
+        selectedShearingSessionId = sessionId,
+        shearingSessionName = "",
+        shearingEndDate = "",
+        shearingLootjieRate = "",
+        shearingNotes = "",
+        statusMessage = "Queued shearing session.",
+    )
+}
+
+private fun queueShearingEntry(
+    state: FieldUiState,
+    repo: MobileRepository,
+    newGroup: NewStockGroupDraft,
+): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before recording shearing.")
+    val session = selectedShearingSession(state) ?: return state.copy(statusMessage = "Choose a shearing session.")
+    if (session.status == "closed") return state.copy(statusMessage = "Reopen the session before recording counts.")
+    val shearerId = state.selectedShearerId.ifBlank {
+        state.snapshot?.shearers?.firstOrNull { it.active }?.id.orEmpty()
+    }
+    if (shearerId.isBlank()) return state.copy(statusMessage = "Choose or create a shearer.")
+    val workDate = runCatching { LocalDate.parse(state.shearingWorkDate).toString() }
+        .getOrElse { return state.copy(statusMessage = "Work date must use YYYY-MM-DD.") }
+    val quantity = state.shearingQuantity.toIntOrNull()
+        ?: return state.copy(statusMessage = "Count must be a whole number.")
+    if (quantity < 0) return state.copy(statusMessage = "Count must be zero or more.")
+    val group = if (newGroup.enabled) {
+        val breed = newGroup.breed.trim()
+        if (breed.isBlank()) return state.copy(statusMessage = "Breed is required for a new animal type.")
+        val sexValues = stockSexOptions(state.formOptions, session.species).map { it.value }.toSet()
+        val ageValues = stockAgeClassOptions(state.formOptions, session.species).map { it.value }.toSet()
+        if (newGroup.sex !in sexValues) return state.copy(statusMessage = "Choose a valid sex.")
+        if (newGroup.ageClass !in ageValues) return state.copy(statusMessage = "Choose a valid age class.")
+        AnimalGroupTypeSummary(
+            id = "",
+            species = session.species,
+            breed = breed,
+            sex = newGroup.sex,
+            ageClass = newGroup.ageClass,
+        )
+    } else {
+        shearingAnimalGroupOptions(state, session.species).firstOrNull { it.id == state.selectedAnimalGroupTypeId }
+            ?: shearingAnimalGroupOptions(state, session.species).firstOrNull()
+            ?: return state.copy(statusMessage = "Choose an animal type or create a new one.")
+    }
+    repo.queueShearingEntry(
+        farm.id,
+        session.id,
+        workDate,
+        shearerId,
+        group,
+        quantity,
+        state.shearingNote,
+    )
+    return state.copy(
+        currentScreen = AppScreen.ShearingSessionDetail,
+        shearingQuantity = "",
+        shearingNote = "",
+        statusMessage = "Queued shearing count.",
+    )
+}
+
+private fun queueShearingSessionStatus(
+    state: FieldUiState,
+    repo: MobileRepository,
+    status: String,
+): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before updating shearing.")
+    val session = selectedShearingSession(state) ?: return state.copy(statusMessage = "Choose a shearing session.")
+    repo.queueShearingSessionStatus(farm.id, session.id, status)
+    return state.copy(statusMessage = "Queued shearing session ${status}.")
+}
+
+private fun queueShearingBaleCode(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before creating a bale code.")
+    val code = state.baleCodeCode.trim()
+    if (code.isBlank()) return state.copy(statusMessage = "Bale code is required.")
+    val finenessMicron = state.baleCodeFinenessMicron.trim().takeIf { it.isNotBlank() }?.toDoubleOrNull()
+    if (state.baleCodeFinenessMicron.isNotBlank() && finenessMicron == null) {
+        return state.copy(statusMessage = "Fineness micron must be a number.")
+    }
+    val cleanYield = state.baleCodeCleanYieldPercent.trim().takeIf { it.isNotBlank() }?.toDoubleOrNull()
+    if (state.baleCodeCleanYieldPercent.isNotBlank() && cleanYield == null) {
+        return state.copy(statusMessage = "Clean yield must be a number.")
+    }
+    if (cleanYield != null && (cleanYield < 0.0 || cleanYield > 100.0)) {
+        return state.copy(statusMessage = "Clean yield must be between 0 and 100.")
+    }
+    val baleCodeId = repo.queueShearingBaleCode(
+        farmId = farm.id,
+        species = state.baleCodeSpecies,
+        code = code,
+        lineType = state.baleCodeLineType,
+        ageGroup = state.baleCodeAgeGroup,
+        finenessGrade = state.baleCodeFinenessGrade,
+        lengthCode = state.baleCodeLengthCode,
+        finenessMicron = finenessMicron,
+        cleanYieldPercent = cleanYield,
+        color = state.baleCodeColor,
+        vegetableMatter = state.baleCodeVegetableMatter,
+        styleCharacter = state.baleCodeStyleCharacter,
+        consistency = state.baleCodeConsistency,
+        fault = state.baleCodeFault,
+        description = state.baleCodeDescription,
+        notes = state.baleCodeNotes,
+    )
+    return state.copy(
+        currentScreen = AppScreen.Shearing,
+        selectedShearingBaleCodeId = baleCodeId,
+        baleCodeCode = "",
+        baleCodeLineType = "",
+        baleCodeAgeGroup = "",
+        baleCodeFinenessGrade = "",
+        baleCodeLengthCode = "",
+        baleCodeFinenessMicron = "",
+        baleCodeCleanYieldPercent = "",
+        baleCodeColor = "",
+        baleCodeVegetableMatter = "",
+        baleCodeStyleCharacter = "",
+        baleCodeConsistency = "",
+        baleCodeFault = "",
+        baleCodeDescription = "",
+        baleCodeNotes = "",
+        statusMessage = "Queued bale code.",
+    )
+}
+
+private fun queueShearingBale(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before recording a bale.")
+    val session = selectedShearingSession(state) ?: return state.copy(statusMessage = "Choose a shearing session.")
+    val codeId = state.selectedShearingBaleCodeId.takeIf { it.isNotBlank() }
+    val codeText = state.baleCodeText.trim()
+    if (codeId == null && codeText.isBlank()) {
+        return state.copy(statusMessage = "Choose a bale code or enter an ad-hoc code.")
+    }
+    val weight = state.baleWeightKg.toDoubleOrNull()
+        ?: return state.copy(statusMessage = "Weight must be a number.")
+    if (weight <= 0.0) return state.copy(statusMessage = "Weight must be greater than zero.")
+    val pricePerKg = state.balePricePerKg.trim().takeIf { it.isNotBlank() }?.toDoubleOrNull()
+    if (state.balePricePerKg.isNotBlank() && pricePerKg == null) {
+        return state.copy(statusMessage = "Price per kg must be a number.")
+    }
+    val totalPrice = state.baleTotalPrice.trim().takeIf { it.isNotBlank() }?.toDoubleOrNull()
+    if (state.baleTotalPrice.isNotBlank() && totalPrice == null) {
+        return state.copy(statusMessage = "Total price must be a number.")
+    }
+    repo.queueShearingBale(
+        farmId = farm.id,
+        sessionId = session.id,
+        baleCodeId = codeId,
+        codeText = codeText,
+        baleNumber = state.baleNumber,
+        weightKg = weight,
+        pricePerKg = pricePerKg,
+        totalPrice = totalPrice,
+        notes = state.baleNotes,
+    )
+    return state.copy(
+        currentScreen = AppScreen.ShearingSessionDetail,
+        baleNumber = "",
+        baleCodeText = "",
+        baleWeightKg = "",
+        balePricePerKg = "",
+        baleTotalPrice = "",
+        baleNotes = "",
+        statusMessage = "Queued bale.",
+    )
+}
+
+private fun queueShearingBaleDelete(
+    state: FieldUiState,
+    repo: MobileRepository,
+    baleId: String,
+): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before deleting a bale.")
+    val session = selectedShearingSession(state) ?: return state.copy(statusMessage = "Choose a shearing session.")
+    if (baleId.isBlank()) return state.copy(statusMessage = "Choose a bale.")
+    repo.queueShearingBaleDelete(farm.id, session.id, baleId)
+    return state.copy(statusMessage = "Queued bale delete.")
+}
+
 private fun queueGateUpdate(
     state: FieldUiState,
     repo: MobileRepository,
@@ -5202,6 +6063,22 @@ private fun selectedWaterAsset(state: FieldUiState): WaterAssetSummary? =
 private fun selectedFenceSection(state: FieldUiState): FenceSectionSummary? =
     state.snapshot?.fenceSections?.firstOrNull { it.id == state.selectedFenceSectionId }
 
+private fun selectedShearingSession(state: FieldUiState): ShearingSessionSummary? =
+    state.snapshot?.shearingSessions?.firstOrNull { it.id == state.selectedShearingSessionId }
+        ?: state.snapshot?.shearingSessions?.firstOrNull()
+
+private fun selectShearingSessionForDetail(state: FieldUiState, sessionId: String): FieldUiState {
+    val session = state.snapshot?.shearingSessions?.firstOrNull { it.id == sessionId }
+    val baleCode = state.snapshot?.shearingBaleCodes
+        ?.firstOrNull { it.active && it.species == session?.species }
+    return state.copy(
+        selectedShearingSessionId = sessionId,
+        selectedShearingBaleCodeId = baleCode?.id.orEmpty(),
+        baleCodeSpecies = session?.species ?: state.baleCodeSpecies,
+        currentScreen = AppScreen.ShearingSessionDetail,
+    )
+}
+
 private fun initialStockCountRows(mob: MobSummary?): List<StockCountRowDraft> =
     mob?.balances.orEmpty().map { balance ->
         StockCountRowDraft(
@@ -5222,13 +6099,27 @@ private fun defaultNewStockGroupDraft(formOptions: MobileFormOptions): NewStockG
 }
 
 private fun breedSuggestionsForSpecies(snapshot: FarmSnapshot?, species: String): List<String> =
-    snapshot?.mobs.orEmpty()
-        .flatMap { mob -> mob.balances }
-        .filter { balance -> balance.animalGroupType.species == species }
-        .map { balance -> balance.animalGroupType.breed.trim() }
+    (
+        snapshot?.mobs.orEmpty()
+            .flatMap { mob -> mob.balances.map { it.animalGroupType } } +
+            snapshot?.shearingSessions.orEmpty()
+                .flatMap { session -> session.entries.map { it.animalGroupType } }
+    )
+        .filter { group -> group.species == species }
+        .map { group -> group.breed.trim() }
         .filter { it.isNotBlank() }
         .distinct()
         .sorted()
+
+private fun shearingAnimalGroupOptions(state: FieldUiState, species: String): List<AnimalGroupTypeSummary> =
+    mergeAnimalGroupTypes(
+        state.animalGroupTypes,
+        state.snapshot?.shearingSessions.orEmpty().flatMap { session ->
+            session.entries.map { it.animalGroupType }
+        }
+    )
+        .filter { it.species == species }
+        .sortedWith(compareBy({ it.breed.lowercase() }, { it.sex }, { it.ageClass }))
 
 private fun stockSpeciesOptions(formOptions: MobileFormOptions): List<MobileOption> =
     formOptions.speciesOptions.ifEmpty {
@@ -5266,7 +6157,11 @@ private fun stockOptions(vararg values: String): List<MobileOption> =
 
 private fun animalGroupTypesFromSnapshot(snapshot: FarmSnapshot?): List<AnimalGroupTypeSummary> {
     if (snapshot == null) return emptyList()
-    return mergeAnimalGroupTypes(emptyList(), snapshot.mobs.flatMap { mob -> mob.balances.map { it.animalGroupType } })
+    return mergeAnimalGroupTypes(
+        emptyList(),
+        snapshot.mobs.flatMap { mob -> mob.balances.map { it.animalGroupType } } +
+            snapshot.shearingSessions.flatMap { session -> session.entries.map { it.animalGroupType } },
+    )
 }
 
 private fun mergeAnimalGroupTypes(

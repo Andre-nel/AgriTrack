@@ -124,6 +124,28 @@ class OptimisticSnapshotTest {
     }
 
     @Test
+    fun pendingMoveIntoAlreadyOpenGateUsesGateAllocations() {
+        val raw = JSONObject(fieldSnapshot().rawJson)
+        raw.getJSONArray("gates").getJSONObject(0).put("status", "open")
+        raw.getJSONArray("map_features")
+            .getJSONObject(0)
+            .getJSONObject("properties")
+            .put("status", "open")
+        val base = FarmSnapshot.fromJson(raw)
+        val commands = JSONArray()
+            .put(MobileCommand.mobMove("farm-1", "mob-1", "paddock-2").toJson())
+
+        val optimistic = base.withOptimisticCommands(commands)
+
+        val allocations = optimistic.activeGrazing.first { it.mobId == "mob-1" }.allocations
+            .associate { it.paddockId to it.allocationFraction }
+        assertEquals(0.25, allocations["paddock-1"] ?: 0.0, 0.0)
+        assertEquals(0.75, allocations["paddock-2"] ?: 0.0, 0.0)
+        assertEquals(2.5, paddockGrazing(optimistic, "paddock-1")?.totalHead ?: 0.0, 0.0)
+        assertEquals(7.5, paddockGrazing(optimistic, "paddock-2")?.totalHead ?: 0.0, 0.0)
+    }
+
+    @Test
     fun pendingCountMoveUsesExactGroupCountsForPaddockGrazing() {
         val base = fieldSnapshot()
         val commands = JSONArray()
@@ -152,6 +174,116 @@ class OptimisticSnapshotTest {
         assertEquals(0.6, allocations["paddock-2"] ?: 0.0, 0.0)
         assertEquals(4.0, paddockGrazing(optimistic, "paddock-1")?.totalHead ?: 0.0, 0.0)
         assertEquals(6.0, paddockGrazing(optimistic, "paddock-2")?.totalHead ?: 0.0, 0.0)
+    }
+
+    @Test
+    fun pendingShearingCommandsCreateTotalsAndRemoveZeroQuantityRows() {
+        val base = shearingSnapshot()
+        val createShearer = MobileCommand.shearerCreate("farm-1", "shearer-1", "Lootjie")
+        val createSession = MobileCommand.shearingSessionCreate(
+            farmId = "farm-1",
+            sessionId = "session-1",
+            name = "October sheep",
+            species = "Sheep",
+            startDate = "2026-10-01",
+            endDate = "2026-10-03",
+            lootjieRate = 10.0,
+            notes = "",
+        )
+        val recordAdultRam = MobileCommand.shearingEntryRecord(
+            farmId = "farm-1",
+            entryId = "entry-1",
+            sessionId = "session-1",
+            workDate = "2026-10-01",
+            shearerId = "shearer-1",
+            animalGroupType = AnimalGroupTypeSummary("group-1", "Sheep", "Merino", "ram", "adult"),
+            quantity = 4,
+            note = "First day",
+        )
+        val baleCode = MobileCommand.shearingBaleCodeUpsert(
+            farmId = "farm-1",
+            baleCodeId = "code-1",
+            species = "Sheep",
+            code = "FH",
+            lineType = "Fleece",
+            ageGroup = "Adult",
+            finenessGrade = "Fine",
+            lengthCode = "B",
+            finenessMicron = 21.5,
+            cleanYieldPercent = 80.0,
+            color = "",
+            vegetableMatter = "",
+            styleCharacter = "Good character",
+            consistency = "Even",
+            fault = "",
+            description = "",
+            notes = "",
+        )
+        val bale = MobileCommand.shearingBaleRecord(
+            farmId = "farm-1",
+            baleId = "bale-1",
+            sessionId = "session-1",
+            baleCodeId = "code-1",
+            codeText = "",
+            baleNumber = "B1",
+            weightKg = 80.0,
+            pricePerKg = 20.0,
+            totalPrice = null,
+            notes = "First bale",
+        )
+
+        val withEntry = base.withOptimisticCommands(
+            JSONArray()
+                .put(createShearer.toJson())
+                .put(createSession.toJson())
+                .put(baleCode.toJson())
+                .put(bale.toJson())
+                .put(recordAdultRam.toJson())
+        )
+
+        val session = withEntry.shearingSessions.first()
+        assertEquals(1, withEntry.shearerCount)
+        assertEquals("Lootjie", withEntry.shearers.first().name)
+        assertEquals(1, withEntry.shearingBaleCodeCount)
+        assertEquals("Fine", withEntry.shearingBaleCodes.first().finenessGrade)
+        assertEquals("B", withEntry.shearingBaleCodes.first().lengthCode)
+        assertEquals(80.0, withEntry.shearingBaleCodes.first().cleanYieldPercent ?: 0.0, 0.0)
+        assertEquals(4, session.totalQuantity)
+        assertEquals(80.0, session.totalAmount, 0.0)
+        assertEquals(1, session.baleMoneyTotals.totalBales)
+        assertEquals(80.0, session.baleMoneyTotals.totalKg, 0.0)
+        assertEquals(1600.0, session.baleMoneyTotals.totalPrice, 0.0)
+        assertEquals(20.0, session.baleMoneyTotals.averagePricePerKg ?: 0.0, 0.0)
+        assertEquals("FH", session.baleSummaryByCode.first().code)
+        assertEquals(2.0, session.entries.first().multiplier, 0.0)
+        assertEquals(20.0, session.entries.first().unitRate, 0.0)
+        assertEquals("Lootjie", session.byShearer.first().shearerName)
+
+        val removeAdultRam = MobileCommand.shearingEntryRecord(
+            farmId = "farm-1",
+            entryId = "entry-1",
+            sessionId = "session-1",
+            workDate = "2026-10-01",
+            shearerId = "shearer-1",
+            animalGroupType = AnimalGroupTypeSummary("group-1", "Sheep", "Merino", "ram", "adult"),
+            quantity = 0,
+            note = "",
+        )
+        val removed = base.withOptimisticCommands(
+            JSONArray()
+                .put(createShearer.toJson())
+                .put(createSession.toJson())
+                .put(baleCode.toJson())
+                .put(bale.toJson())
+                .put(recordAdultRam.toJson())
+                .put(removeAdultRam.toJson())
+                .put(MobileCommand.shearingBaleDelete("farm-1", "session-1", "bale-1").toJson())
+        )
+
+        assertEquals(0, removed.shearingSessions.first().totalQuantity)
+        assertEquals(0, removed.shearingSessions.first().entries.size)
+        assertEquals(0, removed.shearingSessions.first().baleMoneyTotals.totalBales)
+        assertEquals(0, removed.shearingSessions.first().bales.size)
     }
 
     private fun fieldSnapshot(): FarmSnapshot =
@@ -347,6 +479,15 @@ class OptimisticSnapshotTest {
                                 ),
                         ),
                 ),
+        )
+
+    private fun shearingSnapshot(): FarmSnapshot =
+        FarmSnapshot.fromJson(
+            JSONObject()
+                .put("farm", JSONObject().put("id", "farm-1").put("name", "North Farm").put("timezone", "UTC"))
+                .put("shearers", JSONArray())
+                .put("shearing_bale_codes", JSONArray())
+                .put("shearing_sessions", JSONArray()),
         )
 
     private fun balance(id: String, mobId: String, groupId: String, headCount: Int): JSONObject =

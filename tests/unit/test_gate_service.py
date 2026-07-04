@@ -123,6 +123,27 @@ def test_open_gate_redistributes_active_mob_by_grazeable_area_and_records_time(a
     assert len(closed_sessions) == 1
 
 
+def test_open_gate_network_adjusts_new_percentage_move_allocations(app):
+    farm, (north, south) = _farm_with_paddocks(("North", 10, 10), ("South", 30, 30))
+    gate = GateService.create_manual_gate(
+        farm_id=str(farm.id),
+        paddock_a_id=str(north.id),
+        paddock_b_id=str(south.id),
+    )
+    gate.status = "open"
+    db.session.commit()
+
+    allocations = GateService.allocations_for_open_gate_network(
+        str(farm.id),
+        [{"paddock_id": str(south.id), "allocation_fraction": "1.0"}],
+    )
+
+    assert allocations == [
+        {"paddock_id": str(north.id), "allocation_fraction": "0.2500"},
+        {"paddock_id": str(south.id), "allocation_fraction": "0.7500"},
+    ]
+
+
 def test_open_gate_chain_redistributes_across_full_connected_component(app):
     farm, (a, b, c) = _farm_with_paddocks(("A", 10, 10), ("B", 10, 10), ("C", 20, 20))
     mob = _mob_in_allocations(farm, [(a, Decimal("1.0"))])

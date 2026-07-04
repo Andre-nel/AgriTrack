@@ -485,5 +485,192 @@ data class MobileCommand(
                 payload = payload,
             )
         }
+
+        fun shearerCreate(
+            farmId: String,
+            shearerId: String,
+            name: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("id", shearerId)
+                .put("name", name.trim())
+                .put("active", true)
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "shearer.create",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun shearingSessionCreate(
+            farmId: String,
+            sessionId: String,
+            name: String,
+            species: String,
+            startDate: String,
+            endDate: String,
+            lootjieRate: Double,
+            notes: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("id", sessionId)
+                .put("name", name.trim())
+                .put("species", species.trim())
+                .put("start_date", startDate.trim())
+                .put("lootjie_rate", lootjieRate)
+            if (endDate.isNotBlank()) {
+                payload.put("end_date", endDate.trim())
+            }
+            if (notes.isNotBlank()) {
+                payload.put("notes", notes.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "shearing_session.create",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun shearingSessionUpdate(
+            farmId: String,
+            sessionId: String,
+            status: String,
+        ): MobileCommand = MobileCommand(
+            clientCommandId = UUID.randomUUID().toString(),
+            type = "shearing_session.update",
+            farmId = farmId,
+            payload = JSONObject()
+                .put("session_id", sessionId)
+                .put("status", status.trim()),
+        )
+
+        fun shearingEntryRecord(
+            farmId: String,
+            entryId: String,
+            sessionId: String,
+            workDate: String,
+            shearerId: String,
+            animalGroupType: AnimalGroupTypeSummary,
+            quantity: Int,
+            note: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("id", entryId)
+                .put("session_id", sessionId)
+                .put("work_date", workDate.trim())
+                .put("shearer_id", shearerId)
+                .put(
+                    "animal_group_type",
+                    JSONObject()
+                        .put("id", animalGroupType.id)
+                        .put("species", animalGroupType.species)
+                        .put("breed", animalGroupType.breed)
+                        .put("sex", animalGroupType.sex)
+                        .put("age_class", animalGroupType.ageClass)
+                )
+                .put("quantity", quantity)
+            if (animalGroupType.id.isNotBlank() && !animalGroupType.id.startsWith("pending-")) {
+                payload.put("animal_group_type_id", animalGroupType.id)
+            }
+            if (note.isNotBlank()) {
+                payload.put("note", note.trim())
+            }
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "shearing_entry.record",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun shearingBaleCodeUpsert(
+            farmId: String,
+            baleCodeId: String,
+            species: String,
+            code: String,
+            lineType: String,
+            ageGroup: String,
+            finenessGrade: String,
+            lengthCode: String,
+            finenessMicron: Double?,
+            cleanYieldPercent: Double?,
+            color: String,
+            vegetableMatter: String,
+            styleCharacter: String,
+            consistency: String,
+            fault: String,
+            description: String,
+            notes: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("id", baleCodeId)
+                .put("species", species.trim())
+                .put("code", code.trim())
+                .put("active", true)
+            if (lineType.isNotBlank()) payload.put("line_type", lineType.trim())
+            if (ageGroup.isNotBlank()) payload.put("age_group", ageGroup.trim())
+            if (finenessGrade.isNotBlank()) payload.put("fineness_grade", finenessGrade.trim())
+            if (lengthCode.isNotBlank()) payload.put("length_code", lengthCode.trim().uppercase())
+            finenessMicron?.let { payload.put("fineness_micron", it) }
+            cleanYieldPercent?.let { payload.put("clean_yield_percent", it) }
+            if (color.isNotBlank()) payload.put("color", color.trim())
+            if (vegetableMatter.isNotBlank()) payload.put("vegetable_matter", vegetableMatter.trim())
+            if (styleCharacter.isNotBlank()) payload.put("style_character", styleCharacter.trim())
+            if (consistency.isNotBlank()) payload.put("consistency", consistency.trim())
+            if (fault.isNotBlank()) payload.put("fault", fault.trim())
+            if (description.isNotBlank()) payload.put("description", description.trim())
+            if (notes.isNotBlank()) payload.put("notes", notes.trim())
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "shearing_bale_code.upsert",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun shearingBaleRecord(
+            farmId: String,
+            baleId: String,
+            sessionId: String,
+            baleCodeId: String?,
+            codeText: String,
+            baleNumber: String,
+            weightKg: Double,
+            pricePerKg: Double?,
+            totalPrice: Double?,
+            notes: String,
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("id", baleId)
+                .put("session_id", sessionId)
+                .put("weight_kg", weightKg)
+            baleCodeId?.takeIf { it.isNotBlank() }?.let { payload.put("bale_code_id", it) }
+            if (codeText.isNotBlank()) payload.put("code_text", codeText.trim())
+            if (baleNumber.isNotBlank()) payload.put("bale_number", baleNumber.trim())
+            pricePerKg?.let { payload.put("price_per_kg", it) }
+            totalPrice?.let { payload.put("total_price", it) }
+            if (notes.isNotBlank()) payload.put("notes", notes.trim())
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "shearing_bale.record",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
+        fun shearingBaleDelete(
+            farmId: String,
+            sessionId: String,
+            baleId: String,
+        ): MobileCommand = MobileCommand(
+            clientCommandId = UUID.randomUUID().toString(),
+            type = "shearing_bale.delete",
+            farmId = farmId,
+            payload = JSONObject()
+                .put("session_id", sessionId)
+                .put("bale_id", baleId),
+        )
     }
 }

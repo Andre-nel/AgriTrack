@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 from flask import flash, redirect, render_template, request, url_for
 
 from app.extensions import db
-from app.models import AnimalGroupType, Farm, Paddock, StockLedgerEntry, WaterAsset
+from app.models import AnimalGroupType, Farm, Paddock, ShearingBaleCode, StockLedgerEntry, WaterAsset
 from app.modules.analytics.constants import (
     ANALYTICS_GROUP_LABELS,
     ANALYTICS_GROUP_ORDER,
@@ -21,6 +21,8 @@ from app.modules.analytics.forms import (
     normalize_analytics_group_by,
     normalize_lsu_paddock_tracking_metric,
     normalize_lsu_paddock_tracking_plot_mode,
+    normalize_repeated_query_ids,
+    normalize_shearing_analytics_species,
     normalize_water_asset_analytics_asset_types,
     normalize_water_asset_analytics_plot_mode,
     normalize_water_asset_current_active_filter,
@@ -35,9 +37,12 @@ from app.modules.analytics.presenters import (
 )
 from app.modules.analytics.services import (
     build_lsu_paddock_tracking_report,
+    build_shearing_analytics_report,
     build_water_asset_state_report,
     create_journal_entry,
     earliest_lsu_paddock_breakdown_date,
+    earliest_shearing_session_date,
+    latest_shearing_session_date,
     lsu_paddock_breakdown_uncovered_paddocks,
 )
 from app.services.water_network_service import WaterNetworkService
@@ -51,6 +56,34 @@ def _water_asset_filter_label(asset: WaterAsset, include_farm_name: bool) -> str
     if include_farm_name and asset.farm:
         return f"{asset.farm.name} | {asset.name}"
     return asset.name
+
+
+def _truthy_query_flag(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _format_optional_number(value, decimals: int = 2) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):,.{decimals}f}"
+
+
+def _format_count(value) -> str:
+    if value is None:
+        return "N/A"
+    return f"{int(value):,}"
+
+
+def _format_money(value) -> str:
+    if value is None:
+        return "N/A"
+    return f"R {float(value):,.2f}"
+
+
+def _format_rate(value) -> str:
+    if value is None:
+        return "N/A"
+    return f"R {float(value):,.4f}"
 
 
 def register_legacy_routes(bp) -> None:
@@ -350,6 +383,102 @@ def register_legacy_routes(bp) -> None:
             chart_payload=report["chart_payload"],
             summary_rows=report["summary_rows"],
             has_history=report["has_history"],
+        )
+
+    @bp.get("/analytics/shearing")
+    def analytics_shearing():
+        farms = Farm.query.order_by(Farm.name).all()
+        valid_farm_ids = {str(farm.id) for farm in farms}
+        selected_farm_ids = [
+            farm_id
+            for farm_id in normalize_repeated_query_ids(request.args.getlist("farm_id"))
+            if farm_id in valid_farm_ids
+        ]
+        selected_species = normalize_shearing_analytics_species(request.args.get("species"))
+        group_by_farm = _truthy_query_flag(request.args.get("group_by_farm"))
+        today = date.today()
+        rolling_start = today - timedelta(days=730)
+        earliest_session = earliest_shearing_session_date(
+            farm_ids=selected_farm_ids,
+            species=selected_species,
+        )
+        latest_session = latest_shearing_session_date(
+            farm_ids=selected_farm_ids,
+            species=selected_species,
+        )
+        default_start = (
+            max(rolling_start, earliest_session)
+            if earliest_session is not None
+            else rolling_start
+        )
+        default_end = max(today, latest_session) if latest_session is not None else today
+
+        try:
+            start_date = parse_query_date(request.args.get("start_date")) or default_start
+            end_date = parse_query_date(request.args.get("end_date")) or default_end
+        except ValueError:
+            flash("Shearing analytics dates must be valid (YYYY-MM-DD)", "error")
+            return redirect(url_for("web.analytics_shearing"))
+
+        if end_date < start_date:
+            flash("Shearing analytics end date must be on or after the start date", "error")
+            return redirect(url_for("web.analytics_shearing"))
+
+        bale_code_query = ShearingBaleCode.query
+        if selected_species:
+            bale_code_query = bale_code_query.filter(ShearingBaleCode.species == selected_species)
+        bale_codes = bale_code_query.order_by(
+            ShearingBaleCode.species.asc(),
+            ShearingBaleCode.code.asc(),
+        ).all()
+        valid_bale_code_ids = {str(code.id) for code in bale_codes}
+        selected_bale_code_ids = [
+            code_id
+            for code_id in normalize_repeated_query_ids(request.args.getlist("bale_code_id"))
+            if code_id in valid_bale_code_ids
+        ]
+
+        report = build_shearing_analytics_report(
+            farm_ids=selected_farm_ids,
+            species=selected_species,
+            start_date=start_date,
+            end_date=end_date,
+            bale_code_ids=selected_bale_code_ids,
+            group_by_farm=group_by_farm,
+        )
+        filter_options = {
+            "farms": [{"id": str(farm.id), "name": farm.name} for farm in farms],
+            "species": ["Sheep", "Goat"],
+            "bale_codes": [
+                {
+                    "id": str(code.id),
+                    "species": code.species,
+                    "code": code.code,
+                    "label": code.code if selected_species else f"{code.species} | {code.code}",
+                }
+                for code in bale_codes
+            ],
+        }
+        selected_filters = {"species": selected_species}
+
+        return render_template(
+            "analytics/shearing.html",
+            filter_options=filter_options,
+            selected_filters=selected_filters,
+            selected_farm_ids=selected_farm_ids,
+            selected_bale_code_ids=selected_bale_code_ids,
+            group_by_farm=group_by_farm,
+            start_date=start_date,
+            end_date=end_date,
+            chart_payload=report["chart_payload"],
+            summary=report["summary"],
+            session_rows=report["session_rows"],
+            code_rows=report["code_rows"],
+            has_sessions=report["has_sessions"],
+            format_count=_format_count,
+            format_money=_format_money,
+            format_rate=_format_rate,
+            format_number=_format_optional_number,
         )
 
     @bp.get("/analytics/lsu-paddock-tracking")

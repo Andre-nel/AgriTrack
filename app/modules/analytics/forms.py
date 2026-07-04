@@ -51,6 +51,27 @@ def normalize_lsu_paddock_tracking_plot_mode(value: str | None) -> str:
     return candidate
 
 
+def normalize_shearing_analytics_species(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate == "sheep":
+        return "Sheep"
+    if candidate == "goat":
+        return "Goat"
+    return ""
+
+
+def normalize_repeated_query_ids(raw_values: list[str]) -> list[str]:
+    selected = []
+    seen = set()
+    for raw in raw_values:
+        value = (raw or "").strip()
+        if not value or value in seen:
+            continue
+        selected.append(value)
+        seen.add(value)
+    return selected
+
+
 def normalize_water_asset_analytics_asset_types(raw_values: list[str]) -> list[str]:
     selected = []
     seen = set()

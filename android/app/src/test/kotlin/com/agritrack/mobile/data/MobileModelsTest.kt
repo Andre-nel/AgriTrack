@@ -428,6 +428,206 @@ class MobileModelsTest {
     }
 
     @Test
+    fun snapshotParserKeepsShearingSessionsAndBreakdowns() {
+        val snapshot = FarmSnapshot.fromJson(
+            JSONObject()
+                .put("farm", JSONObject().put("id", "farm-1").put("name", "North Block").put("timezone", "UTC"))
+                .put(
+                    "shearers",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("id", "shearer-1")
+                            .put("farm_id", "farm-1")
+                            .put("name", "Lootjie")
+                            .put("active", true),
+                    ),
+                )
+                .put(
+                    "shearing_bale_codes",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("id", "code-1")
+                            .put("species", "Sheep")
+                            .put("code", "FH")
+                            .put("active", true)
+                            .put("line_type", "Fleece")
+                            .put("age_group", "Adult")
+                            .put("fineness_grade", "Fine")
+                            .put("length_code", "B")
+                            .put("clean_yield_percent", 80.0)
+                            .put("style_character", "Good character")
+                            .put("consistency", "Even")
+                            .put("fault", "None")
+                            .put("fineness_micron", 21.5),
+                    ),
+                )
+                .put(
+                    "shearing_sessions",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("id", "session-1")
+                            .put("farm_id", "farm-1")
+                            .put("name", "October sheep")
+                            .put("species", "Sheep")
+                            .put("start_date", "2026-10-01")
+                            .put("end_date", "2026-10-03")
+                            .put("status", "open")
+                            .put("lootjie_rate", 10.0)
+                            .put("adult_old_ram_multiplier", 2.0)
+                            .put("notes", "Main shearing")
+                            .put("totals", JSONObject().put("quantity", 4).put("amount", 80.0))
+                            .put(
+                                "bale_money_totals",
+                                JSONObject()
+                                    .put("total_bales", 2)
+                                    .put("total_kg", 150.0)
+                                    .put("priced_bales", 1)
+                                    .put("priced_kg", 80.0)
+                                    .put("unpriced_bales", 1)
+                                    .put("total_price", 1600.0)
+                                    .put("average_price_per_kg", 20.0),
+                            )
+                            .put(
+                                "bale_summary_by_code",
+                                JSONArray().put(
+                                    JSONObject()
+                                        .put("bale_code_id", "code-1")
+                                        .put("code", "FH")
+                                        .put("code_text", "FH")
+                                        .put("bale_count", 2)
+                                        .put("kg", 150.0)
+                                        .put("priced_kg", 80.0)
+                                        .put("unpriced_bales", 1)
+                                        .put("total_price", 1600.0)
+                                        .put("average_price_per_kg", 20.0),
+                                ),
+                            )
+                            .put(
+                                "bales",
+                                JSONArray()
+                                    .put(
+                                        JSONObject()
+                                            .put("id", "bale-1")
+                                            .put("session_id", "session-1")
+                                            .put("bale_code_id", "code-1")
+                                            .put("code", "FH")
+                                            .put("code_text", "FH")
+                                            .put("bale_number", "1")
+                                            .put("weight_kg", 80.0)
+                                            .put("price_per_kg", 20.0)
+                                            .put("total_price", 1600.0)
+                                            .put("pricing_input_mode", "price_per_kg"),
+                                    )
+                                    .put(
+                                        JSONObject()
+                                            .put("id", "bale-2")
+                                            .put("session_id", "session-1")
+                                            .put("bale_code_id", "code-1")
+                                            .put("code", "FH")
+                                            .put("code_text", "FH")
+                                            .put("bale_number", "2")
+                                            .put("weight_kg", 70.0)
+                                            .put("pricing_input_mode", "unpriced"),
+                                    ),
+                            )
+                            .put(
+                                "entries",
+                                JSONArray().put(
+                                    JSONObject()
+                                        .put("id", "entry-1")
+                                        .put("session_id", "session-1")
+                                        .put("work_date", "2026-10-01")
+                                        .put("shearer_id", "shearer-1")
+                                        .put("shearer_name", "Lootjie")
+                                        .put("animal_group_type_id", "group-1")
+                                        .put(
+                                            "animal_group_type",
+                                            JSONObject()
+                                                .put("id", "group-1")
+                                                .put("species", "Sheep")
+                                                .put("breed", "Merino")
+                                                .put("sex", "ram")
+                                                .put("age_class", "adult"),
+                                        )
+                                        .put("quantity", 4)
+                                        .put("multiplier", 2.0)
+                                        .put("unit_rate", 20.0)
+                                        .put("line_amount", 80.0)
+                                        .put("note", "Strong line"),
+                                ),
+                            )
+                            .put(
+                                "by_shearer",
+                                JSONArray().put(
+                                    JSONObject()
+                                        .put("shearer_id", "shearer-1")
+                                        .put("shearer_name", "Lootjie")
+                                        .put("quantity", 4)
+                                        .put("amount", 80.0),
+                                ),
+                            )
+                            .put(
+                                "by_animal_type",
+                                JSONArray().put(
+                                    JSONObject()
+                                        .put("animal_group_type_id", "group-1")
+                                        .put(
+                                            "animal_group_type",
+                                            JSONObject()
+                                                .put("id", "group-1")
+                                                .put("species", "Sheep")
+                                                .put("breed", "Merino")
+                                                .put("sex", "ram")
+                                                .put("age_class", "adult"),
+                                        )
+                                        .put("quantity", 4)
+                                        .put("amount", 80.0),
+                                ),
+                            )
+                            .put(
+                                "by_date",
+                                JSONArray().put(
+                                    JSONObject()
+                                        .put("work_date", "2026-10-01")
+                                        .put("quantity", 4)
+                                        .put("amount", 80.0),
+                                ),
+                            ),
+                    ),
+                )
+        )
+
+        assertEquals(1, snapshot.shearerCount)
+        assertEquals("Lootjie", snapshot.shearers.first().name)
+        assertEquals(true, snapshot.shearers.first().active)
+        assertEquals(1, snapshot.shearingBaleCodeCount)
+        assertEquals("Fine", snapshot.shearingBaleCodes.first().finenessGrade)
+        assertEquals("B", snapshot.shearingBaleCodes.first().lengthCode)
+        assertEquals(80.0, snapshot.shearingBaleCodes.first().cleanYieldPercent ?: 0.0, 0.0)
+        assertEquals("Even", snapshot.shearingBaleCodes.first().consistency)
+        assertEquals(1, snapshot.shearingSessionCount)
+        val session = snapshot.shearingSessions.first()
+        assertEquals("October sheep", session.name)
+        assertEquals("Open", session.statusLabel)
+        assertEquals(4, session.totalQuantity)
+        assertEquals(80.0, session.totalAmount, 0.0)
+        assertEquals(2, session.baleMoneyTotals.totalBales)
+        assertEquals(150.0, session.baleMoneyTotals.totalKg, 0.0)
+        assertEquals(20.0, session.baleMoneyTotals.averagePricePerKg ?: 0.0, 0.0)
+        assertEquals("FH", session.baleSummaryByCode.first().code)
+        assertEquals(1, session.baleMoneyTotals.unpricedBales)
+        assertEquals(2, session.bales.size)
+        assertEquals(1600.0, session.bales.first().totalPrice ?: 0.0, 0.0)
+        assertEquals(2.0, session.entries.first().multiplier, 0.0)
+        assertEquals(20.0, session.entries.first().unitRate, 0.0)
+        assertEquals("Sheep Merino ram adult", session.entries.first().animalGroupType.label)
+        assertEquals("Strong line", session.entries.first().note)
+        assertEquals(80.0, session.byShearer.first().amount, 0.0)
+        assertEquals(4, session.byAnimalType.first().quantity)
+        assertEquals("2026-10-01", session.byDate.first().workDate)
+    }
+
+    @Test
     fun bootstrapParserKeepsFormOptions() {
         val bootstrap = BootstrapResult.fromJson(
             JSONObject()

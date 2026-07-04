@@ -184,6 +184,13 @@ Important response fields:
       "stock_count.record",
       "mob.move",
       "mob.transfer",
+      "shearer.create",
+      "shearing_session.create",
+      "shearing_session.update",
+      "shearing_entry.record",
+      "shearing_bale_code.upsert",
+      "shearing_bale.record",
+      "shearing_bale.delete",
       "task.create",
       "task.status.update",
       "task.comment.create",
@@ -232,6 +239,9 @@ Response groups:
   "water_assets": [],
   "water_connections": [],
   "gates": [],
+  "shearers": [],
+  "shearing_bale_codes": [],
+  "shearing_sessions": [],
   "task_spaces": [],
   "tasks": [],
   "calendar_activities": [],
@@ -264,6 +274,16 @@ snapshot after the change.
 optional coordinates, shared boundary length, and `last_state_changed_at`.
 `map_features` also includes gate point features with `feature_type: "gate"`
 when coordinates are available.
+
+`shearers` contains reusable global shearer records that can work across farms.
+`shearing_bale_codes` contains the species-global wool/mohair bale code catalog.
+`shearing_sessions` contains sheep/goat shearing sessions with nested daily
+`entries`, nested `bales`, total quantity and payout, plus breakdown arrays by
+shearer, animal type, date, and bale code. Payouts are calculated from the
+session `lootjie_rate`; only animal groups with `sex: "ram"` and `age_class` of
+`adult` or `old` use the 2x ram multiplier. Bale revenue stays separate from
+shearer payouts. `bale_money_totals.average_price_per_kg` is calculated from
+priced bales only, while unpriced bales still count toward `total_kg`.
 
 ### Mobile Map Data
 
@@ -385,6 +405,13 @@ Supported command types:
 - `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group.
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
 - `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.
+- `shearer.create`: client-generated `id`, `name`, optional `active`.
+- `shearing_session.create`: client-generated `id`, `name`, `species` (`Sheep` or `Goat`), `start_date`, optional `end_date`, `lootjie_rate`, optional `notes`.
+- `shearing_session.update`: `session_id`, and at least one editable field: `name`, `species`, `start_date`, `end_date`, `lootjie_rate`, `notes`, or `status`.
+- `shearing_entry.record`: `session_id`, `work_date`, `shearer_id`, `quantity`, optional `note`, plus either `animal_group_type_id` or an `animal_group_type` object with `species`, `breed`, `sex`, and `age_class`. Quantity `0` removes the matching daily row.
+- `shearing_bale_code.upsert`: client-generated `id`, `species` (`Sheep` or `Goat`), `code`, optional `active`, optional `line_type`, `age_group`, `fineness_grade`, `length_code`, `fineness_micron`, `clean_yield_percent`, `style_character`, `consistency`, `color`, `vegetable_matter`, `fault`, `description`, and `notes`.
+- `shearing_bale.record`: client-generated `id`, `session_id`, positive `weight_kg`, optional `bale_code_id`, optional ad-hoc `code_text`, optional `bale_number`, optional `price_per_kg`, optional `total_price`, and optional `notes`. If only one price field is supplied, the server calculates the other; both fields may be blank until sale prices are known.
+- `shearing_bale.delete`: `session_id` and `bale_id`.
 - `task.create`: `heading`, `description`, optional `space_id`, optional `due_date`, optional entity link ids.
 - `task.status.update`: `task_id`, `status`, optional `note`, optional `changed_at`; `note` is required when `status` is `closed`.
 - `task.comment.create`: `task_id`, `body`.

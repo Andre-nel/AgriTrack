@@ -27,6 +27,10 @@ from app.models import (
     PaddockEvent,
     PaddockGate,
     RainfallRecord,
+    Shearer,
+    ShearingBaleCode,
+    ShearingEntry,
+    ShearingSession,
     Task,
     TaskAttachment,
     TaskComment,
@@ -47,6 +51,7 @@ from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
 from app.services.paddock_event_service import PaddockEventService
 from app.services.reporting_service import ReportingService
+from app.services.shearing_service import ShearingService
 from app.services.stock_service import StockService
 from app.services.task_service import (
     TASK_PRIORITIES,
@@ -556,6 +561,28 @@ def _serialize_calendar_activity(activity: CalendarActivity) -> dict:
     }
 
 
+def _serialize_shearer(shearer: Shearer) -> dict:
+    payload = ShearingService.serialize_shearer(shearer)
+    payload["updated_at"] = _iso_datetime(shearer.updated_at)
+    return payload
+
+
+def _serialize_shearing_session(session: ShearingSession) -> dict:
+    payload = ShearingService.serialize_session(session)
+    payload["updated_at"] = _iso_datetime(session.updated_at)
+    for entry_payload, entry in zip(payload.get("entries", []), ShearingService.sorted_entries(session.entries)):
+        entry_payload["updated_at"] = _iso_datetime(entry.updated_at)
+    for bale_payload, bale in zip(payload.get("bales", []), ShearingService.sorted_bales(session.bales)):
+        bale_payload["updated_at"] = _iso_datetime(bale.updated_at)
+    return payload
+
+
+def _serialize_shearing_bale_code(bale_code: ShearingBaleCode) -> dict:
+    payload = ShearingService.serialize_bale_code(bale_code)
+    payload["updated_at"] = _iso_datetime(bale_code.updated_at)
+    return payload
+
+
 def _mobile_visible_calendar_entity_links(
     links: list[dict],
     *,
@@ -923,6 +950,13 @@ def bootstrap():
                     "stock_count.record",
                     "mob.move",
                     "mob.transfer",
+                    "shearer.create",
+                    "shearing_session.create",
+                    "shearing_session.update",
+                    "shearing_entry.record",
+                    "shearing_bale_code.upsert",
+                    "shearing_bale.record",
+                    "shearing_bale.delete",
                     "task.create",
                     "task.status.update",
                     "task.comment.create",
@@ -1038,6 +1072,9 @@ def farm_snapshot(farm_id):
         .order_by(PaddockGate.status.asc(), PaddockGate.created_at.asc())
         .all()
     )
+    shearers = Shearer.query.order_by(Shearer.active.desc(), Shearer.name.asc()).all()
+    shearing_bale_codes = ShearingService.bale_codes_for_species()
+    shearing_sessions = ShearingService.sessions_for_farm(str(farm.id))
     task_spaces = TaskSpace.query.filter_by(farm_id=farm.id).order_by(TaskSpace.key.asc()).all()
     tasks = (
         Task.query.join(TaskSpace)
@@ -1096,6 +1133,13 @@ def farm_snapshot(farm_id):
                 for connection in water_connections
             ],
             "gates": [GateService.serialize_gate(gate) for gate in gates],
+            "shearers": [_serialize_shearer(shearer) for shearer in shearers],
+            "shearing_bale_codes": [
+                _serialize_shearing_bale_code(bale_code) for bale_code in shearing_bale_codes
+            ],
+            "shearing_sessions": [
+                _serialize_shearing_session(session) for session in shearing_sessions
+            ],
             "task_spaces": [_serialize_task_space(space) for space in task_spaces],
             "tasks": [_serialize_task(task, active_mob_ids=active_mob_ids) for task in tasks],
             "calendar_activities": [
@@ -1556,6 +1600,13 @@ def _dispatch_command(command_type: str, farm: Farm, payload) -> dict:
         "stock_count.record": _handle_stock_count_record,
         "mob.move": _handle_mob_move,
         "mob.transfer": _handle_mob_transfer,
+        "shearer.create": _handle_shearer_create,
+        "shearing_session.create": _handle_shearing_session_create,
+        "shearing_session.update": _handle_shearing_session_update,
+        "shearing_entry.record": _handle_shearing_entry_record,
+        "shearing_bale_code.upsert": _handle_shearing_bale_code_upsert,
+        "shearing_bale.record": _handle_shearing_bale_record,
+        "shearing_bale.delete": _handle_shearing_bale_delete,
         "task.create": _handle_task_create,
         "task.status.update": _handle_task_status_update,
         "task.comment.create": _handle_task_comment_create,
@@ -1771,12 +1822,19 @@ def _handle_mob_move(farm: Farm, payload: dict) -> dict:
     destination_farm_id = payload.get("destination_farm_id") or farm.id
     if str(destination_farm_id) != str(farm.id):
         _get_accessible_farm(str(destination_farm_id))
+    allocation_mode = payload.get("allocation_mode")
+    allocations = payload.get("allocations") or []
+    normalized_mode = str(allocation_mode or "").strip().lower()
+    if not normalized_mode and isinstance(allocations, list):
+        normalized_mode = "counts" if any(item.get("group_counts") for item in allocations if isinstance(item, dict)) else "percentage"
+    if normalized_mode != "counts" and isinstance(allocations, list):
+        allocations = GateService.allocations_for_open_gate_network(str(destination_farm_id), allocations)
     session = MovementService.move_mob(
         mob=mob,
-        allocations=payload.get("allocations") or [],
+        allocations=allocations,
         destination_farm_id=str(destination_farm_id),
         when=_parse_iso_datetime(payload.get("event_time"), "event_time"),
-        allocation_mode=payload.get("allocation_mode"),
+        allocation_mode=allocation_mode,
     )
     db.session.flush()
     return {"grazing_session_id": str(session.id)}
@@ -1808,6 +1866,142 @@ def _handle_mob_transfer(farm: Farm, payload: dict) -> dict:
         "source_mob_id": str(source.id),
         "destination_mob_id": str(destination.id),
         "status": "ok",
+    }
+
+
+def _get_shearing_session_for_farm(farm: Farm, session_id: str) -> ShearingSession:
+    session = ShearingSession.query.filter_by(
+        id=str(session_id or "").strip(),
+        farm_id=farm.id,
+    ).first()
+    if session is None:
+        raise MobileApiError("not_found", "Shearing session not found for this farm", 404)
+    return session
+
+
+def _handle_shearer_create(farm: Farm, payload: dict) -> dict:
+    shearer = ShearingService.create_shearer(
+        farm_id=str(farm.id),
+        name=payload.get("name"),
+        shearer_id=payload.get("id") or payload.get("shearer_id"),
+        active=bool(payload.get("active", True)),
+    )
+    db.session.flush()
+    return {"shearer": _serialize_shearer(shearer)}
+
+
+def _handle_shearing_session_create(farm: Farm, payload: dict) -> dict:
+    session = ShearingService.create_session(
+        farm_id=str(farm.id),
+        name=payload.get("name"),
+        species=payload.get("species"),
+        start_date=payload.get("start_date"),
+        end_date=payload.get("end_date"),
+        lootjie_rate=payload.get("lootjie_rate"),
+        notes=payload.get("notes"),
+        session_id=payload.get("id") or payload.get("session_id"),
+    )
+    db.session.flush()
+    return {"shearing_session": _serialize_shearing_session(session)}
+
+
+def _handle_shearing_session_update(farm: Farm, payload: dict) -> dict:
+    session = _get_shearing_session_for_farm(farm, str(payload.get("session_id") or payload.get("id") or "").strip())
+    update_kwargs = {}
+    for field in ("name", "species", "start_date", "end_date", "lootjie_rate", "notes", "status"):
+        if field in payload:
+            update_kwargs[field] = payload.get(field)
+    if not update_kwargs:
+        raise ValueError("At least one shearing session field is required")
+    ShearingService.update_session(session, **update_kwargs)
+    db.session.flush()
+    return {"shearing_session": _serialize_shearing_session(session)}
+
+
+def _handle_shearing_entry_record(farm: Farm, payload: dict) -> dict:
+    session = _get_shearing_session_for_farm(farm, str(payload.get("session_id") or "").strip())
+    group_type = ShearingService.group_type_from_payload(payload, expected_species=session.species)
+    entry_kwargs = {
+        "session": session,
+        "work_date": payload.get("work_date"),
+        "shearer_id": str(payload.get("shearer_id") or "").strip(),
+        "animal_group_type": group_type,
+        "quantity": payload.get("quantity"),
+        "note": payload.get("note"),
+        "entry_id": payload.get("id") or payload.get("entry_id"),
+    }
+    if "unit_rate" in payload:
+        entry_kwargs["unit_rate"] = payload.get("unit_rate")
+    if "line_amount" in payload:
+        entry_kwargs["line_amount"] = payload.get("line_amount")
+    entry = ShearingService.record_entry(**entry_kwargs)
+    db.session.flush()
+    if entry is None:
+        return {
+            "session_id": str(session.id),
+            "deleted": True,
+            "shearing_session": _serialize_shearing_session(session),
+        }
+    return {
+        "entry": ShearingService.serialize_entry(entry, session=session),
+        "shearing_session": _serialize_shearing_session(session),
+    }
+
+
+def _handle_shearing_bale_code_upsert(farm: Farm, payload: dict) -> dict:
+    bale_code = ShearingService.upsert_bale_code(
+        bale_code_id=payload.get("id") or payload.get("bale_code_id"),
+        species=payload.get("species"),
+        code=payload.get("code"),
+        active=bool(payload.get("active", True)),
+        line_type=payload.get("line_type"),
+        age_group=payload.get("age_group"),
+        fineness_grade=payload.get("fineness_grade"),
+        length_code=payload.get("length_code"),
+        fineness_micron=payload.get("fineness_micron"),
+        clean_yield_percent=payload.get("clean_yield_percent"),
+        color=payload.get("color"),
+        vegetable_matter=payload.get("vegetable_matter"),
+        style_character=payload.get("style_character"),
+        consistency=payload.get("consistency"),
+        fault=payload.get("fault"),
+        description=payload.get("description"),
+        notes=payload.get("notes"),
+    )
+    db.session.flush()
+    return {"shearing_bale_code": _serialize_shearing_bale_code(bale_code)}
+
+
+def _handle_shearing_bale_record(farm: Farm, payload: dict) -> dict:
+    session = _get_shearing_session_for_farm(farm, str(payload.get("session_id") or "").strip())
+    bale_code = ShearingService.bale_code_from_payload(payload, expected_species=session.species)
+    bale = ShearingService.record_bale(
+        session=session,
+        bale_id=payload.get("id") or payload.get("bale_id"),
+        bale_code=bale_code,
+        code_text=payload.get("code_text") or payload.get("code"),
+        bale_number=payload.get("bale_number"),
+        weight_kg=payload.get("weight_kg"),
+        price_per_kg=payload.get("price_per_kg"),
+        total_price=payload.get("total_price"),
+        notes=payload.get("notes") or payload.get("note"),
+    )
+    db.session.flush()
+    return {
+        "bale": ShearingService.serialize_bale(bale),
+        "shearing_session": _serialize_shearing_session(session),
+    }
+
+
+def _handle_shearing_bale_delete(farm: Farm, payload: dict) -> dict:
+    session = _get_shearing_session_for_farm(farm, str(payload.get("session_id") or "").strip())
+    bale_id = str(payload.get("bale_id") or payload.get("id") or "").strip()
+    ShearingService.delete_bale(session=session, bale_id=bale_id)
+    db.session.flush()
+    return {
+        "bale_id": bale_id,
+        "deleted": True,
+        "shearing_session": _serialize_shearing_session(session),
     }
 
 

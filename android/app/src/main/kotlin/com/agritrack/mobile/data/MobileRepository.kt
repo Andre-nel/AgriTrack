@@ -1,6 +1,7 @@
 package com.agritrack.mobile.data
 
 import org.json.JSONArray
+import java.util.UUID
 
 class MobileRepository(
     private val apiClient: MobileApiClient,
@@ -282,6 +283,142 @@ class MobileRepository(
             caption = caption,
             capturedAt = capturedAt,
         )
+    }
+
+    fun queueShearerCreate(farmId: String, name: String): String {
+        val shearerId = UUID.randomUUID().toString()
+        fieldStore.enqueue(MobileCommand.shearerCreate(farmId, shearerId, name))
+        return shearerId
+    }
+
+    fun queueShearingSessionCreate(
+        farmId: String,
+        name: String,
+        species: String,
+        startDate: String,
+        endDate: String,
+        lootjieRate: Double,
+        notes: String,
+    ): String {
+        val sessionId = UUID.randomUUID().toString()
+        fieldStore.enqueue(
+            MobileCommand.shearingSessionCreate(
+                farmId = farmId,
+                sessionId = sessionId,
+                name = name,
+                species = species,
+                startDate = startDate,
+                endDate = endDate,
+                lootjieRate = lootjieRate,
+                notes = notes,
+            )
+        )
+        return sessionId
+    }
+
+    fun queueShearingSessionStatus(farmId: String, sessionId: String, status: String) {
+        fieldStore.enqueue(MobileCommand.shearingSessionUpdate(farmId, sessionId, status))
+    }
+
+    fun queueShearingEntry(
+        farmId: String,
+        sessionId: String,
+        workDate: String,
+        shearerId: String,
+        animalGroupType: AnimalGroupTypeSummary,
+        quantity: Int,
+        note: String,
+    ): String {
+        val entryId = UUID.randomUUID().toString()
+        fieldStore.enqueue(
+            MobileCommand.shearingEntryRecord(
+                farmId = farmId,
+                entryId = entryId,
+                sessionId = sessionId,
+                workDate = workDate,
+                shearerId = shearerId,
+                animalGroupType = animalGroupType,
+                quantity = quantity,
+                note = note,
+            )
+        )
+        return entryId
+    }
+
+    fun queueShearingBaleCode(
+        farmId: String,
+        species: String,
+        code: String,
+        lineType: String,
+        ageGroup: String,
+        finenessGrade: String,
+        lengthCode: String,
+        finenessMicron: Double?,
+        cleanYieldPercent: Double?,
+        color: String,
+        vegetableMatter: String,
+        styleCharacter: String,
+        consistency: String,
+        fault: String,
+        description: String,
+        notes: String,
+    ): String {
+        val baleCodeId = UUID.randomUUID().toString()
+        fieldStore.enqueue(
+            MobileCommand.shearingBaleCodeUpsert(
+                farmId = farmId,
+                baleCodeId = baleCodeId,
+                species = species,
+                code = code,
+                lineType = lineType,
+                ageGroup = ageGroup,
+                finenessGrade = finenessGrade,
+                lengthCode = lengthCode,
+                finenessMicron = finenessMicron,
+                cleanYieldPercent = cleanYieldPercent,
+                color = color,
+                vegetableMatter = vegetableMatter,
+                styleCharacter = styleCharacter,
+                consistency = consistency,
+                fault = fault,
+                description = description,
+                notes = notes,
+            )
+        )
+        return baleCodeId
+    }
+
+    fun queueShearingBale(
+        farmId: String,
+        sessionId: String,
+        baleCodeId: String?,
+        codeText: String,
+        baleNumber: String,
+        weightKg: Double,
+        pricePerKg: Double?,
+        totalPrice: Double?,
+        notes: String,
+    ): String {
+        val baleId = UUID.randomUUID().toString()
+        fieldStore.enqueue(
+            MobileCommand.shearingBaleRecord(
+                farmId = farmId,
+                baleId = baleId,
+                sessionId = sessionId,
+                baleCodeId = baleCodeId,
+                codeText = codeText,
+                baleNumber = baleNumber,
+                weightKg = weightKg,
+                pricePerKg = pricePerKg,
+                totalPrice = totalPrice,
+                notes = notes,
+            )
+        )
+        return baleId
+    }
+
+    fun queueShearingBaleDelete(farmId: String, sessionId: String, baleId: String) {
+        fieldStore.enqueue(MobileCommand.shearingBaleDelete(farmId, sessionId, baleId))
     }
 
     fun syncQueuedCommands(refreshAfterSync: Boolean = true): SyncSummary {

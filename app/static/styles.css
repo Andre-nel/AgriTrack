@@ -308,6 +308,81 @@ th, td {
   text-align: left;
 }
 
+.table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.shearing-entry-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.shearing-entry-table {
+  min-width: 58rem;
+  table-layout: fixed;
+  border: 0;
+}
+
+.shearing-entry-table th,
+.shearing-entry-table td {
+  padding: 0.38rem;
+  vertical-align: top;
+}
+
+.shearing-entry-table input,
+.shearing-entry-table select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.42rem;
+  border-radius: 6px;
+  font-size: 0.86rem;
+}
+
+.shearing-entry-table .btn {
+  width: 100%;
+  padding: 0.42rem 0.5rem;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.shearing-entry-row-actions {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.shearing-entry-row-actions form {
+  margin: 0;
+}
+
+.shearing-entry-col-date {
+  width: 7.8rem;
+}
+
+.shearing-entry-col-shearer {
+  width: 8.6rem;
+}
+
+.shearing-entry-col-animal {
+  width: 10.6rem;
+}
+
+.shearing-entry-col-count {
+  width: 4.4rem;
+}
+
+.shearing-entry-col-money {
+  width: 5.4rem;
+}
+
+.shearing-entry-col-note {
+  width: auto;
+}
+
+.shearing-entry-col-actions {
+  width: 5.8rem;
+}
+
 .balance-row {
   cursor: pointer;
 }

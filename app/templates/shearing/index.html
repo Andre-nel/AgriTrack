@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}Shearing | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Shearing</h1>
+  <p>Track sheep and goat shearing sessions, daily shearer counts, bale weights, and wool or mohair revenue.</p>
+</section>
+
+<section class="card">
+  <form method="get" action="{{ url_for('shearing.index') }}" class="grid-form">
+    <div class="grid-two">
+      <label>Farm
+        <select name="farm_id">
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if farm.id == selected_farm_id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Open Farm</button>
+    </div>
+  </form>
+</section>
+
+{% if selected_farm_id %}
+<section class="card">
+  <h2>Create Shearing Session</h2>
+  <form method="post" action="{{ url_for('shearing.create_session') }}" class="grid-form">
+    <input type="hidden" name="farm_id" value="{{ selected_farm_id }}" />
+    <div class="grid-two">
+      <label>Session Name
+        <input name="name" placeholder="July goat shearing" required />
+      </label>
+      <label>Species
+        <select name="species" required>
+          <option value="Sheep">Sheep</option>
+          <option value="Goat">Goat</option>
+        </select>
+      </label>
+      <label>Start Date
+        <input type="date" name="start_date" value="{{ today }}" required />
+      </label>
+      <label>End Date
+        <input type="date" name="end_date" />
+      </label>
+      <label>Lootjie Rate
+        <input name="lootjie_rate" inputmode="decimal" placeholder="0.00" required />
+      </label>
+    </div>
+    <label>Notes
+      <textarea name="notes" rows="3" placeholder="Optional session notes"></textarea>
+    </label>
+    <div class="row-actions">
+      <button type="submit" class="btn">Create Session</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Reusable Shearers</h2>
+  <p class="muted">Shearers are shared across farms and can be selected for any farm's shearing session.</p>
+  <form method="post" action="{{ url_for('shearing.create_shearer') }}" class="grid-form">
+    <input type="hidden" name="farm_id" value="{{ selected_farm_id }}" />
+    <div class="grid-two">
+      <label>Shearer Name
+        <input name="name" placeholder="Shearer name" required />
+      </label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Shearer</button>
+    </div>
+  </form>
+
+  {% if shearers %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for shearer in shearers %}
+        <tr>
+          <td>{{ shearer.name }}</td>
+          <td><span class="badge {% if shearer.active %}ok{% endif %}">{{ "Active" if shearer.active else "Inactive" }}</span></td>
+          <td>
+            <form method="post" action="{{ url_for('shearing.toggle_shearer', shearer_id=shearer.id) }}">
+              <input type="hidden" name="farm_id" value="{{ selected_farm_id }}" />
+              <button type="submit" class="btn btn-secondary">{{ "Deactivate" if shearer.active else "Reactivate" }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No shearers saved yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Bale Code Catalog</h2>
+  <p class="muted">Codes are shared by species across all farms, and individual bales can still use an ad-hoc code.</p>
+  <form method="post" action="{{ url_for('shearing.create_bale_code') }}" class="grid-form">
+    <input type="hidden" name="farm_id" value="{{ selected_farm_id }}" />
+    <div class="grid-two">
+      <label>Species
+        <select name="species" required>
+          <option value="Sheep">Sheep / Wool</option>
+          <option value="Goat">Goat / Mohair</option>
+        </select>
+      </label>
+      <label>Code
+        <input name="code" placeholder="FH / BS / Kid A" required />
+      </label>
+      <label>Line Type
+        <input name="line_type" placeholder="Fleece / Stain / Cot / Seed" />
+      </label>
+      <label>Age Group
+        <input name="age_group" placeholder="Kid / Young goat / Adult" />
+      </label>
+      <label>Fineness Grade
+        <input name="fineness_grade" placeholder="Fine fine young goat / FH" />
+      </label>
+      <label>Length Code
+        <input name="length_code" placeholder="AA / A / B / C / D / E" />
+      </label>
+      <label>Fineness (Micron)
+        <input name="fineness_micron" inputmode="decimal" placeholder="21.5" />
+      </label>
+      <label>Clean Yield %
+        <input name="clean_yield_percent" inputmode="decimal" placeholder="80" />
+      </label>
+      <label>Style And Character
+        <input name="style_character" placeholder="Good curl / soft handle" />
+      </label>
+      <label>Consistency
+        <input name="consistency" placeholder="Even / mixed" />
+      </label>
+      <label>Color
+        <input name="color" placeholder="White / Cream" />
+      </label>
+      <label>Vegetable Matter
+        <input name="vegetable_matter" placeholder="Low / Medium" />
+      </label>
+      <label>Fault / Outsort
+        <input name="fault" placeholder="STN / LOX / COT / SDY" />
+      </label>
+    </div>
+    <label>Description
+      <textarea name="description" rows="2" placeholder="Optional code description"></textarea>
+    </label>
+    <label>Notes
+      <textarea name="notes" rows="2" placeholder="Optional catalog notes"></textarea>
+    </label>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Bale Code</button>
+    </div>
+  </form>
+
+  {% for species in ["Sheep", "Goat"] %}
+  {% set species_codes = bale_codes|selectattr("species", "equalto", species)|list %}
+  <h3>{{ species }} Codes</h3>
+  {% if species_codes %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Traits</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for code in species_codes %}
+        <tr>
+          <td>{{ code.code }}</td>
+          <td>
+            {{ code.line_type or "Line" }}
+            {% if code.age_group %} | {{ code.age_group }}{% endif %}
+            {% if code.fineness_grade %} | {{ code.fineness_grade }}{% endif %}
+            {% if code.length_code %} | {{ code.length_code }} length{% endif %}
+            {% if code.fineness_micron %} | {{ code.fineness_micron }} micron{% endif %}
+            {% if code.clean_yield_percent %} | {{ code.clean_yield_percent }}% clean yield{% endif %}
+            {% if code.style_character %} | {{ code.style_character }}{% endif %}
+            {% if code.consistency %} | {{ code.consistency }} consistency{% endif %}
+            {% if code.fault %} | {{ code.fault }}{% endif %}
+          </td>
+          <td><span class="badge {% if code.active %}ok{% endif %}">{{ "Active" if code.active else "Inactive" }}</span></td>
+          <td>
+            <form method="post" action="{{ url_for('shearing.toggle_bale_code', bale_code_id=code.id) }}">
+              <input type="hidden" name="farm_id" value="{{ selected_farm_id }}" />
+              <button type="submit" class="btn btn-secondary">{{ "Deactivate" if code.active else "Reactivate" }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No {{ species|lower }} bale codes saved yet.</p>
+  {% endif %}
+  {% endfor %}
+</section>
+
+{% for species in ["Sheep", "Goat"] %}
+{% set species_sessions = sessions|selectattr("species", "equalto", species)|list %}
+<section class="cards farm-grid">
+  {% for session in species_sessions %}
+  {% set payload = serialize_session(session, include_entries=False) %}
+  {% set money = payload["bale_money_totals"] %}
+  <article class="card">
+    <h2>{{ session.name }}</h2>
+    <p class="muted">{{ species }} | {{ session.start_date }}{% if session.end_date %} to {{ session.end_date }}{% endif %}</p>
+    <p><span class="badge {% if session.status == 'open' %}ok{% endif %}">{{ session.status|title }}</span></p>
+    <p class="cash-summary-value">{{ format_money(money["total_price"]) }}</p>
+    <p class="muted">
+      {{ money["total_bales"] }} bales | {{ "%.3f"|format(money["total_kg"]) }} kg
+      {% if money["average_price_per_kg"] is not none %} | Avg {{ format_money(money["average_price_per_kg"]) }}/kg{% endif %}
+    </p>
+    <p class="muted">{{ payload["totals"]["quantity"] }} shorn | Payout {{ format_money(payload["totals"]["amount"]) }}</p>
+    <a class="btn btn-secondary" href="{{ url_for('shearing.detail', session_id=session.id) }}">Open Session</a>
+  </article>
+  {% else %}
+  <article class="card">
+    <h2>No {{ species }} Sessions</h2>
+    <p class="muted">Create a {{ species|lower }} session above.</p>
+  </article>
+  {% endfor %}
+</section>
+{% endfor %}
+{% else %}
+<section class="card">
+  <p class="muted">Create or activate a farm before adding shearing sessions.</p>
+</section>
+{% endif %}
+{% endblock %}

@@ -279,6 +279,103 @@ class OfflineCommandQueueTest {
     }
 
     @Test
+    fun shearingCommandsShapeSupportedSyncPayloads() {
+        val shearer = MobileCommand.shearerCreate(
+            farmId = "farm-1",
+            shearerId = "shearer-1",
+            name = "  Lootjie  ",
+        ).toJson()
+        val session = MobileCommand.shearingSessionCreate(
+            farmId = "farm-1",
+            sessionId = "session-1",
+            name = "  October sheep  ",
+            species = "Sheep",
+            startDate = "2026-10-01",
+            endDate = "2026-10-03",
+            lootjieRate = 10.0,
+            notes = "Main run",
+        ).toJson()
+        val existingGroupEntry = MobileCommand.shearingEntryRecord(
+            farmId = "farm-1",
+            entryId = "entry-1",
+            sessionId = "session-1",
+            workDate = "2026-10-01",
+            shearerId = "shearer-1",
+            animalGroupType = AnimalGroupTypeSummary("group-1", "Sheep", "Merino", "ram", "adult"),
+            quantity = 4,
+            note = "First day",
+        ).toJson()
+        val newGroupEntry = MobileCommand.shearingEntryRecord(
+            farmId = "farm-1",
+            entryId = "entry-2",
+            sessionId = "session-1",
+            workDate = "2026-10-02",
+            shearerId = "shearer-1",
+            animalGroupType = AnimalGroupTypeSummary("pending-group-1", "Sheep", "Dormer", "ewe", "adult"),
+            quantity = 7,
+            note = "",
+        ).toJson()
+        val close = MobileCommand.shearingSessionUpdate("farm-1", "session-1", "closed").toJson()
+        val baleCode = MobileCommand.shearingBaleCodeUpsert(
+            farmId = "farm-1",
+            baleCodeId = "code-1",
+            species = "Sheep",
+            code = "  FH  ",
+            lineType = "Fleece",
+            ageGroup = "Adult",
+            finenessGrade = "Fine",
+            lengthCode = "b",
+            finenessMicron = 21.5,
+            cleanYieldPercent = 80.0,
+            color = "White",
+            vegetableMatter = "Low",
+            styleCharacter = "Good character",
+            consistency = "Even",
+            fault = "None",
+            description = "Fine hogget",
+            notes = "",
+        ).toJson()
+        val bale = MobileCommand.shearingBaleRecord(
+            farmId = "farm-1",
+            baleId = "bale-1",
+            sessionId = "session-1",
+            baleCodeId = "code-1",
+            codeText = "",
+            baleNumber = "B1",
+            weightKg = 80.0,
+            pricePerKg = 20.0,
+            totalPrice = null,
+            notes = "Sold later",
+        ).toJson()
+        val deleteBale = MobileCommand.shearingBaleDelete("farm-1", "session-1", "bale-1").toJson()
+
+        assertEquals("shearer.create", shearer.getString("type"))
+        assertEquals("Lootjie", shearer.getJSONObject("payload").getString("name"))
+        assertEquals(true, shearer.getJSONObject("payload").getBoolean("active"))
+        assertEquals("shearing_session.create", session.getString("type"))
+        assertEquals("October sheep", session.getJSONObject("payload").getString("name"))
+        assertEquals("2026-10-03", session.getJSONObject("payload").getString("end_date"))
+        assertEquals("shearing_entry.record", existingGroupEntry.getString("type"))
+        assertEquals("group-1", existingGroupEntry.getJSONObject("payload").getString("animal_group_type_id"))
+        assertEquals("adult", existingGroupEntry.getJSONObject("payload").getJSONObject("animal_group_type").getString("age_class"))
+        assertEquals(false, newGroupEntry.getJSONObject("payload").has("animal_group_type_id"))
+        assertEquals("Dormer", newGroupEntry.getJSONObject("payload").getJSONObject("animal_group_type").getString("breed"))
+        assertEquals("shearing_session.update", close.getString("type"))
+        assertEquals("closed", close.getJSONObject("payload").getString("status"))
+        assertEquals("shearing_bale_code.upsert", baleCode.getString("type"))
+        assertEquals("FH", baleCode.getJSONObject("payload").getString("code"))
+        assertEquals("B", baleCode.getJSONObject("payload").getString("length_code"))
+        assertEquals(21.5, baleCode.getJSONObject("payload").getDouble("fineness_micron"), 0.0)
+        assertEquals(80.0, baleCode.getJSONObject("payload").getDouble("clean_yield_percent"), 0.0)
+        assertEquals("shearing_bale.record", bale.getString("type"))
+        assertEquals("code-1", bale.getJSONObject("payload").getString("bale_code_id"))
+        assertEquals(80.0, bale.getJSONObject("payload").getDouble("weight_kg"), 0.0)
+        assertEquals(false, bale.getJSONObject("payload").has("total_price"))
+        assertEquals("shearing_bale.delete", deleteBale.getString("type"))
+        assertEquals("bale-1", deleteBale.getJSONObject("payload").getString("bale_id"))
+    }
+
+    @Test
     fun fieldEditCommandsShapeSupportedSyncPayloads() {
         val water = MobileCommand.waterAssetStatus(
             farmId = "farm-1",

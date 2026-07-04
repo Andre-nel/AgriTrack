@@ -686,6 +686,53 @@ class GateService:
         ]
 
     @classmethod
+    def allocations_for_open_gate_network(
+        cls,
+        farm_id: str,
+        allocations: list[dict],
+    ) -> list[dict]:
+        paddocks_by_id = cls._active_paddocks_by_id(str(farm_id))
+        if not paddocks_by_id:
+            return allocations
+
+        connected_components = [
+            component
+            for component in cls._components(set(paddocks_by_id), cls._open_edges(str(farm_id)))
+            if len(component) > 1
+        ]
+        if not connected_components:
+            return allocations
+
+        component_by_paddock = {
+            paddock_id: component
+            for component in connected_components
+            for paddock_id in component
+        }
+        target: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        changed = False
+
+        for item in allocations:
+            if not isinstance(item, dict):
+                return allocations
+            paddock_id = str(item.get("paddock_id") or "").strip()
+            if paddock_id not in paddocks_by_id:
+                return allocations
+            fraction = Decimal(str(item.get("allocation_fraction", 0)))
+            component = component_by_paddock.get(paddock_id)
+            if component is None:
+                target[paddock_id] += fraction
+                continue
+
+            component_paddocks = [paddocks_by_id[row_id] for row_id in component]
+            for row_id, row_fraction in cls._area_weighted_allocations(component_paddocks, fraction).items():
+                target[row_id] += row_fraction
+            changed = True
+
+        if not changed:
+            return allocations
+        return cls._allocation_payloads(target, paddocks_by_id)
+
+    @classmethod
     def _apply_allocations(
         cls,
         *,

@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Shearing | Analytics | AgriTrack{% endblock %}
+{% block content %}
+<a class="btn btn-secondary" href="{{ url_for('web.analytics_landing') }}">Back To Analytics</a>
+<h1>Shearing Analytics</h1>
+<p class="muted">Session production, bale revenue, and shearing cost trends for wool and mohair.</p>
+
+<section class="card">
+  <h2>Filters</h2>
+  <form method="get" action="{{ url_for('web.analytics_shearing') }}" class="grid-form">
+    <div class="grid-two">
+      <label>Species
+        <select name="species">
+          <option value="">All species</option>
+          {% for value in filter_options.species %}
+          <option value="{{ value }}" {% if selected_filters.species == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Start Date
+        <input type="date" name="start_date" value="{{ start_date }}" />
+      </label>
+    </div>
+
+    <div class="grid-two">
+      <label>End Date
+        <input type="date" name="end_date" value="{{ end_date }}" />
+      </label>
+      <span></span>
+    </div>
+
+    <label>Farms
+      <select name="farm_id" multiple size="6" class="analytics-multi-select">
+        {% for farm in filter_options.farms %}
+        <option value="{{ farm.id }}" {% if farm.id in selected_farm_ids %}selected{% endif %}>
+          {{ farm.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Bale Codes
+      <select name="bale_code_id" multiple size="8" class="analytics-multi-select">
+        {% for option in filter_options.bale_codes %}
+        <option value="{{ option.id }}" {% if option.id in selected_bale_code_ids %}selected{% endif %}>
+          {{ option.label }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <fieldset class="analytics-group-by">
+      <legend>Grouping</legend>
+      <div class="analytics-checkbox-grid">
+        <label class="analytics-checkbox">
+          <input
+            type="checkbox"
+            name="group_by_farm"
+            value="1"
+            {% if group_by_farm %}checked{% endif %}
+          />
+          <span>Group By Farm</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.analytics_shearing') }}">Clear</a>
+    </div>
+  </form>
+</section>
+
+<section class="cards farm-grid">
+  <article class="card stat">
+    <h2>Sessions</h2>
+    <p>{{ format_count(summary.total_sessions) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Total Kg</h2>
+    <p>{{ format_number(summary.total_kg, 3) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Total Money In</h2>
+    <p>{{ format_money(summary.total_money_in) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Average P/kg</h2>
+    <p>{{ format_rate(summary.average_price_per_kg) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Animals Shorn</h2>
+    <p>{{ format_count(summary.animals_shorn) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Kg/Animal</h2>
+    <p>{{ format_number(summary.average_kg_per_animal, 3) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Money/Animal</h2>
+    <p>{{ format_money(summary.average_money_per_animal) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Shearing Costs</h2>
+    <p>{{ format_money(summary.shearing_cost) }}</p>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Trend Charts</h2>
+  <p class="muted">Window: {{ start_date }} to {{ end_date }}</p>
+  {% if chart_payload.panels %}
+  <div class="grazing-chart-grid">
+    {% for panel in chart_payload.panels %}
+    <article class="grazing-chart-card">
+      <h3>{{ panel.title }}</h3>
+      <div class="analytics-chart-wrap">
+        <canvas id="shearingChart{{ loop.index0 }}" data-panel-index="{{ loop.index0 }}" role="img" aria-label="{{ panel.title }} chart"></canvas>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>No shearing sessions or bale money records are available for the selected filters.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Session Summary</h2>
+  <div class="analytics-table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Farm</th>
+          <th>Session</th>
+          <th>Species</th>
+          <th>Date</th>
+          <th>Total Kg</th>
+          <th>Total Money In</th>
+          <th>Average P/kg</th>
+          <th>Animals Shorn</th>
+          <th>Kg/Animal</th>
+          <th>Money/Animal</th>
+          <th>Shearing Cost</th>
+          <th>Cost/Animal</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in session_rows %}
+        <tr>
+          <td>{{ row.farm_name }}</td>
+          <td><a href="{{ url_for('shearing.detail', session_id=row.session_id) }}">{{ row.session_name }}</a></td>
+          <td>{{ row.species }}</td>
+          <td>{{ row.session_date }}</td>
+          <td>{{ format_number(row.total_kg, 3) }}</td>
+          <td>{{ format_money(row.total_money_in) }}</td>
+          <td>{{ format_rate(row.average_price_per_kg) }}</td>
+          <td>{{ format_count(row.animals_shorn) }}</td>
+          <td>{{ format_number(row.average_kg_per_animal, 3) }}</td>
+          <td>{{ format_money(row.average_money_per_animal) }}</td>
+          <td>{{ format_money(row.shearing_cost) }}</td>
+          <td>{{ format_money(row.cost_per_animal) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="12">No shearing sessions match the selected filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Code Breakdown</h2>
+  <div class="analytics-table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Farm</th>
+          <th>Session</th>
+          <th>Code</th>
+          <th>Species</th>
+          <th>Date</th>
+          <th>Bales</th>
+          <th>Kg</th>
+          <th>Priced Kg</th>
+          <th>Average P/kg</th>
+          <th>Total Money In</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in code_rows %}
+        <tr>
+          <td>{{ row.farm_name }}</td>
+          <td><a href="{{ url_for('shearing.detail', session_id=row.session_id) }}">{{ row.session_name }}</a></td>
+          <td>{{ row.code }}</td>
+          <td>{{ row.species }}</td>
+          <td>{{ row.session_date }}</td>
+          <td>{{ format_count(row.bale_count) }}</td>
+          <td>{{ format_number(row.kg, 3) }}</td>
+          <td>{{ format_number(row.priced_kg, 3) }}</td>
+          <td>{{ format_rate(row.average_price_per_kg) }}</td>
+          <td>{{ format_money(row.total_money_in) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10">No bale code breakdown is available for the selected filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if chart_payload.panels %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>
+{% endif %}
+<script id="shearingAnalyticsData" type="application/json">{{ chart_payload | tojson }}</script>
+<script src="{{ url_for('static', filename='analytics_shearing.js') }}"></script>
+{% endblock %}

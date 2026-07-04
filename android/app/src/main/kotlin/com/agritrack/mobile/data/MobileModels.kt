@@ -420,6 +420,134 @@ data class MapFeatureSummary(
     val propertiesJson: String,
 )
 
+data class ShearerSummary(
+    val id: String,
+    val farmId: String? = null,
+    val name: String,
+    val active: Boolean,
+)
+
+data class ShearingEntrySummary(
+    val id: String,
+    val sessionId: String,
+    val workDate: String,
+    val shearerId: String,
+    val shearerName: String,
+    val animalGroupTypeId: String,
+    val animalGroupType: AnimalGroupTypeSummary,
+    val quantity: Int,
+    val multiplier: Double,
+    val unitRate: Double,
+    val lineAmount: Double,
+    val note: String?,
+)
+
+data class ShearingShearerBreakdown(
+    val shearerId: String,
+    val shearerName: String,
+    val quantity: Int,
+    val amount: Double,
+)
+
+data class ShearingAnimalTypeBreakdown(
+    val animalGroupTypeId: String,
+    val animalGroupType: AnimalGroupTypeSummary,
+    val quantity: Int,
+    val amount: Double,
+)
+
+data class ShearingDateBreakdown(
+    val workDate: String,
+    val quantity: Int,
+    val amount: Double,
+)
+
+data class ShearingBaleCodeSummary(
+    val id: String,
+    val species: String,
+    val code: String,
+    val active: Boolean,
+    val lineType: String? = null,
+    val ageGroup: String? = null,
+    val finenessGrade: String? = null,
+    val lengthCode: String? = null,
+    val finenessMicron: Double? = null,
+    val cleanYieldPercent: Double? = null,
+    val styleCharacter: String? = null,
+    val consistency: String? = null,
+    val color: String? = null,
+    val vegetableMatter: String? = null,
+    val fault: String? = null,
+    val description: String? = null,
+    val notes: String? = null,
+) {
+    val label: String
+        get() = listOfNotNull(code, finenessGrade, lengthCode, finenessMicron?.let { "$it micron" })
+            .filter { it.isNotBlank() }
+            .joinToString(" - ")
+}
+
+data class ShearingBaleMoneyTotals(
+    val totalBales: Int = 0,
+    val totalKg: Double = 0.0,
+    val pricedBales: Int = 0,
+    val pricedKg: Double = 0.0,
+    val unpricedBales: Int = 0,
+    val totalPrice: Double = 0.0,
+    val averagePricePerKg: Double? = null,
+)
+
+data class ShearingBaleCodeBreakdown(
+    val baleCodeId: String?,
+    val code: String,
+    val codeText: String?,
+    val baleCount: Int,
+    val kg: Double,
+    val pricedKg: Double,
+    val unpricedBales: Int,
+    val totalPrice: Double,
+    val averagePricePerKg: Double?,
+)
+
+data class ShearingBaleSummary(
+    val id: String,
+    val sessionId: String,
+    val baleCodeId: String?,
+    val code: String,
+    val codeText: String,
+    val baleNumber: String?,
+    val weightKg: Double,
+    val pricePerKg: Double?,
+    val totalPrice: Double?,
+    val pricingInputMode: String,
+    val notes: String?,
+)
+
+data class ShearingSessionSummary(
+    val id: String,
+    val farmId: String,
+    val name: String,
+    val species: String,
+    val startDate: String,
+    val endDate: String?,
+    val status: String,
+    val lootjieRate: Double,
+    val adultOldRamMultiplier: Double,
+    val notes: String?,
+    val totalQuantity: Int,
+    val totalAmount: Double,
+    val entries: List<ShearingEntrySummary>,
+    val byShearer: List<ShearingShearerBreakdown>,
+    val byAnimalType: List<ShearingAnimalTypeBreakdown>,
+    val byDate: List<ShearingDateBreakdown>,
+    val baleMoneyTotals: ShearingBaleMoneyTotals = ShearingBaleMoneyTotals(),
+    val baleSummaryByCode: List<ShearingBaleCodeBreakdown> = emptyList(),
+    val bales: List<ShearingBaleSummary> = emptyList(),
+) {
+    val statusLabel: String
+        get() = status.replace("_", " ").replaceFirstChar(Char::titlecase)
+}
+
 data class FarmSnapshot(
     val farm: FarmSummary,
     val paddockCount: Int,
@@ -432,6 +560,9 @@ data class FarmSnapshot(
     val fenceSectionCount: Int,
     val fenceEventCount: Int,
     val waterAssetStateHistoryCount: Int,
+    val shearerCount: Int,
+    val shearingBaleCodeCount: Int,
+    val shearingSessionCount: Int,
     val taskCount: Int,
     val calendarItemCount: Int,
     val decisionCount: Int,
@@ -448,6 +579,9 @@ data class FarmSnapshot(
     val fenceSections: List<FenceSectionSummary>,
     val fenceEvents: List<FenceEventSummary>,
     val waterAssetStateHistory: List<WaterAssetStateHistorySummary>,
+    val shearers: List<ShearerSummary>,
+    val shearingBaleCodes: List<ShearingBaleCodeSummary>,
+    val shearingSessions: List<ShearingSessionSummary>,
     val tasks: List<TaskSummary>,
     val calendarItems: List<CalendarItemSummary>,
     val decisionFeed: List<DecisionItemSummary>,
@@ -471,6 +605,9 @@ data class FarmSnapshot(
             val fenceSections = parseFenceSections(json.optJSONArray("fence_sections") ?: JSONArray())
             val fenceEvents = parseFenceEvents(json.optJSONArray("fence_events") ?: JSONArray())
             val waterAssetStateHistory = parseWaterAssetStateHistory(json.optJSONArray("water_asset_state_history") ?: JSONArray())
+            val shearers = parseShearers(json.optJSONArray("shearers") ?: JSONArray())
+            val shearingBaleCodes = parseShearingBaleCodes(json.optJSONArray("shearing_bale_codes") ?: JSONArray())
+            val shearingSessions = parseShearingSessions(json.optJSONArray("shearing_sessions") ?: JSONArray())
             val tasks = parseTasks(json.optJSONArray("tasks") ?: JSONArray())
             val calendarItems = parseCalendarItems(json.optJSONArray("calendar_items") ?: JSONArray())
             val decisions = parseDecisionFeed(json.optJSONArray("decision_feed") ?: JSONArray())
@@ -492,6 +629,9 @@ data class FarmSnapshot(
                 fenceSectionCount = fenceSections.size,
                 fenceEventCount = fenceEvents.size,
                 waterAssetStateHistoryCount = waterAssetStateHistory.size,
+                shearerCount = shearers.size,
+                shearingBaleCodeCount = shearingBaleCodes.size,
+                shearingSessionCount = shearingSessions.size,
                 taskCount = tasks.size,
                 calendarItemCount = calendarItems.size,
                 decisionCount = decisions.size,
@@ -508,6 +648,9 @@ data class FarmSnapshot(
                 fenceSections = fenceSections,
                 fenceEvents = fenceEvents,
                 waterAssetStateHistory = waterAssetStateHistory,
+                shearers = shearers,
+                shearingBaleCodes = shearingBaleCodes,
+                shearingSessions = shearingSessions,
                 tasks = tasks,
                 calendarItems = calendarItems,
                 decisionFeed = decisions,
@@ -862,6 +1005,197 @@ data class FarmSnapshot(
                         active = row.optBoolean("active", true),
                         status = row.optNullableString("status"),
                         waterLevel = row.optNullableString("water_level"),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearers(json: JSONArray): List<ShearerSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                add(
+                    ShearerSummary(
+                        id = row.optString("id"),
+                        farmId = row.optNullableString("farm_id"),
+                        name = row.optString("name", "Shearer"),
+                        active = row.optBoolean("active", true),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearingBaleCodes(json: JSONArray): List<ShearingBaleCodeSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                add(
+                    ShearingBaleCodeSummary(
+                        id = row.optString("id"),
+                        species = row.optString("species", "Sheep"),
+                        code = row.optString("code"),
+                        active = row.optBoolean("active", true),
+                        lineType = row.optNullableString("line_type"),
+                        ageGroup = row.optNullableString("age_group"),
+                        finenessGrade = row.optNullableString("fineness_grade"),
+                        lengthCode = row.optNullableString("length_code"),
+                        finenessMicron = row.optNullableDouble("fineness_micron"),
+                        cleanYieldPercent = row.optNullableDouble("clean_yield_percent"),
+                        styleCharacter = row.optNullableString("style_character"),
+                        consistency = row.optNullableString("consistency"),
+                        color = row.optNullableString("color"),
+                        vegetableMatter = row.optNullableString("vegetable_matter"),
+                        fault = row.optNullableString("fault"),
+                        description = row.optNullableString("description"),
+                        notes = row.optNullableString("notes"),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearingSessions(json: JSONArray): List<ShearingSessionSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                val totals = row.optJSONObject("totals") ?: JSONObject()
+                add(
+                    ShearingSessionSummary(
+                        id = row.optString("id"),
+                        farmId = row.optString("farm_id"),
+                        name = row.optString("name", "Shearing session"),
+                        species = row.optString("species", "Sheep"),
+                        startDate = row.optString("start_date"),
+                        endDate = row.optNullableString("end_date"),
+                        status = row.optString("status", "open"),
+                        lootjieRate = row.optDouble("lootjie_rate", 0.0),
+                        adultOldRamMultiplier = row.optDouble("adult_old_ram_multiplier", 2.0),
+                        notes = row.optNullableString("notes"),
+                        totalQuantity = totals.optInt("quantity", 0),
+                        totalAmount = totals.optDouble("amount", 0.0),
+                        entries = parseShearingEntries(row.optJSONArray("entries") ?: JSONArray()),
+                        byShearer = parseShearingShearerBreakdown(row.optJSONArray("by_shearer") ?: JSONArray()),
+                        byAnimalType = parseShearingAnimalBreakdown(row.optJSONArray("by_animal_type") ?: JSONArray()),
+                        byDate = parseShearingDateBreakdown(row.optJSONArray("by_date") ?: JSONArray()),
+                        baleMoneyTotals = parseShearingBaleMoneyTotals(row.optJSONObject("bale_money_totals")),
+                        baleSummaryByCode = parseShearingBaleCodeBreakdown(row.optJSONArray("bale_summary_by_code") ?: JSONArray()),
+                        bales = parseShearingBales(row.optJSONArray("bales") ?: JSONArray()),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearingEntries(json: JSONArray): List<ShearingEntrySummary> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                val groupJson = row.optJSONObject("animal_group_type") ?: JSONObject()
+                val groupId = row.optString("animal_group_type_id", groupJson.optString("id"))
+                add(
+                    ShearingEntrySummary(
+                        id = row.optString("id"),
+                        sessionId = row.optString("session_id"),
+                        workDate = row.optString("work_date"),
+                        shearerId = row.optString("shearer_id"),
+                        shearerName = row.optString("shearer_name", "Shearer"),
+                        animalGroupTypeId = groupId,
+                        animalGroupType = parseAnimalGroupType(groupJson, groupId),
+                        quantity = row.optInt("quantity", 0),
+                        multiplier = row.optDouble("multiplier", 1.0),
+                        unitRate = row.optDouble("unit_rate", 0.0),
+                        lineAmount = row.optDouble("line_amount", 0.0),
+                        note = row.optNullableString("note"),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearingShearerBreakdown(json: JSONArray): List<ShearingShearerBreakdown> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                add(
+                    ShearingShearerBreakdown(
+                        shearerId = row.optString("shearer_id"),
+                        shearerName = row.optString("shearer_name", "Shearer"),
+                        quantity = row.optInt("quantity", 0),
+                        amount = row.optDouble("amount", 0.0),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearingAnimalBreakdown(json: JSONArray): List<ShearingAnimalTypeBreakdown> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                val groupJson = row.optJSONObject("animal_group_type") ?: JSONObject()
+                val groupId = row.optString("animal_group_type_id", groupJson.optString("id"))
+                add(
+                    ShearingAnimalTypeBreakdown(
+                        animalGroupTypeId = groupId,
+                        animalGroupType = parseAnimalGroupType(groupJson, groupId),
+                        quantity = row.optInt("quantity", 0),
+                        amount = row.optDouble("amount", 0.0),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearingDateBreakdown(json: JSONArray): List<ShearingDateBreakdown> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                add(
+                    ShearingDateBreakdown(
+                        workDate = row.optString("work_date"),
+                        quantity = row.optInt("quantity", 0),
+                        amount = row.optDouble("amount", 0.0),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearingBaleMoneyTotals(json: JSONObject?): ShearingBaleMoneyTotals {
+            val row = json ?: JSONObject()
+            return ShearingBaleMoneyTotals(
+                totalBales = row.optInt("total_bales", 0),
+                totalKg = row.optDouble("total_kg", 0.0),
+                pricedBales = row.optInt("priced_bales", 0),
+                pricedKg = row.optDouble("priced_kg", 0.0),
+                unpricedBales = row.optInt("unpriced_bales", 0),
+                totalPrice = row.optDouble("total_price", 0.0),
+                averagePricePerKg = row.optNullableDouble("average_price_per_kg"),
+            )
+        }
+
+        private fun parseShearingBaleCodeBreakdown(json: JSONArray): List<ShearingBaleCodeBreakdown> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                add(
+                    ShearingBaleCodeBreakdown(
+                        baleCodeId = row.optNullableString("bale_code_id"),
+                        code = row.optString("code", "Code"),
+                        codeText = row.optNullableString("code_text"),
+                        baleCount = row.optInt("bale_count", row.optInt("bales", 0)),
+                        kg = row.optDouble("kg", 0.0),
+                        pricedKg = row.optDouble("priced_kg", 0.0),
+                        unpricedBales = row.optInt("unpriced_bales", 0),
+                        totalPrice = row.optDouble("total_price", 0.0),
+                        averagePricePerKg = row.optNullableDouble("average_price_per_kg"),
+                    )
+                )
+            }
+        }
+
+        private fun parseShearingBales(json: JSONArray): List<ShearingBaleSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val row = json.getJSONObject(index)
+                add(
+                    ShearingBaleSummary(
+                        id = row.optString("id"),
+                        sessionId = row.optString("session_id"),
+                        baleCodeId = row.optNullableString("bale_code_id"),
+                        code = row.optString("code", row.optString("code_text", "Code")),
+                        codeText = row.optString("code_text", row.optString("code", "Code")),
+                        baleNumber = row.optNullableString("bale_number"),
+                        weightKg = row.optDouble("weight_kg", 0.0),
+                        pricePerKg = row.optNullableDouble("price_per_kg"),
+                        totalPrice = row.optNullableDouble("total_price"),
+                        pricingInputMode = row.optString("pricing_input_mode", "unpriced"),
+                        notes = row.optNullableString("notes"),
                     )
                 )
             }

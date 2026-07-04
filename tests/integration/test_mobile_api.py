@@ -1422,6 +1422,58 @@ def test_mobile_snapshot_includes_gates_and_gate_update_command(client, app):
     assert refreshed.get_json()["gates"][0]["status"] == "open"
 
 
+def test_mobile_mob_move_into_open_gate_uses_gate_allocations(client, app):
+    with app.app_context():
+        farm = Farm(name="Mobile Open Gate Move Farm", timezone="UTC", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        north = Paddock(farm_id=farm.id, name="North Open", area_ha=10, grazeable_area_ha=10)
+        south = Paddock(farm_id=farm.id, name="South Open", area_ha=30, grazeable_area_ha=30)
+        mob = Mob(farm_id=farm.id, name="Open Gate Move Mob", status="active")
+        db.session.add_all([north, south, mob])
+        db.session.flush()
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(north.id),
+            paddock_b_id=str(south.id),
+        )
+        gate.status = "open"
+        db.session.commit()
+        farm_id = str(farm.id)
+        mob_id = str(mob.id)
+        north_id = str(north.id)
+        south_id = str(south.id)
+
+    token = _login(client)
+    response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={
+            "commands": [
+                {
+                    "client_command_id": "move-into-open-gate-1",
+                    "type": "mob.move",
+                    "farm_id": farm_id,
+                    "payload": {
+                        "mob_id": mob_id,
+                        "allocations": [
+                            {"paddock_id": south_id, "allocation_fraction": 1.0},
+                        ],
+                    },
+                }
+            ]
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 200
+    assert response.get_json()["results"][0]["status"] == "applied"
+
+    with app.app_context():
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {str(row.paddock_id): float(row.allocation_fraction) for row in session.allocations}
+        assert allocations == {north_id: 0.25, south_id: 0.75}
+
+
 def test_mobile_stock_count_can_create_animal_group_from_payload(client, app):
     with app.app_context():
         farm = Farm(name="New Group Mobile Farm", timezone="UTC", active=True)

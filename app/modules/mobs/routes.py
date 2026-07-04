@@ -15,6 +15,7 @@ from app.modules.mobs.presenters import build_mob_detail_context
 from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_balance_line_from_form
 from app.services.mob_event_service import MobEventService
 from app.services.mob_service import MobService
+from app.services.gate_service import GateService
 from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
 
@@ -145,6 +146,7 @@ def register_legacy_routes(bp) -> None:
                     allocation_pcts=request.form.getlist("allocation_pct"),
                     valid_paddock_ids=valid_paddock_ids,
                 )
+                allocations = GateService.allocations_for_open_gate_network(destination_farm_id, allocations)
 
             MovementService.move_mob(
                 mob=mob,

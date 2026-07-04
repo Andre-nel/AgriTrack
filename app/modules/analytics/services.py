@@ -1,7 +1,9 @@
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import func, or_
+from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models import (
@@ -12,6 +14,9 @@ from app.models import (
     GrazingSession,
     JournalEntry,
     Paddock,
+    ShearingBale,
+    ShearingEntry,
+    ShearingSession,
     WaterAsset,
     WaterAssetStateHistory,
 )
@@ -21,6 +26,7 @@ from app.modules.analytics.constants import (
     WATER_ASSET_STATE_FIELD_LABELS,
 )
 from app.services.mob_event_service import MobEventService
+from app.services.shearing_service import ShearingService
 from app.services.water_network_service import WaterNetworkService
 
 
@@ -805,4 +811,412 @@ def build_lsu_paddock_tracking_report(
         },
         "summary_rows": summary_rows,
         "has_history": bool(history_rows),
+    }
+
+
+SHEARING_MONEY_QUANT = Decimal("0.01")
+SHEARING_RATE_QUANT = Decimal("0.0001")
+SHEARING_WEIGHT_QUANT = Decimal("0.001")
+
+
+def _shearing_decimal(value) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def _shearing_float(value: Decimal, quant: Decimal) -> float:
+    return float(value.quantize(quant, rounding=ROUND_HALF_UP))
+
+
+def _shearing_average(
+    numerator: Decimal,
+    denominator: Decimal,
+    quant: Decimal,
+) -> float | None:
+    if denominator <= 0:
+        return None
+    return _shearing_float(numerator / denominator, quant)
+
+
+def _empty_shearing_bale_rollup() -> dict:
+    return {
+        "total_bales": 0,
+        "total_kg": Decimal("0.000"),
+        "priced_bales": 0,
+        "priced_kg": Decimal("0.000"),
+        "total_price": Decimal("0.00"),
+    }
+
+
+def _add_shearing_bale_to_rollup(rollup: dict, bale: ShearingBale) -> None:
+    weight = _shearing_decimal(bale.weight_kg)
+    rollup["total_bales"] += 1
+    rollup["total_kg"] += weight
+    if bale.total_price is not None:
+        rollup["priced_bales"] += 1
+        rollup["priced_kg"] += weight
+        rollup["total_price"] += _shearing_decimal(bale.total_price)
+
+
+def _merge_shearing_bale_rollups(target: dict, source: dict) -> None:
+    target["total_bales"] += source["total_bales"]
+    target["total_kg"] += source["total_kg"]
+    target["priced_bales"] += source["priced_bales"]
+    target["priced_kg"] += source["priced_kg"]
+    target["total_price"] += source["total_price"]
+
+
+def _shearing_bale_label(bale: ShearingBale) -> str:
+    return bale.bale_code.code if bale.bale_code else bale.code_text
+
+
+def _shearing_bale_key(bale: ShearingBale) -> str:
+    if bale.bale_code_id:
+        return str(bale.bale_code_id)
+    return f"ad-hoc:{bale.code_key}"
+
+
+def _filtered_shearing_bales(
+    session: ShearingSession,
+    selected_bale_code_ids: set[str],
+) -> list[ShearingBale]:
+    bales = ShearingService.sorted_bales(session.bales)
+    if not selected_bale_code_ids:
+        return bales
+    return [
+        bale
+        for bale in bales
+        if bale.bale_code_id and str(bale.bale_code_id) in selected_bale_code_ids
+    ]
+
+
+def earliest_shearing_session_date(
+    *,
+    farm_ids: list[str] | None = None,
+    species: str = "",
+) -> date | None:
+    query = db.session.query(func.min(ShearingSession.start_date))
+    if farm_ids:
+        query = query.filter(ShearingSession.farm_id.in_(farm_ids))
+    if species:
+        query = query.filter(ShearingSession.species == species)
+    return query.scalar()
+
+
+def latest_shearing_session_date(
+    *,
+    farm_ids: list[str] | None = None,
+    species: str = "",
+) -> date | None:
+    query = db.session.query(func.max(ShearingSession.start_date))
+    if farm_ids:
+        query = query.filter(ShearingSession.farm_id.in_(farm_ids))
+    if species:
+        query = query.filter(ShearingSession.species == species)
+    return query.scalar()
+
+
+def build_shearing_analytics_report(
+    *,
+    farm_ids: list[str],
+    species: str,
+    start_date: date,
+    end_date: date,
+    bale_code_ids: list[str],
+    group_by_farm: bool,
+) -> dict:
+    selected_bale_code_ids = {str(value).strip() for value in bale_code_ids if str(value).strip()}
+    query = (
+        ShearingSession.query.options(
+            selectinload(ShearingSession.farm),
+            selectinload(ShearingSession.entries).selectinload(ShearingEntry.shearer),
+            selectinload(ShearingSession.entries).selectinload(ShearingEntry.animal_group_type),
+            selectinload(ShearingSession.bales).selectinload(ShearingBale.bale_code),
+        )
+        .join(Farm, ShearingSession.farm_id == Farm.id)
+        .filter(
+            ShearingSession.start_date >= start_date,
+            ShearingSession.start_date <= end_date,
+        )
+    )
+    if farm_ids:
+        query = query.filter(ShearingSession.farm_id.in_(farm_ids))
+    if species:
+        query = query.filter(ShearingSession.species == species)
+
+    sessions = (
+        query.order_by(
+            ShearingSession.start_date.asc(),
+            Farm.name.asc(),
+            ShearingSession.name.asc(),
+            ShearingSession.id.asc(),
+        )
+        .all()
+    )
+
+    session_rows = []
+    code_rows = []
+    code_time_rollups: dict[tuple[str, str], dict] = defaultdict(_empty_shearing_bale_rollup)
+    total_kg = Decimal("0.000")
+    total_priced_kg = Decimal("0.000")
+    total_money_in = Decimal("0.00")
+    total_shearing_cost = Decimal("0.00")
+    total_animals_shorn = 0
+
+    include_farm_in_session_label = group_by_farm or len({str(session.farm_id) for session in sessions}) > 1
+
+    for session in sessions:
+        farm_name = session.farm.name if session.farm else "Unknown Farm"
+        session_date = session.start_date.isoformat()
+        payout_breakdown = ShearingService.session_breakdown(session)
+        animals_shorn = int(payout_breakdown["totals"]["quantity"])
+        shearing_cost = _shearing_decimal(payout_breakdown["totals"]["amount"])
+        bales = _filtered_shearing_bales(session, selected_bale_code_ids)
+        session_rollup = _empty_shearing_bale_rollup()
+        code_rollups: dict[str, dict] = {}
+
+        for bale in bales:
+            _add_shearing_bale_to_rollup(session_rollup, bale)
+            code_key = _shearing_bale_key(bale)
+            code_rollup = code_rollups.setdefault(
+                code_key,
+                {
+                    **_empty_shearing_bale_rollup(),
+                    "bale_code_id": str(bale.bale_code_id) if bale.bale_code_id else None,
+                    "code": _shearing_bale_label(bale),
+                },
+            )
+            _add_shearing_bale_to_rollup(code_rollup, bale)
+
+        total_kg += session_rollup["total_kg"]
+        total_priced_kg += session_rollup["priced_kg"]
+        total_money_in += session_rollup["total_price"]
+        total_shearing_cost += shearing_cost
+        total_animals_shorn += animals_shorn
+
+        animals_decimal = Decimal(animals_shorn)
+        session_label_parts = []
+        if include_farm_in_session_label:
+            session_label_parts.append(farm_name)
+        session_label_parts.extend([session.name, session_date])
+        session_rows.append(
+            {
+                "farm_id": str(session.farm_id),
+                "farm_name": farm_name,
+                "session_id": str(session.id),
+                "session_name": session.name,
+                "species": session.species,
+                "session_date": session_date,
+                "chart_label": " | ".join(session_label_parts),
+                "total_bales": session_rollup["total_bales"],
+                "total_kg": _shearing_float(session_rollup["total_kg"], SHEARING_WEIGHT_QUANT),
+                "priced_kg": _shearing_float(session_rollup["priced_kg"], SHEARING_WEIGHT_QUANT),
+                "total_money_in": _shearing_float(
+                    session_rollup["total_price"],
+                    SHEARING_MONEY_QUANT,
+                ),
+                "average_price_per_kg": _shearing_average(
+                    session_rollup["total_price"],
+                    session_rollup["priced_kg"],
+                    SHEARING_RATE_QUANT,
+                ),
+                "animals_shorn": animals_shorn,
+                "average_kg_per_animal": _shearing_average(
+                    session_rollup["total_kg"],
+                    animals_decimal,
+                    SHEARING_WEIGHT_QUANT,
+                ),
+                "average_money_per_animal": _shearing_average(
+                    session_rollup["total_price"],
+                    animals_decimal,
+                    SHEARING_MONEY_QUANT,
+                ),
+                "shearing_cost": _shearing_float(shearing_cost, SHEARING_MONEY_QUANT),
+                "cost_per_animal": _shearing_average(
+                    shearing_cost,
+                    animals_decimal,
+                    SHEARING_MONEY_QUANT,
+                ),
+            }
+        )
+
+        for code_rollup in code_rollups.values():
+            code_label = code_rollup["code"]
+            series_label = f"{farm_name} | {code_label}" if group_by_farm else code_label
+            _merge_shearing_bale_rollups(
+                code_time_rollups[(session_date, series_label)],
+                code_rollup,
+            )
+            code_rows.append(
+                {
+                    "farm_id": str(session.farm_id),
+                    "farm_name": farm_name,
+                    "session_id": str(session.id),
+                    "session_name": session.name,
+                    "species": session.species,
+                    "session_date": session_date,
+                    "bale_code_id": code_rollup["bale_code_id"],
+                    "code": code_label,
+                    "bale_count": code_rollup["total_bales"],
+                    "kg": _shearing_float(code_rollup["total_kg"], SHEARING_WEIGHT_QUANT),
+                    "priced_kg": _shearing_float(code_rollup["priced_kg"], SHEARING_WEIGHT_QUANT),
+                    "average_price_per_kg": _shearing_average(
+                        code_rollup["total_price"],
+                        code_rollup["priced_kg"],
+                        SHEARING_RATE_QUANT,
+                    ),
+                    "total_money_in": _shearing_float(
+                        code_rollup["total_price"],
+                        SHEARING_MONEY_QUANT,
+                    ),
+                }
+            )
+
+    code_rows.sort(
+        key=lambda row: (
+            row["session_date"],
+            row["farm_name"].lower(),
+            row["session_name"].lower(),
+            row["code"].lower(),
+        )
+    )
+    date_labels = sorted({date_label for date_label, _series in code_time_rollups})
+    code_series_labels = sorted(
+        {series for _date_label, series in code_time_rollups},
+        key=str.lower,
+    )
+
+    def code_dataset(metric: str, series_label: str) -> dict | None:
+        values = []
+        for date_label in date_labels:
+            rollup = code_time_rollups.get((date_label, series_label))
+            if rollup is None:
+                values.append(None if metric == "price" else 0)
+            elif metric == "kg":
+                values.append(_shearing_float(rollup["total_kg"], SHEARING_WEIGHT_QUANT))
+            elif metric == "money":
+                values.append(_shearing_float(rollup["total_price"], SHEARING_MONEY_QUANT))
+            else:
+                values.append(
+                    _shearing_average(
+                        rollup["total_price"],
+                        rollup["priced_kg"],
+                        SHEARING_RATE_QUANT,
+                    )
+                )
+
+        has_values = any(value is not None and value != 0 for value in values)
+        if metric == "price":
+            has_values = any(value is not None for value in values)
+        if not has_values:
+            return None
+        return {"label": series_label, "values": values}
+
+    panels = []
+    code_panel_specs = [
+        ("code-weight", "Weight by Code Over Time", "kg", "kg", "line"),
+        ("code-price", "Price per Kg by Code Over Time", "price", "R/kg", "line"),
+        ("code-money", "Money In by Code Over Time", "money", "R", "bar"),
+    ]
+    for panel_id, title, metric, axis_label, chart_type in code_panel_specs:
+        datasets = [
+            dataset
+            for series_label in code_series_labels
+            if (dataset := code_dataset(metric, series_label)) is not None
+        ]
+        if datasets:
+            panels.append(
+                {
+                    "id": panel_id,
+                    "title": title,
+                    "chart_type": chart_type,
+                    "value_format": metric,
+                    "labels": date_labels,
+                    "y_axis_label": axis_label,
+                    "datasets": datasets,
+                }
+            )
+
+    if session_rows:
+        session_labels = [row["chart_label"] for row in session_rows]
+        panels.extend(
+            [
+                {
+                    "id": "session-total-kg",
+                    "title": "Total Weight Per Session",
+                    "chart_type": "bar",
+                    "value_format": "kg",
+                    "labels": session_labels,
+                    "y_axis_label": "kg",
+                    "datasets": [
+                        {
+                            "label": "Total kg",
+                            "values": [row["total_kg"] for row in session_rows],
+                        }
+                    ],
+                },
+                {
+                    "id": "session-money-cost",
+                    "title": "Money In And Shearing Costs Per Session",
+                    "chart_type": "bar",
+                    "value_format": "money",
+                    "labels": session_labels,
+                    "y_axis_label": "R",
+                    "datasets": [
+                        {
+                            "label": "Total money in",
+                            "values": [row["total_money_in"] for row in session_rows],
+                        },
+                        {
+                            "label": "Shearing costs",
+                            "values": [row["shearing_cost"] for row in session_rows],
+                        },
+                    ],
+                },
+            ]
+        )
+
+    total_animals_decimal = Decimal(total_animals_shorn)
+    summary = {
+        "total_sessions": len(session_rows),
+        "total_kg": _shearing_float(total_kg, SHEARING_WEIGHT_QUANT),
+        "priced_kg": _shearing_float(total_priced_kg, SHEARING_WEIGHT_QUANT),
+        "total_money_in": _shearing_float(total_money_in, SHEARING_MONEY_QUANT),
+        "average_price_per_kg": _shearing_average(
+            total_money_in,
+            total_priced_kg,
+            SHEARING_RATE_QUANT,
+        ),
+        "animals_shorn": total_animals_shorn,
+        "average_kg_per_animal": _shearing_average(
+            total_kg,
+            total_animals_decimal,
+            SHEARING_WEIGHT_QUANT,
+        ),
+        "average_money_per_animal": _shearing_average(
+            total_money_in,
+            total_animals_decimal,
+            SHEARING_MONEY_QUANT,
+        ),
+        "shearing_cost": _shearing_float(total_shearing_cost, SHEARING_MONEY_QUANT),
+        "cost_per_animal": _shearing_average(
+            total_shearing_cost,
+            total_animals_decimal,
+            SHEARING_MONEY_QUANT,
+        ),
+    }
+
+    return {
+        "chart_payload": {
+            "labels": date_labels,
+            "group_by_farm": group_by_farm,
+            "panels": panels,
+        },
+        "summary": summary,
+        "session_rows": session_rows,
+        "code_rows": code_rows,
+        "has_sessions": bool(session_rows),
     }

@@ -53,6 +53,13 @@ internal fun FarmSnapshot.withOptimisticCommands(commands: JSONArray): FarmSnaps
             }
             "water_asset_status.update" -> changed = applyWaterAssetStatus(json, payload) || changed
             "fence_section.update" -> changed = applyFenceSectionUpdate(json, payload) || changed
+            "shearer.create" -> changed = applyShearerCreate(json, command, payload) || changed
+            "shearing_session.create" -> changed = applyShearingSessionCreate(json, command, payload) || changed
+            "shearing_session.update" -> changed = applyShearingSessionUpdate(json, payload) || changed
+            "shearing_entry.record" -> changed = applyShearingEntryRecord(json, command, payload) || changed
+            "shearing_bale_code.upsert" -> changed = applyShearingBaleCodeUpsert(json, command, payload) || changed
+            "shearing_bale.record" -> changed = applyShearingBaleRecord(json, command, payload) || changed
+            "shearing_bale.delete" -> changed = applyShearingBaleDelete(json, payload) || changed
             "task.create" -> changed = applyTaskCreate(json, command, payload) || changed
             "task.status.update" -> changed = applyTaskStatus(json, command, payload) || changed
             "task.comment.create" -> changed = applyTaskComment(json, command, payload) || changed
@@ -253,8 +260,8 @@ private fun applyMobMove(json: JSONObject, command: JSONObject, payload: JSONObj
     if (mobId.isBlank() || allocations.length() == 0) {
         return false
     }
-    val sessionAllocations = copyArray(allocations)
-    if (payload.optString("allocation_mode") == "counts") {
+    var sessionAllocations = copyArray(allocations)
+    if (payload.optString("allocation_mode") == "counts" || hasGroupCountAllocations(sessionAllocations)) {
         val mob = findObjectById(json.optJSONArray("mobs"), mobId)
         if (mob != null) {
             for (index in 0 until sessionAllocations.length()) {
@@ -262,6 +269,8 @@ private fun applyMobMove(json: JSONObject, command: JSONObject, payload: JSONObj
                 allocation.put("allocation_fraction", optimisticAllocationFraction(allocation, mob))
             }
         }
+    } else {
+        sessionAllocations = openGateAdjustedAllocations(json, sessionAllocations)
     }
     val retained = mutableListOf<JSONObject>()
     val activeGrazing = ensureArray(json, "active_grazing")
@@ -482,6 +491,62 @@ private fun redistributeForGateClose(json: JSONObject, gate: JSONObject, payload
         changed = replaceSessionAllocations(session, target, payload.optionalString("event_time")) || changed
     }
     return changed
+}
+
+private fun openGateAdjustedAllocations(json: JSONObject, allocations: JSONArray): JSONArray {
+    val allPaddockIds = activePaddockIds(json)
+    if (allPaddockIds.isEmpty()) {
+        return allocations
+    }
+    val connectedComponents = components(allPaddockIds, openGateEdges(json))
+        .filter { it.size > 1 }
+    if (connectedComponents.isEmpty()) {
+        return allocations
+    }
+    val componentByPaddock = mutableMapOf<String, Set<String>>()
+    connectedComponents.forEach { component ->
+        component.forEach { paddockId -> componentByPaddock[paddockId] = component }
+    }
+
+    val target = linkedMapOf<String, Double>()
+    var changed = false
+    for (index in 0 until allocations.length()) {
+        val allocation = allocations.optJSONObject(index) ?: continue
+        val paddockId = allocation.optString("paddock_id")
+        if (paddockId.isBlank()) {
+            return allocations
+        }
+        val fraction = allocation.optDouble("allocation_fraction", 0.0)
+        val component = componentByPaddock[paddockId]
+        if (component == null) {
+            target[paddockId] = (target[paddockId] ?: 0.0) + fraction
+            continue
+        }
+        areaWeightedAllocations(json, component, fraction).forEach { (targetPaddockId, targetFraction) ->
+            target[targetPaddockId] = (target[targetPaddockId] ?: 0.0) + targetFraction
+        }
+        changed = true
+    }
+    if (!changed) {
+        return allocations
+    }
+    return JSONArray().apply {
+        normalizeAllocationMap(target).toSortedMap().forEach { (paddockId, fraction) ->
+            if (fraction > 0.0) {
+                put(JSONObject().put("paddock_id", paddockId).put("allocation_fraction", fraction))
+            }
+        }
+    }
+}
+
+private fun hasGroupCountAllocations(allocations: JSONArray): Boolean {
+    for (index in 0 until allocations.length()) {
+        val groupCounts = allocations.optJSONObject(index)?.optJSONArray("group_counts")
+        if (groupCounts != null && groupCounts.length() > 0) {
+            return true
+        }
+    }
+    return false
 }
 
 private fun activePaddockIds(json: JSONObject): Set<String> {
@@ -769,6 +834,396 @@ private fun updateFenceMapFeature(json: JSONObject, fenceSectionId: String, payl
         properties.put("pending_sync", true)
     }
 }
+
+private fun applyShearerCreate(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val name = payload.optString("name").trim()
+    if (name.isBlank()) return false
+    upsertObjectById(
+        json,
+        "shearers",
+        JSONObject()
+            .put("id", payload.optString("id").ifBlank { pendingId(command, "shearer") })
+            .put("farm_id", command.optString("farm_id"))
+            .put("name", name)
+            .put("active", payload.optBoolean("active", true))
+            .put("pending_sync", true),
+    )
+    return true
+}
+
+private fun applyShearingSessionCreate(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val name = payload.optString("name").trim()
+    val species = payload.optString("species").ifBlank { "Sheep" }
+    val startDate = payload.optString("start_date")
+    if (name.isBlank() || startDate.isBlank()) return false
+    val session = JSONObject()
+        .put("id", payload.optString("id").ifBlank { pendingId(command, "shearing-session") })
+        .put("farm_id", command.optString("farm_id"))
+        .put("name", name)
+        .put("species", species)
+        .put("start_date", startDate)
+        .putOptional("end_date", payload.optionalString("end_date"))
+        .put("status", payload.optString("status", "open").ifBlank { "open" })
+        .put("lootjie_rate", payload.optDouble("lootjie_rate", 0.0))
+        .put("adult_old_ram_multiplier", payload.optDouble("adult_old_ram_multiplier", 2.0))
+        .putOptional("notes", payload.optionalString("notes"))
+        .put("entries", JSONArray())
+        .put("bales", JSONArray())
+        .put("pending_sync", true)
+    rebuildShearingSessionTotals(session, json)
+    upsertObjectById(json, "shearing_sessions", session)
+    return true
+}
+
+private fun applyShearingSessionUpdate(json: JSONObject, payload: JSONObject): Boolean {
+    val sessionId = payload.optString("session_id", payload.optString("id"))
+    val session = findObjectById(json.optJSONArray("shearing_sessions"), sessionId) ?: return false
+    listOf("name", "species", "start_date", "status", "notes").forEach { field ->
+        if (payload.has(field)) {
+            session.putOptional(field, payload.optionalString(field))
+        }
+    }
+    if (payload.has("end_date")) {
+        session.putOptional("end_date", payload.optionalString("end_date"))
+    }
+    if (payload.has("lootjie_rate")) {
+        session.put("lootjie_rate", payload.optDouble("lootjie_rate", 0.0))
+    }
+    session.put("pending_sync", true)
+    rebuildShearingSessionTotals(session, json)
+    return true
+}
+
+private fun applyShearingEntryRecord(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val session = findObjectById(json.optJSONArray("shearing_sessions"), payload.optString("session_id")) ?: return false
+    val workDate = payload.optString("work_date")
+    val shearerId = payload.optString("shearer_id")
+    val groupId = payload.optString("animal_group_type_id").ifBlank { pendingId(command, "animal-group") }
+    if (workDate.isBlank() || shearerId.isBlank()) return false
+    val quantity = payload.optInt("quantity", -1)
+    if (quantity < 0) return false
+    val entries = ensureArray(session, "entries")
+    val existingIndex = findShearingEntryIndex(entries, workDate, shearerId, groupId)
+    if (quantity == 0) {
+        if (existingIndex >= 0) {
+            val retained = JSONArray()
+            for (index in 0 until entries.length()) {
+                if (index != existingIndex) retained.put(entries.get(index))
+            }
+            session.put("entries", retained)
+            rebuildShearingSessionTotals(session, json)
+            session.put("pending_sync", true)
+            return true
+        }
+        return false
+    }
+    val group = payload.optJSONObject("animal_group_type")
+        ?.deepCopy()
+        ?.put("id", groupId)
+        ?: JSONObject()
+            .put("id", groupId)
+            .put("species", session.optString("species", "Sheep"))
+            .put("breed", "Unknown")
+            .put("sex", "mixed")
+            .put("age_class", "adult")
+    val entry = JSONObject()
+        .put("id", payload.optString("id").ifBlank { pendingId(command, "shearing-entry") })
+        .put("session_id", session.optString("id"))
+        .put("work_date", workDate)
+        .put("shearer_id", shearerId)
+        .put("shearer_name", shearerName(json, shearerId))
+        .put("animal_group_type_id", groupId)
+        .put("animal_group_type", group)
+        .put("quantity", quantity)
+        .putOptional("note", payload.optionalString("note"))
+        .put("pending_sync", true)
+    decorateShearingEntry(entry, session)
+    if (existingIndex >= 0) {
+        entries.put(existingIndex, entry)
+    } else {
+        entries.put(entry)
+    }
+    rebuildShearingSessionTotals(session, json)
+    session.put("pending_sync", true)
+    return true
+}
+
+private fun applyShearingBaleCodeUpsert(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val species = payload.optString("species", "Sheep").ifBlank { "Sheep" }
+    val code = payload.optString("code").trim()
+    if (code.isBlank()) return false
+    val baleCode = JSONObject()
+        .put("id", payload.optString("id", payload.optString("bale_code_id")).ifBlank { pendingId(command, "bale-code") })
+        .put("species", species)
+        .put("code", code)
+        .put("active", payload.optBoolean("active", true))
+        .putOptional("line_type", payload.optionalString("line_type"))
+        .putOptional("age_group", payload.optionalString("age_group"))
+        .putOptional("fineness_grade", payload.optionalString("fineness_grade"))
+        .putOptional("length_code", payload.optionalString("length_code"))
+        .putOptional("color", payload.optionalString("color"))
+        .putOptional("vegetable_matter", payload.optionalString("vegetable_matter"))
+        .putOptional("style_character", payload.optionalString("style_character"))
+        .putOptional("consistency", payload.optionalString("consistency"))
+        .putOptional("fault", payload.optionalString("fault"))
+        .putOptional("description", payload.optionalString("description"))
+        .putOptional("notes", payload.optionalString("notes"))
+        .put("pending_sync", true)
+    payload.optionalDouble("fineness_micron")?.let { baleCode.put("fineness_micron", it) }
+    payload.optionalDouble("clean_yield_percent")?.let { baleCode.put("clean_yield_percent", it) }
+    upsertObjectById(json, "shearing_bale_codes", baleCode)
+    return true
+}
+
+private fun applyShearingBaleRecord(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val session = findObjectById(json.optJSONArray("shearing_sessions"), payload.optString("session_id")) ?: return false
+    val weight = payload.optionalDouble("weight_kg") ?: return false
+    if (weight <= 0.0) return false
+    val baleCodeId = payload.optionalString("bale_code_id")
+    val baleCode = baleCodeId?.let { baleCodeForId(json, it) }
+    if (baleCode != null && baleCode.optString("species") != session.optString("species", "Sheep")) {
+        return false
+    }
+    val codeText = payload.optionalString("code_text")
+        ?: payload.optionalString("code")
+        ?: baleCode?.optString("code")?.takeIf { it.isNotBlank() }
+        ?: return false
+    val price = deriveOptimisticBalePrices(weight, payload) ?: return false
+    val bale = JSONObject()
+        .put("id", payload.optString("id", payload.optString("bale_id")).ifBlank { pendingId(command, "shearing-bale") })
+        .put("session_id", session.optString("id"))
+        .putOptional("bale_code_id", baleCodeId)
+        .put("code", baleCode?.optString("code") ?: codeText)
+        .put("code_text", codeText)
+        .putOptional("bale_number", payload.optionalString("bale_number"))
+        .put("weight_kg", roundKg(weight))
+        .putOptional("notes", payload.optionalString("notes") ?: payload.optionalString("note"))
+        .put("pricing_input_mode", price.mode)
+        .put("pending_sync", true)
+    price.pricePerKg?.let { bale.put("price_per_kg", roundRate(it)) }
+    price.totalPrice?.let { bale.put("total_price", roundMoney(it)) }
+    upsertObjectById(ensureArray(session, "bales"), bale)
+    rebuildShearingBaleMoney(session, json)
+    session.put("pending_sync", true)
+    return true
+}
+
+private fun applyShearingBaleDelete(json: JSONObject, payload: JSONObject): Boolean {
+    val session = findObjectById(json.optJSONArray("shearing_sessions"), payload.optString("session_id")) ?: return false
+    val baleId = payload.optString("bale_id", payload.optString("id"))
+    if (baleId.isBlank()) return false
+    val bales = ensureArray(session, "bales")
+    val retained = JSONArray()
+    var removed = false
+    for (index in 0 until bales.length()) {
+        val bale = bales.optJSONObject(index) ?: continue
+        if (bale.optString("id") == baleId) {
+            removed = true
+        } else {
+            retained.put(bale)
+        }
+    }
+    if (!removed) return false
+    session.put("bales", retained)
+    rebuildShearingBaleMoney(session, json)
+    session.put("pending_sync", true)
+    return true
+}
+
+private fun findShearingEntryIndex(entries: JSONArray, workDate: String, shearerId: String, groupId: String): Int {
+    for (index in 0 until entries.length()) {
+        val entry = entries.optJSONObject(index) ?: continue
+        if (
+            entry.optString("work_date") == workDate &&
+            entry.optString("shearer_id") == shearerId &&
+            entry.optString("animal_group_type_id") == groupId
+        ) {
+            return index
+        }
+    }
+    return -1
+}
+
+private fun rebuildShearingSessionTotals(session: JSONObject, json: JSONObject) {
+    val byShearer = linkedMapOf<String, JSONObject>()
+    val byAnimal = linkedMapOf<String, JSONObject>()
+    val byDate = linkedMapOf<String, JSONObject>()
+    var totalQuantity = 0
+    var totalAmount = 0.0
+    val entries = ensureArray(session, "entries")
+    for (index in 0 until entries.length()) {
+        val entry = entries.optJSONObject(index) ?: continue
+        if (entry.optString("shearer_name").isBlank()) {
+            entry.put("shearer_name", shearerName(json, entry.optString("shearer_id")))
+        }
+        decorateShearingEntry(entry, session)
+        val quantity = entry.optInt("quantity", 0)
+        val amount = entry.optDouble("line_amount", 0.0)
+        totalQuantity += quantity
+        totalAmount += amount
+
+        val shearerId = entry.optString("shearer_id")
+        val shearer = byShearer.getOrPut(shearerId) {
+            JSONObject()
+                .put("shearer_id", shearerId)
+                .put("shearer_name", entry.optString("shearer_name", "Shearer"))
+                .put("quantity", 0)
+                .put("amount", 0.0)
+        }
+        shearer.put("quantity", shearer.optInt("quantity", 0) + quantity)
+        shearer.put("amount", roundMoney(shearer.optDouble("amount", 0.0) + amount))
+
+        val groupId = entry.optString("animal_group_type_id")
+        val animal = byAnimal.getOrPut(groupId) {
+            JSONObject()
+                .put("animal_group_type_id", groupId)
+                .put("animal_group_type", entry.optJSONObject("animal_group_type")?.deepCopy() ?: JSONObject())
+                .put("quantity", 0)
+                .put("amount", 0.0)
+        }
+        animal.put("quantity", animal.optInt("quantity", 0) + quantity)
+        animal.put("amount", roundMoney(animal.optDouble("amount", 0.0) + amount))
+
+        val workDate = entry.optString("work_date")
+        val day = byDate.getOrPut(workDate) {
+            JSONObject()
+                .put("work_date", workDate)
+                .put("quantity", 0)
+                .put("amount", 0.0)
+        }
+        day.put("quantity", day.optInt("quantity", 0) + quantity)
+        day.put("amount", roundMoney(day.optDouble("amount", 0.0) + amount))
+    }
+    session.put("totals", JSONObject().put("quantity", totalQuantity).put("amount", roundMoney(totalAmount)))
+    session.put("by_shearer", JSONArray().apply { byShearer.values.sortedBy { it.optString("shearer_name") }.forEach(::put) })
+    session.put("by_animal_type", JSONArray().apply { byAnimal.values.forEach(::put) })
+    session.put("by_date", JSONArray().apply { byDate.values.sortedBy { it.optString("work_date") }.forEach(::put) })
+    rebuildShearingBaleMoney(session, json)
+}
+
+private fun rebuildShearingBaleMoney(session: JSONObject, json: JSONObject) {
+    val byCode = linkedMapOf<String, JSONObject>()
+    var totalBales = 0
+    var totalKg = 0.0
+    var pricedBales = 0
+    var pricedKg = 0.0
+    var totalPrice = 0.0
+    val bales = ensureArray(session, "bales")
+    for (index in 0 until bales.length()) {
+        val bale = bales.optJSONObject(index) ?: continue
+        val baleCode = bale.optionalString("bale_code_id")?.let { baleCodeForId(json, it) }
+        if (bale.optString("code").isBlank()) {
+            bale.put("code", baleCode?.optString("code") ?: bale.optString("code_text", "Code"))
+        }
+        val weight = bale.optDouble("weight_kg", 0.0).coerceAtLeast(0.0)
+        totalBales += 1
+        totalKg += weight
+        val balePrice = bale.optionalDouble("total_price")
+        if (balePrice != null) {
+            pricedBales += 1
+            pricedKg += weight
+            totalPrice += balePrice
+        }
+        val key = bale.optionalString("bale_code_id") ?: "ad-hoc:${bale.optString("code_text").lowercase()}"
+        val row = byCode.getOrPut(key) {
+            JSONObject()
+                .putOptional("bale_code_id", bale.optionalString("bale_code_id"))
+                .put("code", baleCode?.optString("code") ?: bale.optString("code_text", "Code"))
+                .put("code_text", bale.optString("code_text", "Code"))
+                .put("bale_count", 0)
+                .put("bales", 0)
+                .put("kg", 0.0)
+                .put("priced_kg", 0.0)
+                .put("unpriced_bales", 0)
+                .put("total_price", 0.0)
+        }
+        row.put("bale_count", row.optInt("bale_count", 0) + 1)
+        row.put("bales", row.optInt("bales", 0) + 1)
+        row.put("kg", roundKg(row.optDouble("kg", 0.0) + weight))
+        if (balePrice == null) {
+            row.put("unpriced_bales", row.optInt("unpriced_bales", 0) + 1)
+        } else {
+            row.put("priced_kg", roundKg(row.optDouble("priced_kg", 0.0) + weight))
+            row.put("total_price", roundMoney(row.optDouble("total_price", 0.0) + balePrice))
+        }
+    }
+    val average = if (pricedKg > 0.0) roundRate(totalPrice / pricedKg) else null
+    session.put(
+        "bale_money_totals",
+        JSONObject()
+            .put("total_bales", totalBales)
+            .put("total_kg", roundKg(totalKg))
+            .put("priced_bales", pricedBales)
+            .put("priced_kg", roundKg(pricedKg))
+            .put("unpriced_bales", totalBales - pricedBales)
+            .put("total_price", roundMoney(totalPrice))
+            .putOptional("average_price_per_kg", average),
+    )
+    session.put(
+        "bale_summary_by_code",
+        JSONArray().apply {
+            byCode.values.sortedBy { it.optString("code").lowercase() }.forEach { row ->
+                val rowPricedKg = row.optDouble("priced_kg", 0.0)
+                row.putOptional(
+                    "average_price_per_kg",
+                    if (rowPricedKg > 0.0) roundRate(row.optDouble("total_price", 0.0) / rowPricedKg) else null,
+                )
+                put(row)
+            }
+        },
+    )
+}
+
+private fun decorateShearingEntry(entry: JSONObject, session: JSONObject) {
+    val group = entry.optJSONObject("animal_group_type") ?: JSONObject()
+    val multiplier = if (
+        group.optString("sex").lowercase() == "ram" &&
+        group.optString("age_class").lowercase() in setOf("adult", "old")
+    ) {
+        session.optDouble("adult_old_ram_multiplier", 2.0)
+    } else {
+        1.0
+    }
+    val unitRate = session.optDouble("lootjie_rate", 0.0) * multiplier
+    entry.put("multiplier", multiplier)
+    entry.put("unit_rate", roundMoney(unitRate))
+    entry.put("line_amount", roundMoney(unitRate * entry.optInt("quantity", 0)))
+}
+
+private fun shearerName(json: JSONObject, shearerId: String): String {
+    val shearer = findObjectById(json.optJSONArray("shearers"), shearerId)
+    return shearer?.optString("name")?.takeIf { it.isNotBlank() } ?: "Shearer"
+}
+
+private fun baleCodeForId(json: JSONObject, baleCodeId: String): JSONObject? =
+    findObjectById(json.optJSONArray("shearing_bale_codes"), baleCodeId)
+
+private fun deriveOptimisticBalePrices(weightKg: Double, payload: JSONObject): OptimisticBalePrice? {
+    val pricePerKg = payload.optionalDouble("price_per_kg")
+    val totalPrice = payload.optionalDouble("total_price")
+    if (pricePerKg == null && totalPrice == null) {
+        return OptimisticBalePrice(null, null, "unpriced")
+    }
+    if (pricePerKg != null && pricePerKg < 0.0) return null
+    if (totalPrice != null && totalPrice < 0.0) return null
+    if (pricePerKg != null && totalPrice == null) {
+        return OptimisticBalePrice(roundRate(pricePerKg), roundMoney(pricePerKg * weightKg), "price_per_kg")
+    }
+    if (pricePerKg == null && totalPrice != null) {
+        return OptimisticBalePrice(roundRate(totalPrice / weightKg), roundMoney(totalPrice), "total_price")
+    }
+    val expected = roundMoney((pricePerKg ?: 0.0) * weightKg)
+    if (abs(expected - (totalPrice ?: 0.0)) > 0.01) {
+        return null
+    }
+    return OptimisticBalePrice(roundRate(pricePerKg ?: 0.0), roundMoney(totalPrice ?: 0.0), "both")
+}
+
+private fun roundMoney(value: Double): Double = round(value * 100.0) / 100.0
+
+private fun roundKg(value: Double): Double = round(value * 1000.0) / 1000.0
+
+private fun roundRate(value: Double): Double = round(value * 10000.0) / 10000.0
 
 private fun applyTaskCreate(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
     val heading = payload.optString("heading", payload.optString("title")).trim()
@@ -1143,6 +1598,10 @@ private fun findObjectById(array: JSONArray?, id: String): JSONObject? {
 
 private fun upsertObjectById(json: JSONObject, arrayName: String, item: JSONObject) {
     val array = ensureArray(json, arrayName)
+    upsertObjectById(array, item)
+}
+
+private fun upsertObjectById(array: JSONArray, item: JSONObject) {
     val itemId = item.optString("id")
     for (index in 0 until array.length()) {
         if (array.optJSONObject(index)?.optString("id") == itemId) {
@@ -1180,7 +1639,13 @@ private fun JSONObject.deepCopy(): JSONObject = JSONObject(toString())
 private fun JSONObject.optionalString(name: String): String? =
     if (isNull(name)) null else optString(name).takeIf { it.isNotBlank() }
 
+private fun JSONObject.optionalDouble(name: String): Double? =
+    if (!has(name) || isNull(name)) null else optDouble(name)
+
 private fun JSONObject.putOptional(name: String, value: String?): JSONObject =
+    if (value == null) put(name, JSONObject.NULL) else put(name, value)
+
+private fun JSONObject.putOptional(name: String, value: Double?): JSONObject =
     if (value == null) put(name, JSONObject.NULL) else put(name, value)
 
 private fun pendingId(command: JSONObject, prefix: String): String =
@@ -1312,4 +1777,10 @@ private data class OptimisticGroupHead(
     val groupId: String,
     val group: JSONObject,
     var head: Double,
+)
+
+private data class OptimisticBalePrice(
+    val pricePerKg: Double?,
+    val totalPrice: Double?,
+    val mode: String,
 )
