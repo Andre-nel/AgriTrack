@@ -431,6 +431,11 @@ a { color: #1b5f49; }
   color: var(--warn);
 }
 
+.badge.danger {
+  background: #fdecec;
+  color: #b94b4b;
+}
+
 .flash-list {
   list-style: none;
   padding: 0;
@@ -2800,6 +2805,135 @@ tr.is-selected-fence {
 .cash-edit-form {
   padding-top: 0.25rem;
   border-top: 1px dashed #d9e3de;
+}
+
+.simulator-hero {
+  background:
+    linear-gradient(135deg, rgba(47, 122, 92, 0.11), rgba(187, 127, 43, 0.08)),
+    var(--card);
+}
+
+.simulator-title-row,
+.simulator-section-header,
+.simulator-scenario-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.simulator-scenario-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.simulator-scenario-row {
+  padding: 0.7rem 0;
+  border-bottom: 1px dashed #d9e3de;
+}
+
+.simulator-scenario-row:last-child {
+  border-bottom: 0;
+}
+
+.simulator-scenario-row h3 {
+  margin: 0 0 0.25rem;
+}
+
+.simulator-summary-grid {
+  margin-top: 1rem;
+}
+
+.simulator-summary-value {
+  margin: 0 0 0.35rem;
+  font-size: 1.65rem;
+  font-weight: 700;
+}
+
+.simulator-forecast-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.simulator-forecast-row {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(120px, 1fr) minmax(110px, auto);
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.simulator-forecast-year {
+  font-weight: 700;
+}
+
+.simulator-forecast-track {
+  height: 0.8rem;
+  border-radius: 999px;
+  background: #edf2ef;
+  overflow: hidden;
+}
+
+.simulator-forecast-bar {
+  display: block;
+  min-width: 0.35rem;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.simulator-forecast-bar.positive {
+  background: #2f7a5c;
+}
+
+.simulator-forecast-bar.negative {
+  background: #b54747;
+}
+
+.simulator-forecast-net {
+  text-align: right;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.simulator-forecast-table-wrap {
+  margin-top: 1rem;
+}
+
+.simulator-forecast-table {
+  min-width: 700px;
+}
+
+.simulator-list-table-wrap {
+  overflow-x: auto;
+  margin-top: 1rem;
+}
+
+.simulator-stock-actions {
+  margin-top: 0.85rem;
+}
+
+.inline-form {
+  display: inline-flex;
+  margin: 0.1rem 0.25rem 0.1rem 0;
+}
+
+.simulator-list-table,
+.simulator-expense-table {
+  min-width: 680px;
+}
+
+.simulator-stock-table {
+  min-width: 920px;
+}
+
+.simulator-table td:first-child,
+.simulator-table th:first-child {
+  min-width: 150px;
+}
+
+.simulator-table td:nth-child(2),
+.simulator-table th:nth-child(2) {
+  min-width: 90px;
 }
 
 @media (max-width: 840px) {

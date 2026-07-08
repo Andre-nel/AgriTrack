@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+{% block title %}{{ scenario.name }} | Farm Simulator{% endblock %}
+{% block content %}
+<section class="hero simulator-hero">
+  <div class="simulator-title-row">
+    <div>
+      <h1>{{ scenario.name }}</h1>
+      <p>{{ scenario.projection_year }} projection</p>
+    </div>
+    <form method="post" action="{{ url_for('simulator.delete_scenario', scenario_id=scenario.id) }}">
+      <button type="submit" class="btn btn-danger">Delete Scenario</button>
+    </form>
+  </div>
+</section>
+
+<section class="cards farm-grid simulator-summary-grid">
+  <article class="card simulator-summary-card">
+    <h2>Overall Business</h2>
+    <p class="simulator-summary-value">{{ format_currency(projection["overall"]["annual_net"]) }}</p>
+    <p>
+      <span class="badge {{ projection['overall']['health']['class'] }}">{{ projection["overall"]["health"]["label"] }}</span>
+    </p>
+    <p class="muted">Income {{ format_currency(projection["overall"]["annual_income"]) }} | Expenses {{ format_currency(projection["overall"]["annual_expenses"]) }}</p>
+  </article>
+  {% for farm in projection["farms"] %}
+  <article class="card simulator-summary-card">
+    <h2>{{ farm["name"] }}</h2>
+    <p class="simulator-summary-value">{{ format_currency(farm["annual_net"]) }}</p>
+    <p>
+      <span class="badge {{ farm['health']['class'] }}">{{ farm["health"]["label"] }}</span>
+    </p>
+    <p class="muted">Income {{ format_currency(farm["annual_income"]) }} | Expenses {{ format_currency(farm["annual_expenses"]) }}</p>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h2>Scenario Details</h2>
+  <form method="post" action="{{ url_for('simulator.edit_scenario', scenario_id=scenario.id) }}" class="grid-form">
+    <div class="grid-two">
+      <label>Name
+        <input name="name" value="{{ scenario.name }}" required />
+      </label>
+      <label>Projection Year
+        <input name="projection_year" inputmode="numeric" value="{{ scenario.projection_year }}" required />
+      </label>
+    </div>
+    <div class="grid-two">
+      <label>Income Inflation %
+        <input name="income_inflation_rate" inputmode="decimal" value="{{ scenario.income_inflation_rate or 0 }}" />
+      </label>
+      <label>Expense Inflation %
+        <input name="expense_inflation_rate" inputmode="decimal" value="{{ scenario.expense_inflation_rate or 0 }}" />
+      </label>
+    </div>
+    <label>Notes
+      <textarea name="notes" rows="3">{{ scenario.notes or "" }}</textarea>
+    </label>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Details</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="row-actions simulator-section-header">
+    <div>
+      <h2>Yearly Projection</h2>
+      <p class="muted">Farm rows exclude business-wide expenses. Overall includes all farm and business-wide expenses.</p>
+    </div>
+  </div>
+  <div class="cash-flow-table-wrap">
+    <table class="cash-entry-table simulator-table">
+      <thead>
+        <tr>
+          <th>View</th>
+          <th>Income</th>
+          <th>Expenses</th>
+          <th>Net Profit/Loss</th>
+          <th>Health</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for statement in projection["statements"] %}
+        <tr>
+          <td>{{ statement["name"] }}</td>
+          <td>{{ format_currency(statement["annual_income"]) }}</td>
+          <td>{{ format_currency(statement["annual_expenses"]) }}</td>
+          <td>{{ format_currency(statement["annual_net"]) }}</td>
+          <td><span class="badge {{ statement['health']['class'] }}">{{ statement["health"]["label"] }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row-actions simulator-section-header">
+    <div>
+      <h2>Overall Net Forecast</h2>
+      <p class="muted">
+        {{ projection["overall_forecast"]["horizon_years"] }} years, using {{ projection["overall_forecast"]["income_inflation_rate"] or 0 }}% income inflation and {{ projection["overall_forecast"]["expense_inflation_rate"] or 0 }}% expense inflation.
+      </p>
+    </div>
+  </div>
+  <div class="simulator-forecast-list">
+    {% for row in projection["overall_forecast"]["rows"] %}
+    <div class="simulator-forecast-row">
+      <div class="simulator-forecast-year">{{ row["year"] }}</div>
+      <div class="simulator-forecast-track">
+        <span class="simulator-forecast-bar {{ row['bar_class'] }}" style="width: {{ row['bar_percent'] }}%"></span>
+      </div>
+      <div class="simulator-forecast-net">{{ format_currency(row["net"]) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="cash-flow-table-wrap simulator-forecast-table-wrap">
+    <table class="cash-entry-table simulator-table simulator-forecast-table">
+      <thead>
+        <tr>
+          <th>Year</th>
+          <th>Income</th>
+          <th>Expenses</th>
+          <th>Net Profit/Loss</th>
+          <th>Health</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in projection["overall_forecast"]["rows"] %}
+        <tr>
+          <td>{{ row["year"] }}</td>
+          <td>{{ format_currency(row["income"]) }}</td>
+          <td>{{ format_currency(row["expenses"]) }}</td>
+          <td>{{ format_currency(row["net"]) }}</td>
+          <td><span class="badge {{ row['health']['class'] }}">{{ row["health"]["label"] }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Revenue Assumptions</h2>
+    <form method="post" action="{{ url_for('simulator.upsert_revenue_assumption', scenario_id=scenario.id) }}" class="grid-form">
+      <div class="grid-three">
+        <label>Species
+          <select name="species" required>
+            {% for species in species_options %}
+            <option value="{{ species }}">{{ species }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Breed
+          <input name="breed" placeholder="Angora" required />
+        </label>
+        <label>Yearly Revenue
+          <input name="yearly_revenue_per_adult_female" inputmode="decimal" placeholder="3000" required />
+        </label>
+      </div>
+      <div class="row-actions">
+        <button type="submit" class="btn">Save Revenue</button>
+      </div>
+    </form>
+    <div class="simulator-list-table-wrap">
+      <table class="cash-entry-table simulator-list-table">
+        <thead><tr><th>Species</th><th>Breed</th><th>Yearly Revenue</th><th></th></tr></thead>
+        <tbody>
+          {% for assumption in scenario.revenue_assumptions|sort(attribute="species") %}
+          <tr>
+            <td>{{ assumption.species }}</td>
+            <td>{{ assumption.breed }}</td>
+            <td>{{ format_currency(assumption.yearly_revenue_per_adult_female) }}</td>
+            <td>
+              <form method="post" action="{{ url_for('simulator.delete_revenue_assumption', scenario_id=scenario.id, assumption_id=assumption.id) }}">
+                <button type="submit" class="btn btn-secondary">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="muted">No revenue assumptions yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="card">
+    <h2>Scenario Stock</h2>
+    <form method="post" action="{{ url_for('simulator.upsert_stock_detail', scenario_id=scenario.id) }}" class="grid-form">
+      <div class="grid-two">
+        <label>Farm
+          <select name="farm_id" required>
+            {% for farm in farms %}
+            <option value="{{ farm.id }}">{{ farm.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Species
+          <select name="species" required>
+            {% for species in species_options %}
+            <option value="{{ species }}">{{ species }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Breed
+          <input name="breed" placeholder="Bonsmara" required />
+        </label>
+        <label>Adult Females
+          <input name="adult_female_count" inputmode="numeric" placeholder="25" required />
+        </label>
+      </div>
+      <div class="row-actions">
+        <button type="submit" class="btn">Add / Update Stock</button>
+      </div>
+    </form>
+    <div class="row-actions simulator-stock-actions">
+      <form method="post" action="{{ url_for('simulator.seed_stock_details', scenario_id=scenario.id) }}">
+        <button type="submit" class="btn btn-secondary">Seed From Live Stock</button>
+      </form>
+      <form method="post" action="{{ url_for('simulator.clear_stock_details', scenario_id=scenario.id) }}">
+        <button type="submit" class="btn btn-danger">Clear Stock</button>
+      </form>
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Stock Income Detail</h2>
+  <div class="cash-flow-table-wrap">
+    <table class="cash-flow-table simulator-stock-table">
+      <thead>
+        <tr>
+          <th>Farm</th><th>Species</th><th>Breed</th><th>Adult Females</th><th>Revenue/Head</th><th>Annual Income</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for farm in projection["farms"] %}
+          {% for row in farm["stock_rows"] %}
+          <tr>
+            <td>
+              <select name="farm_id" form="stock-edit-{{ row['id'] }}" required>
+                {% for option_farm in farms %}
+                <option value="{{ option_farm.id }}" {% if option_farm.id == row["farm_id"] %}selected{% endif %}>{{ option_farm.name }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <select name="species" form="stock-edit-{{ row['id'] }}" required>
+                {% for species in species_options %}
+                <option value="{{ species }}" {% if species == row["species"] %}selected{% endif %}>{{ species }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td><input name="breed" form="stock-edit-{{ row['id'] }}" value="{{ row["breed"] }}" required /></td>
+            <td><input name="adult_female_count" form="stock-edit-{{ row['id'] }}" inputmode="numeric" value="{{ row["adult_female_count"] }}" required /></td>
+            <td>{{ format_currency(row["revenue_per_head"]) }}</td>
+            <td>{{ format_currency(row["annual_income"]) }}</td>
+            <td>
+              <form id="stock-edit-{{ row['id'] }}" method="post" action="{{ url_for('simulator.edit_stock_detail', scenario_id=scenario.id, stock_detail_id=row['id']) }}" class="inline-form">
+                <button type="submit" class="btn btn-secondary">Update</button>
+              </form>
+              <form method="post" action="{{ url_for('simulator.delete_stock_detail', scenario_id=scenario.id, stock_detail_id=row['id']) }}" class="inline-form">
+                <button type="submit" class="btn btn-secondary">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+        {% if projection["stock_detail_count"] == 0 %}
+        <tr><td colspan="7" class="muted">No scenario stock rows yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Add Standard Expense</h2>
+    <form method="post" action="{{ url_for('simulator.create_expense', scenario_id=scenario.id) }}" class="grid-form">
+      <input type="hidden" name="expense_type" value="standard" />
+      <div class="grid-two">
+        <label>Farm
+          <select name="farm_id">
+            <option value="">Business-wide</option>
+            {% for farm in farms %}
+            <option value="{{ farm.id }}">{{ farm.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Category
+          <select name="category_code" required>
+            {% for category in expense_categories %}
+            <option value="{{ category.value }}" {% if category.value == "wages" %}selected{% endif %}>{{ category.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Label
+        <input name="label" placeholder="Worker wages / Diesel / Feed" required />
+      </label>
+      <div class="grid-two">
+        <label>Amount
+          <input name="amount" inputmode="decimal" placeholder="5000" required />
+        </label>
+        <label>Recurrence
+          <select name="recurrence" required>
+            {% for option in recurrence_options %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="row-actions">
+        <button type="submit" class="btn">Save Expense</button>
+      </div>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Add Loan</h2>
+    <form method="post" action="{{ url_for('simulator.create_expense', scenario_id=scenario.id) }}" class="grid-form">
+      <input type="hidden" name="expense_type" value="loan" />
+      <input type="hidden" name="category_code" value="loan" />
+      <div class="grid-two">
+        <label>Farm
+          <select name="farm_id">
+            <option value="">Business-wide</option>
+            {% for farm in farms %}
+            <option value="{{ farm.id }}">{{ farm.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Label
+          <input name="label" placeholder="Tractor loan" required />
+        </label>
+      </div>
+      <div class="grid-three">
+        <label>Principal
+          <input name="loan_principal" inputmode="decimal" placeholder="250000" required />
+        </label>
+        <label>Annual Interest %
+          <input name="annual_interest_rate" inputmode="decimal" placeholder="11.5" required />
+        </label>
+        <label>Term Years
+          <input name="remaining_term_years" inputmode="decimal" placeholder="3" required />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Payment Interval
+          <select name="payment_interval_months" required>
+            {% for option in payment_interval_options %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>First Payment Month
+          <select name="first_payment_month" required>
+            {% for month in month_options %}
+            <option value="{{ month.value }}">{{ month.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="row-actions">
+        <button type="submit" class="btn">Save Loan</button>
+      </div>
+    </form>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Expenses</h2>
+  <div class="cash-flow-table-wrap">
+    <table class="cash-entry-table simulator-expense-table">
+      <thead>
+        <tr><th>Scope</th><th>Category</th><th>Label</th><th>Type</th><th>Monthly Outflow</th><th>Projected Outflow</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for row in expense_rows %}
+        {% set expense = row["expense"] %}
+        <tr>
+          <td>{{ expense.farm.name if expense.farm else "Business-wide" }}</td>
+          <td>{{ category_label(expense.category_code) }}</td>
+          <td>{{ expense.label }}</td>
+          <td>{{ "Loan" if expense.expense_type == "loan" else expense.recurrence|replace("_", " ")|title }}</td>
+          <td>{% if row["monthly_outflow"] %}{{ format_currency(row["monthly_outflow"]) }}{% endif %}</td>
+          <td>{{ format_currency(row["annual"]) }}</td>
+          <td>
+            <form method="post" action="{{ url_for('simulator.delete_expense', scenario_id=scenario.id, expense_id=expense.id) }}">
+              <button type="submit" class="btn btn-secondary">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="muted">No expenses yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

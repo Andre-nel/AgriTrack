@@ -9,6 +9,7 @@ def test_core_route_inventory(app):
     assert "tasks.index" in endpoints
     assert "calendar.index" in endpoints
     assert "finance.cash_flow" in endpoints
+    assert "simulator.index" in endpoints
     assert "ops.index" in endpoints
     assert "api_v1.health" in endpoints
     assert "mobile_api.bootstrap" in endpoints

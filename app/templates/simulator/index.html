@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Farm Simulator | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero simulator-hero">
+  <h1>Farm Simulator</h1>
+  <p>Model projected farm profit from current adult female stock, scenario adjustments, recurring expenses, and loans.</p>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Create Scenario</h2>
+    <form method="post" action="{{ url_for('simulator.create_scenario') }}" class="grid-form">
+      <label>Name
+        <input name="name" placeholder="2026 base case" required />
+      </label>
+      <div class="grid-two">
+        <label>Projection Year
+          <input name="projection_year" inputmode="numeric" value="{{ current_year }}" required />
+        </label>
+        <label>Income Inflation %
+          <input name="income_inflation_rate" inputmode="decimal" value="0" />
+        </label>
+      </div>
+      <label>Expense Inflation %
+        <input name="expense_inflation_rate" inputmode="decimal" value="0" />
+      </label>
+      <label>Notes
+        <textarea name="notes" rows="4" placeholder="Assumptions, risks, or planning notes"></textarea>
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn">Create Scenario</button>
+      </div>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Saved Scenarios</h2>
+    <div class="simulator-scenario-list">
+      {% for scenario in scenarios %}
+      <div class="simulator-scenario-row">
+        <div>
+          <h3><a href="{{ url_for('simulator.detail', scenario_id=scenario.id) }}">{{ scenario.name }}</a></h3>
+          <p class="muted">{{ scenario.projection_year }} | {{ scenario.revenue_assumptions|length }} revenue assumption{% if scenario.revenue_assumptions|length != 1 %}s{% endif %} | {{ scenario.expenses|length }} expense{% if scenario.expenses|length != 1 %}s{% endif %}</p>
+        </div>
+        <a class="btn btn-secondary" href="{{ url_for('simulator.detail', scenario_id=scenario.id) }}">Open</a>
+      </div>
+      {% else %}
+      <p class="muted">No simulator scenarios yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endblock %}

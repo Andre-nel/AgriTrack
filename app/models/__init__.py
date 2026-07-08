@@ -21,6 +21,12 @@ from app.models.paddock import Paddock
 from app.models.paddock_event import PaddockEvent
 from app.models.rainfall import RainfallRecord
 from app.models.shearing import Shearer, ShearingBale, ShearingBaleCode, ShearingEntry, ShearingSession
+from app.models.simulator import (
+    SimulatorExpense,
+    SimulatorRevenueAssumption,
+    SimulatorScenario,
+    SimulatorStockDetail,
+)
 from app.models.snapshot import DailyStockSnapshot
 from app.models.stock_ledger import StockLedgerEntry
 from app.models.task import (
@@ -72,6 +78,10 @@ __all__ = [
     "ShearingBaleCode",
     "ShearingEntry",
     "ShearingSession",
+    "SimulatorExpense",
+    "SimulatorRevenueAssumption",
+    "SimulatorScenario",
+    "SimulatorStockDetail",
     "StockLedgerEntry",
     "Task",
     "TaskAttachment",

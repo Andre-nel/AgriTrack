@@ -27,6 +27,8 @@ from app.models import (
     PaddockEvent,
     PaddockGate,
     RainfallRecord,
+    SimulatorExpense,
+    SimulatorStockDetail,
     StockLedgerEntry,
     Task,
     TaskComment,
@@ -248,6 +250,11 @@ class FarmDeletionService:
             {"farm_id": None},
             synchronize_session=False,
         )
+        SimulatorExpense.query.filter(SimulatorExpense.farm_id == farm_id).update(
+            {"farm_id": None},
+            synchronize_session=False,
+        )
+        cls._delete_where(SimulatorStockDetail, SimulatorStockDetail.farm_id == farm_id)
 
         cls._delete_where(Paddock, cls._in_if_any(Paddock.id, paddock_ids))
         cls._delete_where(Mob, cls._in_if_any(Mob.id, mob_ids))

@@ -918,7 +918,7 @@ private data class NewStockGroupDraft(
     val species: String = "Cattle",
     val breed: String = "",
     val sex: String = "mixed",
-    val ageClass: String = "calf",
+    val ageClass: String = "adult",
     val headCount: String = "",
 )
 
@@ -4473,11 +4473,12 @@ private fun StockCountScreen(
             }
             if (newGroup.enabled) {
                 OptionPicker("Species", newGroup.species, stockSpeciesOptions(state.formOptions)) { species ->
+                    val sex = defaultStockSex(state.formOptions, species)
                     newGroup = newGroup.copy(
                         species = species,
                         breed = "",
-                        sex = defaultStockSex(state.formOptions, species),
-                        ageClass = defaultStockAgeClass(state.formOptions, species),
+                        sex = sex,
+                        ageClass = defaultStockAgeClassForSex(state.formOptions, species, sex),
                     )
                 }
                 BreedEntry(
@@ -4486,9 +4487,12 @@ private fun StockCountScreen(
                     onValueChange = { breed -> newGroup = newGroup.copy(breed = breed) },
                 )
                 OptionPicker("Sex", newGroup.sex, stockSexOptions(state.formOptions, newGroup.species)) { sex ->
-                    newGroup = newGroup.copy(sex = sex)
+                    newGroup = newGroup.copy(
+                        sex = sex,
+                        ageClass = stockAgeClassForSex(state.formOptions, newGroup.species, sex, newGroup.ageClass),
+                    )
                 }
-                OptionPicker("Age class", newGroup.ageClass, stockAgeClassOptions(state.formOptions, newGroup.species)) { ageClass ->
+                OptionPicker("Age class", newGroup.ageClass, stockAgeClassOptionsForSex(state.formOptions, newGroup.species, newGroup.sex)) { ageClass ->
                     newGroup = newGroup.copy(ageClass = ageClass)
                 }
                 OutlinedTextField(
@@ -5658,7 +5662,7 @@ private fun queueStockCount(
     if (newGroup.enabled) {
         val speciesValues = stockSpeciesOptions(state.formOptions).map { it.value }.toSet()
         val sexValues = stockSexOptions(state.formOptions, newGroup.species).map { it.value }.toSet()
-        val ageValues = stockAgeClassOptions(state.formOptions, newGroup.species).map { it.value }.toSet()
+        val ageValues = stockAgeClassOptionsForSex(state.formOptions, newGroup.species, newGroup.sex).map { it.value }.toSet()
         val breed = newGroup.breed.trim()
         val quantity = newGroup.headCount.toIntOrNull()
             ?: return state.copy(statusMessage = "New group head count must be a whole number.")
@@ -6150,7 +6154,33 @@ private fun defaultStockSex(formOptions: MobileFormOptions, species: String): St
     stockSexOptions(formOptions, species).firstOrNull()?.value ?: "mixed"
 
 private fun defaultStockAgeClass(formOptions: MobileFormOptions, species: String): String =
-    stockAgeClassOptions(formOptions, species).firstOrNull()?.value ?: "adult"
+    stockAgeClassOptions(formOptions, species).firstOrNull { it.value.equals("adult", ignoreCase = true) }?.value
+        ?: stockAgeClassOptions(formOptions, species).firstOrNull()?.value
+        ?: "adult"
+
+private fun defaultStockAgeClassForSex(formOptions: MobileFormOptions, species: String, sex: String): String =
+    stockAgeClassOptionsForSex(formOptions, species, sex).firstOrNull { it.value.equals("adult", ignoreCase = true) }?.value
+        ?: stockAgeClassOptionsForSex(formOptions, species, sex).firstOrNull()?.value
+        ?: defaultStockAgeClass(formOptions, species)
+
+private fun stockAgeClassForSex(formOptions: MobileFormOptions, species: String, sex: String, ageClass: String): String {
+    val options = stockAgeClassOptionsForSex(formOptions, species, sex).map { it.value }
+    return if (ageClass in options) ageClass else defaultStockAgeClassForSex(formOptions, species, sex)
+}
+
+private fun stockAgeClassOptionsForSex(formOptions: MobileFormOptions, species: String, sex: String): List<MobileOption> {
+    val options = stockAgeClassOptions(formOptions, species)
+    if (sex.equals("mixed", ignoreCase = true)) return options
+    val juvenileAgeClass = juvenileStockAgeClass(species)
+    return options.filterNot { it.value.equals(juvenileAgeClass, ignoreCase = true) }.ifEmpty { options }
+}
+
+private fun juvenileStockAgeClass(species: String): String =
+    when (species.trim().lowercase()) {
+        "sheep" -> "lamb"
+        "goat" -> "kid"
+        else -> "calf"
+    }
 
 private fun stockOptions(vararg values: String): List<MobileOption> =
     values.map { MobileOption(it, it.replace("_", " ").replaceFirstChar(Char::titlecase)) }
