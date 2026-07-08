@@ -19,12 +19,12 @@ def register_legacy_routes(bp) -> None:
     @bp.route("/farms/import", methods=["GET", "POST"])
     def import_farm_page():
         if request.method == "GET":
-            return render_template("import_farm.html", default_timezone="UTC")
+            return render_template("import_farm.html", default_timezone="SAST")
 
         uploaded_file = request.files.get("farm_kml")
         file_name = uploaded_file.filename if uploaded_file else ""
         file_bytes = uploaded_file.read() if uploaded_file else b""
-        timezone_value = (request.form.get("timezone") or "UTC").strip() or "UTC"
+        timezone_value = (request.form.get("timezone") or "SAST").strip() or "SAST"
 
         try:
             result = FarmImportService.import_farm(

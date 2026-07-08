@@ -381,6 +381,6 @@ def register_legacy_routes(bp) -> None:
             ],
             linked_task_rows=linked_task_rows_for_entity(
                 paddock_id=str(paddock.id),
-                tz_name=paddock.farm.timezone if paddock.farm else "UTC",
+                tz_name=paddock.farm.timezone if paddock.farm else "SAST",
             ),
         )

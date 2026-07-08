@@ -86,7 +86,7 @@ class MobileFiltersTest {
                     JSONObject()
                         .put("id", "farm-1")
                         .put("name", "Filter Farm")
-                        .put("timezone", "UTC"),
+                        .put("timezone", "SAST"),
                 )
                 .put(
                     "paddocks",

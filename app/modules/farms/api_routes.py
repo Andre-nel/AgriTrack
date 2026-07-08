@@ -42,7 +42,7 @@ def create_farm():
 
     farm = Farm(
         name=payload["name"],
-        timezone=payload.get("timezone", "UTC"),
+        timezone=payload.get("timezone", "SAST"),
         active=True,
         default_stocking_rate_ha_per_lsu=default_stocking_rate,
     )

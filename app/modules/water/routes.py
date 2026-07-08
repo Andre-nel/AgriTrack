@@ -73,7 +73,7 @@ def register_legacy_routes(bp) -> None:
                 )
         linked_tasks_by_water_asset_id = linked_task_rows_by_water_asset(
             asset_ids,
-            farm.timezone if farm else "UTC",
+            farm.timezone if farm else "SAST",
         )
         connections = WaterNetworkService.connections_for_farm(str(farm.id))
         water_summary = WaterNetworkService.farm_summary(str(farm.id))

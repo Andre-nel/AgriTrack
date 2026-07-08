@@ -24,7 +24,7 @@ from app.modules.analytics.services import (
 
 def test_create_journal_entry_normalizes_tags_and_commits(app):
     with app.app_context():
-        farm = Farm(name="Journal Farm", timezone="UTC", active=True)
+        farm = Farm(name="Journal Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.commit()
 
@@ -56,7 +56,7 @@ def test_create_journal_entry_rejects_missing_farm(app):
 
 def test_build_water_asset_state_report_carries_baseline_and_summarizes(app):
     with app.app_context():
-        farm = Farm(name="Water Analytics Farm", timezone="UTC", active=True)
+        farm = Farm(name="Water Analytics Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         tank = WaterAsset(
@@ -189,7 +189,7 @@ def test_build_water_asset_state_report_carries_baseline_and_summarizes(app):
 
 def test_build_water_asset_state_report_supports_asset_plot_mode(app):
     with app.app_context():
-        farm = Farm(name="Water Asset Plot Farm", timezone="UTC", active=True)
+        farm = Farm(name="Water Asset Plot Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         tank = WaterAsset(
@@ -255,7 +255,7 @@ def test_build_water_asset_state_report_supports_asset_plot_mode(app):
 
 def test_build_lsu_paddock_tracking_report_filters_species_and_summarizes(app):
     with app.app_context():
-        farm = Farm(name="LSU Report Farm", timezone="UTC", default_stocking_rate_ha_per_lsu=6)
+        farm = Farm(name="LSU Report Farm", timezone="SAST", default_stocking_rate_ha_per_lsu=6)
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)
@@ -357,7 +357,7 @@ def test_build_lsu_paddock_tracking_report_filters_species_and_summarizes(app):
 
 def test_build_lsu_paddock_tracking_report_groups_by_species(app):
     with app.app_context():
-        farm = Farm(name="Species Group Farm", timezone="UTC", default_stocking_rate_ha_per_lsu=6)
+        farm = Farm(name="Species Group Farm", timezone="SAST", default_stocking_rate_ha_per_lsu=6)
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="West Camp", area_ha=20, grazeable_area_ha=20)
@@ -421,7 +421,7 @@ def test_build_lsu_paddock_tracking_report_groups_by_species(app):
 
 def test_build_lsu_paddock_tracking_report_supports_head_count_metric_and_min_filter(app):
     with app.app_context():
-        farm = Farm(name="Head Metric Farm", timezone="UTC", default_stocking_rate_ha_per_lsu=6)
+        farm = Farm(name="Head Metric Farm", timezone="SAST", default_stocking_rate_ha_per_lsu=6)
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="Head Camp", area_ha=10, grazeable_area_ha=10)

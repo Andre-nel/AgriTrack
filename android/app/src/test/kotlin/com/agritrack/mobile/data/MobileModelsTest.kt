@@ -431,7 +431,7 @@ class MobileModelsTest {
     fun snapshotParserKeepsShearingSessionsAndBreakdowns() {
         val snapshot = FarmSnapshot.fromJson(
             JSONObject()
-                .put("farm", JSONObject().put("id", "farm-1").put("name", "North Block").put("timezone", "UTC"))
+                .put("farm", JSONObject().put("id", "farm-1").put("name", "North Block").put("timezone", "SAST"))
                 .put(
                     "shearers",
                     JSONArray().put(
@@ -645,7 +645,7 @@ class MobileModelsTest {
                             JSONObject()
                                 .put("id", "farm-2")
                                 .put("name", "South Block")
-                                .put("timezone", "UTC")
+                                .put("timezone", "SAST")
                         )
                 )
                 .put("animal_group_types", JSONArray())

@@ -164,8 +164,8 @@ class TaskService:
 
     @staticmethod
     def get_timezone(tz_name: str | None) -> tzinfo:
-        normalized = (tz_name or "UTC").strip() or "UTC"
-        if normalized.upper() == "UTC":
+        normalized = (tz_name or "SAST").strip() or "SAST"
+        if normalized.upper() == "SAST":
             return timezone.utc
         try:
             return ZoneInfo(normalized)
@@ -531,5 +531,5 @@ class TaskService:
     ) -> bool:
         if task.status == "closed" or task.due_date is None:
             return False
-        comparison_date = today or cls.today_for_timezone(tz_name or "UTC")
+        comparison_date = today or cls.today_for_timezone(tz_name or "SAST")
         return task.due_date < comparison_date

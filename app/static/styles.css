@@ -2840,6 +2840,68 @@ tr.is-selected-fence {
   margin: 0 0 0.25rem;
 }
 
+.simulator-fieldset {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.simulator-fieldset legend {
+  padding: 0 0.35rem;
+  font-weight: 700;
+}
+
+.simulator-farm-choice-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.45rem 0.8rem;
+}
+
+.simulator-fold-card {
+  margin-bottom: 1rem;
+}
+
+.simulator-card-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.simulator-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.simulator-card-summary::marker {
+  content: "";
+}
+
+.simulator-card-summary::after {
+  content: "+";
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.simulator-fold-card[open] > .simulator-card-summary::after {
+  content: "-";
+}
+
+.simulator-fold-body {
+  margin-top: 1rem;
+}
+
 .simulator-summary-grid {
   margin-top: 1rem;
 }
@@ -2910,6 +2972,20 @@ tr.is-selected-fence {
 
 .simulator-stock-actions {
   margin-top: 0.85rem;
+}
+
+.simulator-expense-modal {
+  width: min(760px, calc(100vw - 2rem));
+}
+
+.simulator-expense-edit-form {
+  margin-bottom: 0.9rem;
+}
+
+.simulator-expense-delete-form {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
 }
 
 .inline-form {

@@ -19,7 +19,7 @@ from app.services.stock_service import StockService
 
 
 def _build_base_entities():
-    farm = Farm(name="Unit Farm", timezone="UTC", default_stocking_rate_ha_per_lsu=6)
+    farm = Farm(name="Unit Farm", timezone="SAST", default_stocking_rate_ha_per_lsu=6)
     db.session.add(farm)
     db.session.flush()
     paddock = Paddock(farm_id=farm.id, name="Unit Camp", area_ha=12, grazeable_area_ha=12)

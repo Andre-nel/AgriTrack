@@ -90,7 +90,7 @@ class MobileDetailsTest {
                     JSONObject()
                         .put("id", "farm-1")
                         .put("name", "Detail Farm")
-                        .put("timezone", "UTC"),
+                        .put("timezone", "SAST"),
                 )
                 .put(
                     "paddocks",

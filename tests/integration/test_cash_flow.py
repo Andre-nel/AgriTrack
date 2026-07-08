@@ -5,7 +5,7 @@ from app.models import CashTransaction, Farm
 
 
 def _create_farm(name: str = "Cash Flow Farm") -> Farm:
-    farm = Farm(name=name, timezone="UTC")
+    farm = Farm(name=name, timezone="SAST")
     db.session.add(farm)
     db.session.commit()
     return farm

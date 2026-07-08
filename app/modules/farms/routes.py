@@ -76,7 +76,7 @@ def register_legacy_routes(bp) -> None:
             return render_template("setup.html")
 
         farm_name = (request.form.get("farm_name") or "").strip()
-        timezone = (request.form.get("timezone") or "UTC").strip() or "UTC"
+        timezone = (request.form.get("timezone") or "SAST").strip() or "SAST"
         paddocks_raw = request.form.get("paddocks") or ""
         mobs_raw = request.form.get("mobs") or ""
         placements_raw = request.form.get("placements") or ""
@@ -133,7 +133,7 @@ def register_legacy_routes(bp) -> None:
     def farms_page():
         if request.method == "POST":
             name = (request.form.get("name") or "").strip()
-            timezone = (request.form.get("timezone") or "UTC").strip() or "UTC"
+            timezone = (request.form.get("timezone") or "SAST").strip() or "SAST"
             if not name:
                 flash("Farm name is required", "error")
                 return redirect(url_for("web.farms_page"))

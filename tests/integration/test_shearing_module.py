@@ -43,7 +43,7 @@ def _auth(token: str) -> dict:
 
 def test_shearing_service_calculates_adult_and_old_ram_multiplier_only(app):
     with app.app_context():
-        farm = Farm(name="Shearing Farm", timezone="UTC", active=True)
+        farm = Farm(name="Shearing Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         shearer = ShearingService.create_shearer(farm_id=farm.id, name="Johan")
@@ -89,7 +89,7 @@ def test_shearing_service_calculates_adult_and_old_ram_multiplier_only(app):
 
 def test_shearing_service_validates_species_dates_and_zero_delete(app):
     with app.app_context():
-        farm = Farm(name="Validation Shearing Farm", timezone="UTC", active=True)
+        farm = Farm(name="Validation Shearing Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         shearer = ShearingService.create_shearer(farm_id=farm.id, name="Piet")
@@ -152,7 +152,7 @@ def test_shearing_service_validates_species_dates_and_zero_delete(app):
 
 def test_shearing_service_bales_calculate_money_totals_and_validate_species(app):
     with app.app_context():
-        farm = Farm(name="Bale Money Farm", timezone="UTC", active=True)
+        farm = Farm(name="Bale Money Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         session = ShearingService.create_session(
@@ -268,8 +268,8 @@ def test_shearing_service_bales_calculate_money_totals_and_validate_species(app)
 
 def test_shearing_analytics_report_summarizes_bales_codes_and_costs(app):
     with app.app_context():
-        first_farm = Farm(name="Analytics Shearing Farm A", timezone="UTC", active=True)
-        second_farm = Farm(name="Analytics Shearing Farm B", timezone="UTC", active=True)
+        first_farm = Farm(name="Analytics Shearing Farm A", timezone="SAST", active=True)
+        second_farm = Farm(name="Analytics Shearing Farm B", timezone="SAST", active=True)
         db.session.add_all([first_farm, second_farm])
         db.session.flush()
         shearer = ShearingService.create_shearer(farm_id=first_farm.id, name="Analytics Shearer")
@@ -413,7 +413,7 @@ def test_shearing_analytics_report_summarizes_bales_codes_and_costs(app):
 
 def test_shearing_analytics_report_blanks_animal_averages_without_counts(app):
     with app.app_context():
-        farm = Farm(name="Analytics No Count Farm", timezone="UTC", active=True)
+        farm = Farm(name="Analytics No Count Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         session = ShearingService.create_session(
@@ -449,7 +449,7 @@ def test_shearing_analytics_report_blanks_animal_averages_without_counts(app):
 
 def test_shearing_web_routes_create_session_shearer_and_entry(client, app):
     with app.app_context():
-        farm = Farm(name="Web Shearing Farm", timezone="UTC", active=True)
+        farm = Farm(name="Web Shearing Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         farm_id = str(farm.id)
@@ -602,7 +602,7 @@ def test_shearing_analytics_web_route_renders_empty_and_landing_link(client):
 def test_shearing_analytics_default_window_handles_future_sessions(client, app):
     future_start = date.today() + timedelta(days=30)
     with app.app_context():
-        farm = Farm(name="Future Shearing Farm", timezone="UTC", active=True)
+        farm = Farm(name="Future Shearing Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         session = ShearingService.create_session(
@@ -629,8 +629,8 @@ def test_shearing_analytics_default_window_handles_future_sessions(client, app):
 
 def test_shearing_analytics_web_route_filters_and_groups(client, app):
     with app.app_context():
-        first_farm = Farm(name="Analytics Route Farm A", timezone="UTC", active=True)
-        second_farm = Farm(name="Analytics Route Farm B", timezone="UTC", active=True)
+        first_farm = Farm(name="Analytics Route Farm A", timezone="SAST", active=True)
+        second_farm = Farm(name="Analytics Route Farm B", timezone="SAST", active=True)
         db.session.add_all([first_farm, second_farm])
         db.session.flush()
         sheep_code = ShearingService.upsert_bale_code(species="Sheep", code="ROUTE-FH")
@@ -701,7 +701,7 @@ def test_shearing_analytics_web_route_filters_and_groups(client, app):
 
 def test_mobile_shearing_snapshot_and_sync_commands(client, app):
     with app.app_context():
-        farm = Farm(name="Mobile Shearing Farm", timezone="UTC", active=True)
+        farm = Farm(name="Mobile Shearing Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_mobile_user(farm)
@@ -821,7 +821,7 @@ def test_mobile_shearing_snapshot_and_sync_commands(client, app):
 
 def test_mobile_shearing_rejects_invalid_species(client, app):
     with app.app_context():
-        farm = Farm(name="Mobile Invalid Shearing Farm", timezone="UTC", active=True)
+        farm = Farm(name="Mobile Invalid Shearing Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_mobile_user(farm)
@@ -873,8 +873,8 @@ def test_mobile_shearing_rejects_invalid_species(client, app):
 
 def test_shearer_can_work_sessions_on_multiple_farms(app):
     with app.app_context():
-        first_farm = Farm(name="First Shearing Farm", timezone="UTC", active=True)
-        second_farm = Farm(name="Second Shearing Farm", timezone="UTC", active=True)
+        first_farm = Farm(name="First Shearing Farm", timezone="SAST", active=True)
+        second_farm = Farm(name="Second Shearing Farm", timezone="SAST", active=True)
         db.session.add_all([first_farm, second_farm])
         db.session.flush()
         shearer = ShearingService.create_shearer(farm_id=first_farm.id, name="Cross Farm Shearer")

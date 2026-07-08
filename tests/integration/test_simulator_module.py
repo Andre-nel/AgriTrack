@@ -7,18 +7,28 @@ from app.models import (
     Farm,
     Mob,
     SimulatorExpense,
+    SimulatorFarm,
     SimulatorScenario,
     SimulatorStockDetail,
 )
+from app.services.simulator_service import SimulatorService
 
 
-def _farm_with_stock() -> Farm:
-    farm = Farm(name="Simulator Farm", timezone="UTC", active=True)
+def _farm_with_stock(name: str = "Simulator Farm") -> Farm:
+    farm = Farm(name=name, timezone="SAST", active=True)
     db.session.add(farm)
     db.session.flush()
     mob = Mob(farm_id=farm.id, name="Main Mob", status="active")
-    group = AnimalGroupType(species="Goat", breed="Angora", sex="ewe", age_class="adult")
-    db.session.add_all([mob, group])
+    group = AnimalGroupType.query.filter_by(
+        species="Goat",
+        breed="Angora",
+        sex="ewe",
+        age_class="adult",
+    ).first()
+    if group is None:
+        group = AnimalGroupType(species="Goat", breed="Angora", sex="ewe", age_class="adult")
+        db.session.add(group)
+    db.session.add(mob)
     db.session.flush()
     db.session.add(
         AnimalGroupBalance(
@@ -29,6 +39,136 @@ def _farm_with_stock() -> Farm:
     )
     db.session.commit()
     return farm
+
+
+def test_simulator_create_can_scope_existing_and_future_farms(client, app):
+    with app.app_context():
+        selected = _farm_with_stock("Selected Simulator Farm")
+        excluded = _farm_with_stock("Excluded Simulator Farm")
+        selected_id = str(selected.id)
+        excluded_id = str(excluded.id)
+
+    create_response = client.post(
+        "/simulator/scenarios",
+        data={
+            "farm_scope_submitted": "1",
+            "farm_ids": [selected_id],
+            "new_farm_name": "Planned Lease Farm",
+            "name": "Scoped Farm Cash Flow",
+            "projection_year": "2026",
+            "income_inflation_rate": "0",
+            "expense_inflation_rate": "0",
+            "notes": "",
+        },
+        follow_redirects=True,
+    )
+
+    assert create_response.status_code == 200
+    body = create_response.data.decode("utf-8")
+    assert "Planned Lease Farm" in body
+    assert "Future farm" in body
+
+    with app.app_context():
+        scenario = SimulatorScenario.query.filter_by(name="Scoped Farm Cash Flow").first()
+        assert scenario is not None
+        scenario_id = str(scenario.id)
+        targets = SimulatorFarm.query.filter_by(scenario_id=scenario_id).order_by(SimulatorFarm.name.asc()).all()
+        assert [target.name for target in targets] == ["Planned Lease Farm", "Selected Simulator Farm"]
+        assert {str(target.farm_id) for target in targets if target.farm_id} == {selected_id}
+        assert excluded_id not in {str(target.farm_id) for target in targets if target.farm_id}
+
+        stock_rows = SimulatorStockDetail.query.filter_by(scenario_id=scenario_id).all()
+        assert len(stock_rows) == 1
+        assert str(stock_rows[0].farm_id) == selected_id
+
+        projection = SimulatorService.build_projection(scenario)
+        farm_names = {row["name"] for row in projection["farms"]}
+        assert farm_names == {"Planned Lease Farm", "Selected Simulator Farm"}
+        future_result = next(row for row in projection["farms"] if row["name"] == "Planned Lease Farm")
+        assert future_result["stock_rows"] == []
+
+
+def test_simulator_expense_update_and_delete(client, app):
+    with app.app_context():
+        farm = _farm_with_stock("Expense Edit Farm")
+        farm_id = str(farm.id)
+
+    create_response = client.post(
+        "/simulator/scenarios",
+        data={
+            "farm_scope_submitted": "1",
+            "farm_ids": [farm_id],
+            "name": "Expense Edit Scenario",
+            "projection_year": "2026",
+            "income_inflation_rate": "0",
+            "expense_inflation_rate": "0",
+            "notes": "",
+        },
+        follow_redirects=True,
+    )
+    assert create_response.status_code == 200
+
+    with app.app_context():
+        scenario = SimulatorScenario.query.filter_by(name="Expense Edit Scenario").first()
+        scenario_id = str(scenario.id)
+        target = SimulatorFarm.query.filter_by(scenario_id=scenario_id, farm_id=farm_id).one()
+        target_id = str(target.id)
+
+    create_expense_response = client.post(
+        f"/simulator/scenarios/{scenario_id}/expenses",
+        data={
+            "expense_type": "standard",
+            "simulator_farm_id": target_id,
+            "category_code": "wages",
+            "label": "Temporary wages",
+            "amount": "1000",
+            "recurrence": "monthly",
+        },
+        follow_redirects=True,
+    )
+    assert create_expense_response.status_code == 200
+    expense_body = create_expense_response.data.decode("utf-8")
+    assert "Edit Standard Expense" in expense_body
+    assert 'value="Temporary wages"' in expense_body
+
+    with app.app_context():
+        expense = SimulatorExpense.query.filter_by(label="Temporary wages").one()
+        expense_id = str(expense.id)
+
+    update_response = client.post(
+        f"/simulator/scenarios/{scenario_id}/expenses/{expense_id}/edit",
+        data={
+            "expense_type": "standard",
+            "simulator_farm_id": "",
+            "category_code": "diesel_petrol",
+            "label": "Updated diesel",
+            "amount": "750",
+            "recurrence": "yearly",
+        },
+        follow_redirects=True,
+    )
+    assert update_response.status_code == 200
+    update_body = update_response.data.decode("utf-8")
+    assert "Expense updated" in update_body
+    assert "Updated diesel" in update_body
+
+    with app.app_context():
+        expense = db.session.get(SimulatorExpense, expense_id)
+        assert expense.farm_id is None
+        assert expense.simulator_farm_id is None
+        assert expense.category_code == "diesel_petrol"
+        assert expense.amount == Decimal("750.00")
+        assert expense.recurrence == "yearly"
+
+    delete_response = client.post(
+        f"/simulator/scenarios/{scenario_id}/expenses/{expense_id}/delete",
+        follow_redirects=True,
+    )
+    assert delete_response.status_code == 200
+    assert "Expense removed" in delete_response.data.decode("utf-8")
+
+    with app.app_context():
+        assert db.session.get(SimulatorExpense, expense_id) is None
 
 
 def test_simulator_web_flow_create_stock_crud_clear_inputs_and_delete(client, app):
@@ -167,7 +307,7 @@ def test_simulator_web_flow_create_stock_crud_clear_inputs_and_delete(client, ap
 
 def test_farm_deletion_cleans_simulator_farm_links(client, app):
     with app.app_context():
-        farm = Farm(name="Simulator Delete Farm", timezone="UTC", active=True)
+        farm = Farm(name="Simulator Delete Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         scenario = SimulatorScenario(name="Delete Linked Scenario", projection_year=2026)

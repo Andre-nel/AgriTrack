@@ -289,7 +289,7 @@ class OptimisticSnapshotTest {
     private fun fieldSnapshot(): FarmSnapshot =
         FarmSnapshot.fromJson(
             JSONObject()
-                .put("farm", JSONObject().put("id", "farm-1").put("name", "North Farm").put("timezone", "UTC"))
+                .put("farm", JSONObject().put("id", "farm-1").put("name", "North Farm").put("timezone", "SAST"))
                 .put(
                     "paddocks",
                     JSONArray()
@@ -484,7 +484,7 @@ class OptimisticSnapshotTest {
     private fun shearingSnapshot(): FarmSnapshot =
         FarmSnapshot.fromJson(
             JSONObject()
-                .put("farm", JSONObject().put("id", "farm-1").put("name", "North Farm").put("timezone", "UTC"))
+                .put("farm", JSONObject().put("id", "farm-1").put("name", "North Farm").put("timezone", "SAST"))
                 .put("shearers", JSONArray())
                 .put("shearing_bale_codes", JSONArray())
                 .put("shearing_sessions", JSONArray()),

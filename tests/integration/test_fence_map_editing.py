@@ -4,7 +4,7 @@ from app.services.fence_service import FenceService
 
 
 def _farm_with_paddocks(name="Fence Map Farm"):
-    farm = Farm(name=name, timezone="UTC", active=True)
+    farm = Farm(name=name, timezone="SAST", active=True)
     db.session.add(farm)
     db.session.flush()
     north = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)

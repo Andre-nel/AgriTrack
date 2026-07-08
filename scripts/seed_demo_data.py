@@ -11,7 +11,7 @@ def main() -> None:
             print("Data exists; skipping.")
             return
 
-        farm = Farm(name="Script Farm", timezone="UTC", active=True)
+        farm = Farm(name="Script Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
 

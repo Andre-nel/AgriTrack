@@ -366,7 +366,7 @@ def _build_todo_task_rows(
 
     rows = []
     for task in task_query.all():
-        tz_name = task.space.farm.timezone if task.space and task.space.farm else "UTC"
+        tz_name = task.space.farm.timezone if task.space and task.space.farm else "SAST"
         card = _build_task_card(task, tz_name)
         row = {
             "kind": "task",
@@ -460,7 +460,7 @@ def _build_space_summary(tasks: list[Task], tz_name: str) -> dict:
 
 
 def _build_space_card(space: TaskSpace) -> dict:
-    tz_name = space.farm.timezone if space.farm else "UTC"
+    tz_name = space.farm.timezone if space.farm else "SAST"
     return {
         "id": space.id,
         "key": space.key,
@@ -788,7 +788,7 @@ def create_space():
 def space_detail(space_id: str):
     space = _load_space(space_id)
     tasks = Task.query.filter_by(space_id=space.id).order_by(Task.task_number).all()
-    tz_name = space.farm.timezone if space.farm else "UTC"
+    tz_name = space.farm.timezone if space.farm else "SAST"
     summary = _build_space_summary(tasks, tz_name)
     board_columns = []
     for status in TASK_STATUSES:
@@ -932,7 +932,7 @@ def create_space_link(space_id: str):
 @bp.get("/tasks/<task_id>")
 def task_detail(task_id: str):
     task = _load_task(task_id)
-    tz_name = task.space.farm.timezone if task.space and task.space.farm else "UTC"
+    tz_name = task.space.farm.timezone if task.space and task.space.farm else "SAST"
     transitions = (
         TaskStatusTransition.query.filter_by(task_id=task.id)
         .order_by(TaskStatusTransition.changed_at.asc(), TaskStatusTransition.id.asc())

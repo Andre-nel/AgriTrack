@@ -6,8 +6,8 @@ from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models import (
-    Farm,
     SimulatorExpense,
+    SimulatorFarm,
     SimulatorRevenueAssumption,
     SimulatorScenario,
     SimulatorStockDetail,
@@ -20,8 +20,11 @@ bp = Blueprint("simulator", __name__, url_prefix="/simulator")
 def _scenario_query():
     return SimulatorScenario.query.options(
         selectinload(SimulatorScenario.revenue_assumptions),
+        selectinload(SimulatorScenario.farm_targets).selectinload(SimulatorFarm.farm),
         selectinload(SimulatorScenario.stock_details).selectinload(SimulatorStockDetail.farm),
+        selectinload(SimulatorScenario.stock_details).selectinload(SimulatorStockDetail.simulator_farm),
         selectinload(SimulatorScenario.expenses).selectinload(SimulatorExpense.farm),
+        selectinload(SimulatorScenario.expenses).selectinload(SimulatorExpense.simulator_farm),
     )
 
 
@@ -42,6 +45,7 @@ def index():
     return render_template(
         "simulator/index.html",
         scenarios=scenarios,
+        farms=SimulatorService.active_farms(),
         current_year=date.today().year,
     )
 
@@ -63,7 +67,7 @@ def create_scenario():
 def detail(scenario_id: str):
     scenario = _scenario_or_404(scenario_id)
     projection = SimulatorService.build_projection(scenario)
-    farms = Farm.query.filter_by(active=True).order_by(Farm.name.asc()).all()
+    farm_options = SimulatorService.scenario_farm_options(scenario)
     expense_rows = []
     for expense in sorted(scenario.expenses, key=lambda item: (item.created_at, item.label.lower())):
         monthly_outflow = None
@@ -74,6 +78,7 @@ def detail(scenario_id: str):
         expense_rows.append(
             {
                 "expense": expense,
+                "farm_option_value": str(expense.simulator_farm_id or expense.farm_id or ""),
                 "annual": SimulatorService.expense_annual_amount(expense),
                 "monthly_outflow": monthly_outflow,
                 "payment_amount": SimulatorService.loan_payment_amount(expense)
@@ -86,7 +91,7 @@ def detail(scenario_id: str):
         scenario=scenario,
         projection=projection,
         expense_rows=expense_rows,
-        farms=farms,
+        farm_options=farm_options,
         species_options=SimulatorService.species_options(),
         expense_categories=SimulatorService.expense_category_options(),
         recurrence_options=SimulatorService.recurrence_options(),
@@ -213,6 +218,23 @@ def create_expense(scenario_id: str):
         SimulatorService.create_expense(scenario, request.form)
         db.session.commit()
         flash("Expense saved", "success")
+    except (IntegrityError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    return _scenario_redirect(scenario)
+
+
+@bp.post("/scenarios/<scenario_id>/expenses/<expense_id>/edit")
+def edit_expense(scenario_id: str, expense_id: str):
+    scenario = _scenario_or_404(scenario_id)
+    expense = SimulatorExpense.query.filter_by(
+        id=expense_id,
+        scenario_id=scenario.id,
+    ).first_or_404()
+    try:
+        SimulatorService.update_expense(expense, scenario, request.form)
+        db.session.commit()
+        flash("Expense updated", "success")
     except (IntegrityError, ValueError) as exc:
         db.session.rollback()
         flash(str(exc), "error")

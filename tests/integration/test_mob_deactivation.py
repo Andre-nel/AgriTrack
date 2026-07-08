@@ -14,7 +14,7 @@ from app.models import (
 
 
 def _build_grazing_allocation_fixture():
-    farm = Farm(name="Archive Farm", timezone="UTC")
+    farm = Farm(name="Archive Farm", timezone="SAST")
     db.session.add(farm)
     db.session.flush()
 
@@ -128,7 +128,7 @@ def test_web_mob_deactivation_closes_open_grazing(client, app):
 def test_archived_mob_with_stale_open_session_is_not_treated_as_currently_grazing(client, app):
     with app.app_context():
         now = datetime.now(timezone.utc)
-        farm = Farm(name="Legacy Archive Farm", timezone="UTC")
+        farm = Farm(name="Legacy Archive Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 

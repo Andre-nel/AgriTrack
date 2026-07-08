@@ -29,7 +29,7 @@ data class FarmSummary(
             FarmSummary(
                 id = json.getString("id"),
                 name = json.optString("name", "Farm"),
-                timezone = json.optString("timezone", "UTC"),
+                timezone = json.optString("timezone", "SAST"),
                 role = json.optNullableString("role"),
             )
     }
@@ -616,7 +616,7 @@ data class FarmSnapshot(
                 farm = FarmSummary(
                     id = farmJson.getString("id"),
                     name = farmJson.optString("name", "Farm"),
-                    timezone = farmJson.optString("timezone", "UTC"),
+                    timezone = farmJson.optString("timezone", "SAST"),
                     role = farmJson.optNullableString("role"),
                 ),
                 paddockCount = paddocks.size,

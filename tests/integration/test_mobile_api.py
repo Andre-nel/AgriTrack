@@ -111,9 +111,9 @@ def test_mobile_login_bootstrap_logout_and_revocation(client, app):
 
 def test_mobile_login_bootstrap_and_ping_include_multiple_farm_roles(client, app):
     with app.app_context():
-        alpha = Farm(name="Alpha Mobile Farm", timezone="UTC", active=True)
+        alpha = Farm(name="Alpha Mobile Farm", timezone="SAST", active=True)
         beta = Farm(name="Beta Mobile Farm", timezone="Africa/Johannesburg", active=True)
-        inactive = Farm(name="Inactive Mobile Farm", timezone="UTC", active=False)
+        inactive = Farm(name="Inactive Mobile Farm", timezone="SAST", active=False)
         db.session.add_all([alpha, beta, inactive])
         db.session.flush()
         user = User(email="multi@example.com", name="Multi Farm User", active=True)
@@ -165,7 +165,7 @@ def test_mobile_login_bootstrap_and_ping_include_multiple_farm_roles(client, app
 
 def test_mobile_rejects_invalid_login_missing_token_and_expired_token(client, app):
     with app.app_context():
-        farm = Farm(name="Token Farm", timezone="UTC", active=True)
+        farm = Farm(name="Token Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         user = _create_user("token@example.com", "correct-password", farm)
@@ -199,8 +199,8 @@ def test_mobile_rejects_invalid_login_missing_token_and_expired_token(client, ap
 
 def test_mobile_farm_access_blocks_unassigned_farms(client, app):
     with app.app_context():
-        allowed = Farm(name="Allowed Mobile Farm", timezone="UTC", active=True)
-        blocked = Farm(name="Blocked Mobile Farm", timezone="UTC", active=True)
+        allowed = Farm(name="Allowed Mobile Farm", timezone="SAST", active=True)
+        blocked = Farm(name="Blocked Mobile Farm", timezone="SAST", active=True)
         db.session.add_all([allowed, blocked])
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", allowed)
@@ -422,7 +422,7 @@ def test_mobile_snapshot_includes_field_ops_data(client, app):
 
 def test_mobile_snapshot_hides_archived_mobs_and_related_mob_links(client, app):
     with app.app_context():
-        farm = Farm(name="Archived Mobile Mob Farm", timezone="UTC", active=True)
+        farm = Farm(name="Archived Mobile Mob Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -537,7 +537,7 @@ def test_mobile_snapshot_hides_archived_mobs_and_related_mob_links(client, app):
 
 def test_mobile_decision_feed_ignores_weir_water_level(client, app):
     with app.app_context():
-        farm = Farm(name="Weir Decision Farm", timezone="UTC", active=True)
+        farm = Farm(name="Weir Decision Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -570,7 +570,7 @@ def test_mobile_decision_feed_ignores_weir_water_level(client, app):
 
 def test_mobile_decision_feed_ignores_damaged_empty_water_asset(client, app):
     with app.app_context():
-        farm = Farm(name="Damaged Empty Water Decision Farm", timezone="UTC", active=True)
+        farm = Farm(name="Damaged Empty Water Decision Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -599,7 +599,7 @@ def test_mobile_decision_feed_ignores_damaged_empty_water_asset(client, app):
 
 def test_mobile_decision_feed_allows_rainfall_records_under_sixty_days(client, app):
     with app.app_context():
-        farm = Farm(name="Recent Rain Decision Farm", timezone="UTC", active=True)
+        farm = Farm(name="Recent Rain Decision Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -618,7 +618,7 @@ def test_mobile_decision_feed_allows_rainfall_records_under_sixty_days(client, a
 
 def test_mobile_decision_feed_marks_rainfall_stale_after_sixty_days(client, app):
     with app.app_context():
-        farm = Farm(name="Stale Rain Decision Farm", timezone="UTC", active=True)
+        farm = Farm(name="Stale Rain Decision Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -646,7 +646,7 @@ def test_mobile_decision_feed_marks_rainfall_stale_after_sixty_days(client, app)
 
 def test_mobile_decision_feed_flags_mobs_grazing_for_ten_days(client, app):
     with app.app_context():
-        farm = Farm(name="Long Grazing Decision Farm", timezone="UTC", active=True)
+        farm = Farm(name="Long Grazing Decision Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -705,7 +705,7 @@ def test_mobile_decision_feed_flags_mobs_grazing_for_ten_days(client, app):
 
 def test_mobile_decision_feed_allows_mobs_grazing_under_ten_days(client, app):
     with app.app_context():
-        farm = Farm(name="Current Grazing Decision Farm", timezone="UTC", active=True)
+        farm = Farm(name="Current Grazing Decision Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -751,7 +751,7 @@ def test_mobile_decision_feed_allows_mobs_grazing_under_ten_days(client, app):
 
 def test_mobile_task_attachment_upload_is_idempotent_and_visible_in_snapshot(client, app):
     with app.app_context():
-        farm = Farm(name="Attachment Mobile Farm", timezone="UTC", active=True)
+        farm = Farm(name="Attachment Mobile Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -831,7 +831,7 @@ def test_mobile_task_attachment_upload_is_idempotent_and_visible_in_snapshot(cli
 def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Note Attachment Mobile Farm", timezone="UTC", active=True)
+        farm = Farm(name="Note Attachment Mobile Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -959,7 +959,7 @@ def test_mobile_note_attachment_uploads_for_mob_paddock_and_water_notes(client, 
 
 def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, app):
     with app.app_context():
-        farm = Farm(name="Sync Mobile Farm", timezone="UTC", active=True)
+        farm = Farm(name="Sync Mobile Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -1255,7 +1255,7 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
 
 def test_mobile_mob_move_supports_count_allocations(client, app):
     with app.app_context():
-        farm = Farm(name="Mobile Count Move Farm", timezone="UTC", active=True)
+        farm = Farm(name="Mobile Count Move Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -1339,7 +1339,7 @@ def test_mobile_mob_move_supports_count_allocations(client, app):
 
 def test_mobile_snapshot_includes_gates_and_gate_update_command(client, app):
     with app.app_context():
-        farm = Farm(name="Mobile Gate Farm", timezone="UTC", active=True)
+        farm = Farm(name="Mobile Gate Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -1424,7 +1424,7 @@ def test_mobile_snapshot_includes_gates_and_gate_update_command(client, app):
 
 def test_mobile_mob_move_into_open_gate_uses_gate_allocations(client, app):
     with app.app_context():
-        farm = Farm(name="Mobile Open Gate Move Farm", timezone="UTC", active=True)
+        farm = Farm(name="Mobile Open Gate Move Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -1476,7 +1476,7 @@ def test_mobile_mob_move_into_open_gate_uses_gate_allocations(client, app):
 
 def test_mobile_stock_count_can_create_animal_group_from_payload(client, app):
     with app.app_context():
-        farm = Farm(name="New Group Mobile Farm", timezone="UTC", active=True)
+        farm = Farm(name="New Group Mobile Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -1541,7 +1541,7 @@ def test_mobile_stock_count_can_create_animal_group_from_payload(client, app):
 
 def test_mobile_stock_count_new_group_validation_failures(client, app):
     with app.app_context():
-        farm = Farm(name="Invalid New Group Farm", timezone="UTC", active=True)
+        farm = Farm(name="Invalid New Group Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -1593,7 +1593,7 @@ def test_mobile_stock_count_new_group_validation_failures(client, app):
 
 def test_mobile_task_close_requires_note(client, app):
     with app.app_context():
-        farm = Farm(name="Close Note Mobile Farm", timezone="UTC", active=True)
+        farm = Farm(name="Close Note Mobile Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)
@@ -1670,7 +1670,7 @@ def test_mobile_task_close_requires_note(client, app):
 
 def test_mobile_sync_commands_report_partial_failures_and_missing_records(client, app):
     with app.app_context():
-        farm = Farm(name="Partial Sync Farm", timezone="UTC", active=True)
+        farm = Farm(name="Partial Sync Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         _create_user("mobile@example.com", "correct-password", farm)

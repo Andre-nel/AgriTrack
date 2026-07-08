@@ -17,7 +17,7 @@ from app.modules.mobs.presenters import build_mob_detail_context
 
 def test_build_mob_detail_context_filters_events_and_builds_options(app):
     with app.app_context():
-        farm = Farm(name="Mob Farm", timezone="UTC", active=True)
+        farm = Farm(name="Mob Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=8)
@@ -93,7 +93,7 @@ def test_build_mob_detail_context_filters_events_and_builds_options(app):
 
 def test_build_mob_detail_context_prefills_exact_count_allocations(app):
     with app.app_context():
-        farm = Farm(name="Exact Count Farm", timezone="UTC", active=True)
+        farm = Farm(name="Exact Count Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         north = Paddock(farm_id=farm.id, name="North Count", area_ha=10, grazeable_area_ha=8)

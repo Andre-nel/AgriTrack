@@ -12,7 +12,7 @@ def _token_hash(token: str) -> str:
 def test_mobile_cli_can_create_user_set_password_and_assign_farm(app):
     runner = app.test_cli_runner()
     with app.app_context():
-        farm = Farm(name="CLI Mobile Farm", timezone="UTC", active=True)
+        farm = Farm(name="CLI Mobile Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.commit()
         farm_id = str(farm.id)
@@ -55,7 +55,7 @@ def test_mobile_cli_can_create_user_set_password_and_assign_farm(app):
 def test_generic_user_cli_aliases_create_user_set_password_and_assign_farm(app):
     runner = app.test_cli_runner()
     with app.app_context():
-        farm = Farm(name="Web Login Farm", timezone="UTC", active=True)
+        farm = Farm(name="Web Login Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.commit()
 
@@ -117,7 +117,7 @@ def test_mobile_cli_rejects_duplicate_users_and_missing_records(app):
 def test_mobile_cli_revoke_and_prune_tokens(app):
     runner = app.test_cli_runner()
     with app.app_context():
-        farm = Farm(name="Token Admin Farm", timezone="UTC", active=True)
+        farm = Farm(name="Token Admin Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         user = User(email="tokens@example.com", name="Token User", active=True)

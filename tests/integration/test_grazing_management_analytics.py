@@ -17,7 +17,7 @@ from app.services.stock_service import StockService
 
 
 def _create_farm_with_paddocks():
-    farm = Farm(name="Grazing Analytics Farm", timezone="UTC", default_stocking_rate_ha_per_lsu=6)
+    farm = Farm(name="Grazing Analytics Farm", timezone="SAST", default_stocking_rate_ha_per_lsu=6)
     db.session.add(farm)
     db.session.flush()
     north = Paddock(farm_id=farm.id, name="North 1", area_ha=12, grazeable_area_ha=10)
@@ -273,7 +273,7 @@ def test_paddock_detail_pressure_uses_persisted_grazing_history(client, app):
     with app.app_context():
         farm = Farm(
             name="Pressure Consistency Farm",
-            timezone="UTC",
+            timezone="SAST",
             default_stocking_rate_ha_per_lsu=10,
         )
         db.session.add(farm)

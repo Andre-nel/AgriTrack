@@ -22,7 +22,7 @@ from app.services.task_service import TaskService
 
 def test_manage_farms_shows_delete_action(client, app):
     with app.app_context():
-        db.session.add(Farm(name="Delete Button Farm", timezone="UTC", active=True))
+        db.session.add(Farm(name="Delete Button Farm", timezone="SAST", active=True))
         db.session.commit()
 
     response = client.get("/farms")
@@ -44,7 +44,7 @@ def test_delete_farm_removes_farm_records_and_map_file(client, app):
         map_path.unlink()
     app.instance_path = str(instance_path)
     with app.app_context():
-        farm = Farm(name="Delete Me Farm", timezone="UTC", active=True)
+        farm = Farm(name="Delete Me Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
 

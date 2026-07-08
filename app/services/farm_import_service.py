@@ -791,7 +791,7 @@ class FarmImportService:
             paddock_name = PaddockService.validate_name(placemark_name)
             paddock_key = cls.normalize_name(paddock_name).casefold()
             if paddock_key in seen_paddock_names:
-                raise ValueError("Duplicate paddock names were found in the uploaded KML")
+                raise ValueError(f"Duplicate paddock names were found in the uploaded KML: {paddock_key}")
 
             geometry = cls._placemark_geometry(placemark, paddock_name)
             area_ha = round(sum(float(polygon["area_m2"]) for polygon in geometry) / 10000.0, 2)
@@ -1119,7 +1119,7 @@ class FarmImportService:
             managed_point_hints=managed_point_hints,
         )
         farm_name = parsed["farm_name"]
-        timezone_value = cls.normalize_name(timezone) or "UTC"
+        timezone_value = cls.normalize_name(timezone) or "SAST"
         map_path = Path(instance_path) / "maps" / f"{farm_name}.kml"
         farm = Farm.query.filter_by(name=farm_name).first()
         if farm is None and map_path.exists():

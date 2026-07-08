@@ -28,7 +28,7 @@ def linked_task_rows_for_entity(
     water_asset_id: str | None = None,
     mob_id: str | None = None,
     fence_section_id: str | None = None,
-    tz_name: str = "UTC",
+    tz_name: str = "SAST",
 ) -> list[dict]:
     query = TaskEntityLink.query.options(
         selectinload(TaskEntityLink.task).selectinload(Task.space).selectinload(TaskSpace.farm)

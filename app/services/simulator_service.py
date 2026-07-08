@@ -12,6 +12,7 @@ from app.models import (
     Farm,
     Mob,
     SimulatorExpense,
+    SimulatorFarm,
     SimulatorRevenueAssumption,
     SimulatorScenario,
     SimulatorStockDetail,
@@ -95,6 +96,59 @@ class SimulatorService:
     @staticmethod
     def species_options() -> list[str]:
         return ["Cattle", "Sheep", "Goat"]
+
+    @staticmethod
+    def _getlist(source, key: str) -> list[str]:
+        getlist = getattr(source, "getlist", None)
+        if callable(getlist):
+            return [str(value).strip() for value in getlist(key) if str(value).strip()]
+        value = source.get(key) if hasattr(source, "get") else None
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        text = str(value).strip()
+        return [text] if text else []
+
+    @staticmethod
+    def active_farms() -> list[Farm]:
+        return Farm.query.filter_by(active=True).order_by(Farm.name.asc()).all()
+
+    @staticmethod
+    def _farm_scope_was_submitted(source) -> bool:
+        if not hasattr(source, "get"):
+            return False
+        if (source.get("farm_scope_submitted") or "").strip():
+            return True
+        if SimulatorService._getlist(source, "farm_ids"):
+            return True
+        return bool((source.get("new_farm_name") or "").strip())
+
+    @classmethod
+    def scenario_farm_options(cls, scenario: SimulatorScenario) -> list[dict]:
+        targets = sorted(
+            scenario.farm_targets,
+            key=lambda target: (target.display_name.lower(), str(target.id)),
+        )
+        if targets:
+            return [
+                {
+                    "value": str(target.id),
+                    "label": target.display_name,
+                    "is_future": target.farm_id is None,
+                    "farm_id": str(target.farm_id) if target.farm_id else None,
+                }
+                for target in targets
+            ]
+        return [
+            {
+                "value": str(farm.id),
+                "label": farm.name,
+                "is_future": False,
+                "farm_id": str(farm.id),
+            }
+            for farm in cls.active_farms()
+        ]
 
     @staticmethod
     def _text(value: str | None, field_name: str, max_length: int, *, required: bool = True) -> str | None:
@@ -196,8 +250,59 @@ class SimulatorService:
         cls.update_scenario(scenario, source)
         db.session.add(scenario)
         db.session.flush()
-        cls.seed_stock_details_from_live(scenario)
+        targets = cls._create_scenario_farm_targets(scenario, source)
+        db.session.flush()
+        cls.seed_stock_details_from_live(scenario, farm_targets=targets)
         return scenario
+
+    @classmethod
+    def _create_scenario_farm_targets(cls, scenario: SimulatorScenario, source) -> list[SimulatorFarm]:
+        if cls._farm_scope_was_submitted(source):
+            farm_ids = cls._getlist(source, "farm_ids")
+        else:
+            farm_ids = [str(farm.id) for farm in cls.active_farms()]
+
+        targets: list[SimulatorFarm] = []
+        seen_farm_ids: set[str] = set()
+        seen_names: set[str] = set()
+        for farm_id in farm_ids:
+            if farm_id in seen_farm_ids:
+                continue
+            farm = Farm.query.filter_by(id=farm_id, active=True).first()
+            if farm is None:
+                raise ValueError("Selected farm is invalid")
+            normalized_name = farm.name.strip().lower()
+            if normalized_name in seen_names:
+                raise ValueError("Scenario farm names must be unique")
+            target = SimulatorFarm(
+                scenario_id=scenario.id,
+                farm_id=str(farm.id),
+                name=farm.name,
+            )
+            db.session.add(target)
+            targets.append(target)
+            seen_farm_ids.add(farm_id)
+            seen_names.add(normalized_name)
+
+        future_name = cls._text(
+            source.get("new_farm_name"),
+            "Future farm name",
+            cls.MAX_NAME_LENGTH,
+            required=False,
+        )
+        if future_name:
+            normalized_name = future_name.lower()
+            if normalized_name in seen_names:
+                raise ValueError("Scenario farm names must be unique")
+            target = SimulatorFarm(
+                scenario_id=scenario.id,
+                farm_id=None,
+                name=future_name,
+            )
+            db.session.add(target)
+            targets.append(target)
+
+        return targets
 
     @classmethod
     def update_scenario(cls, scenario: SimulatorScenario, source) -> SimulatorScenario:
@@ -246,15 +351,30 @@ class SimulatorService:
         return assumption
 
     @classmethod
-    def seed_stock_details_from_live(cls, scenario: SimulatorScenario) -> None:
+    def seed_stock_details_from_live(
+        cls,
+        scenario: SimulatorScenario,
+        *,
+        farm_targets: list[SimulatorFarm] | None = None,
+    ) -> None:
         cls.clear_stock_details(scenario)
         db.session.flush()
+        targets = farm_targets if farm_targets is not None else list(scenario.farm_targets)
+        farm_target_by_farm_id = {
+            str(target.farm_id): str(target.id)
+            for target in targets
+            if target.farm_id
+        }
+        limit_to_targets = farm_targets is not None or bool(targets)
         for (farm_id, species, breed), head_count in sorted(cls.live_adult_female_stock().items()):
+            if limit_to_targets and farm_id not in farm_target_by_farm_id:
+                continue
             if head_count < 0:
                 continue
             db.session.add(
                 SimulatorStockDetail(
                     scenario_id=scenario.id,
+                    simulator_farm_id=farm_target_by_farm_id.get(farm_id),
                     farm_id=farm_id,
                     species=species,
                     breed=breed,
@@ -270,11 +390,63 @@ class SimulatorService:
         db.session.expire(scenario, ["stock_details"])
 
     @classmethod
+    def _ensure_scenario_farm_for_farm(cls, scenario: SimulatorScenario, farm: Farm) -> SimulatorFarm:
+        target = SimulatorFarm.query.filter_by(
+            scenario_id=scenario.id,
+            farm_id=str(farm.id),
+        ).first()
+        if target is not None:
+            return target
+        target = SimulatorFarm(
+            scenario_id=scenario.id,
+            farm_id=str(farm.id),
+            name=farm.name,
+        )
+        db.session.add(target)
+        db.session.flush()
+        return target
+
+    @classmethod
+    def _scenario_farm_from_value(
+        cls,
+        scenario: SimulatorScenario,
+        value: str | None,
+        *,
+        required: bool,
+    ) -> SimulatorFarm | None:
+        target_id = (value or "").strip()
+        if not target_id:
+            if required:
+                raise ValueError("Farm is required")
+            return None
+
+        target = SimulatorFarm.query.filter_by(
+            id=target_id,
+            scenario_id=scenario.id,
+        ).first()
+        if target is not None:
+            return target
+
+        farm = Farm.query.filter_by(id=target_id, active=True).first()
+        if farm is not None:
+            return cls._ensure_scenario_farm_for_farm(scenario, farm)
+
+        message = "Farm is required" if required else "Selected farm is invalid"
+        raise ValueError(message)
+
+    @classmethod
+    def _required_scenario_farm(cls, scenario: SimulatorScenario, source) -> SimulatorFarm:
+        value = (source.get("simulator_farm_id") or source.get("farm_id") or "").strip()
+        return cls._scenario_farm_from_value(scenario, value, required=True)
+
+    @classmethod
+    def _optional_scenario_farm(cls, scenario: SimulatorScenario, source) -> SimulatorFarm | None:
+        value = (source.get("simulator_farm_id") or source.get("farm_id") or "").strip()
+        return cls._scenario_farm_from_value(scenario, value, required=False)
+
+    @classmethod
     def upsert_stock_detail(cls, scenario: SimulatorScenario, source) -> SimulatorStockDetail:
-        farm_id = (source.get("farm_id") or "").strip()
-        farm = Farm.query.filter_by(id=farm_id, active=True).first()
-        if farm is None:
-            raise ValueError("Farm is required")
+        scenario_farm = cls._required_scenario_farm(scenario, source)
         species = cls.normalize_species(source.get("species"))
         breed = cls.normalize_breed(source.get("breed"))
         adult_female_count = cls.parse_int(
@@ -283,41 +455,55 @@ class SimulatorService:
             minimum=0,
         )
 
-        stock_detail = SimulatorStockDetail.query.filter_by(
+        stock_query = SimulatorStockDetail.query.filter_by(
             scenario_id=scenario.id,
-            farm_id=farm.id,
+            simulator_farm_id=scenario_farm.id,
             species=species,
             breed=breed,
-        ).first()
+        )
+        if scenario_farm.farm_id:
+            stock_query = stock_query.union(
+                SimulatorStockDetail.query.filter_by(
+                    scenario_id=scenario.id,
+                    simulator_farm_id=None,
+                    farm_id=str(scenario_farm.farm_id),
+                    species=species,
+                    breed=breed,
+                )
+            )
+        stock_detail = stock_query.first()
         if stock_detail is None:
             stock_detail = SimulatorStockDetail(
                 scenario_id=scenario.id,
-                farm_id=farm.id,
+                simulator_farm_id=scenario_farm.id,
+                farm_id=str(scenario_farm.farm_id) if scenario_farm.farm_id else None,
                 species=species,
                 breed=breed,
             )
             db.session.add(stock_detail)
+        else:
+            stock_detail.simulator_farm_id = scenario_farm.id
+            stock_detail.farm_id = str(scenario_farm.farm_id) if scenario_farm.farm_id else None
         stock_detail.adult_female_count = adult_female_count
         return stock_detail
 
     @classmethod
     def update_stock_detail(cls, stock_detail: SimulatorStockDetail, source) -> SimulatorStockDetail:
-        farm_id = (source.get("farm_id") or "").strip()
-        farm = Farm.query.filter_by(id=farm_id, active=True).first()
-        if farm is None:
-            raise ValueError("Farm is required")
+        scenario = db.session.get(SimulatorScenario, stock_detail.scenario_id)
+        scenario_farm = cls._required_scenario_farm(scenario, source)
         species = cls.normalize_species(source.get("species"))
         breed = cls.normalize_breed(source.get("breed"))
         duplicate = SimulatorStockDetail.query.filter(
             SimulatorStockDetail.scenario_id == stock_detail.scenario_id,
-            SimulatorStockDetail.farm_id == farm.id,
+            SimulatorStockDetail.simulator_farm_id == scenario_farm.id,
             SimulatorStockDetail.species == species,
             SimulatorStockDetail.breed == breed,
             SimulatorStockDetail.id != stock_detail.id,
         ).first()
         if duplicate is not None:
             raise ValueError("A stock row already exists for this farm, species, and breed")
-        stock_detail.farm_id = farm.id
+        stock_detail.simulator_farm_id = scenario_farm.id
+        stock_detail.farm_id = str(scenario_farm.farm_id) if scenario_farm.farm_id else None
         stock_detail.species = species
         stock_detail.breed = breed
         stock_detail.adult_female_count = cls.parse_int(
@@ -329,23 +515,32 @@ class SimulatorService:
 
     @classmethod
     def create_expense(cls, scenario: SimulatorScenario, source) -> SimulatorExpense:
+        expense = SimulatorExpense(scenario_id=scenario.id)
+        cls.update_expense(expense, scenario, source)
+        db.session.add(expense)
+        return expense
+
+    @classmethod
+    def update_expense(cls, expense: SimulatorExpense, scenario: SimulatorScenario, source) -> SimulatorExpense:
         expense_type = (source.get("expense_type") or "standard").strip().lower()
         if expense_type not in {"standard", "loan"}:
             raise ValueError("Expense type is invalid")
-        farm_id = cls._optional_farm_id(source.get("farm_id"))
+        scenario_farm = cls._optional_scenario_farm(scenario, source)
         category_code = cls.normalize_category_code(source.get("category_code"))
         if expense_type == "loan":
             category_code = "loan"
         label = cls._text(source.get("label"), "Expense label", cls.MAX_LABEL_LENGTH)
 
-        expense = SimulatorExpense(
-            scenario_id=scenario.id,
-            farm_id=farm_id,
-            category_code=category_code,
-            label=label,
-            expense_type=expense_type,
-        )
+        expense.scenario_id = scenario.id
+        expense.simulator_farm_id = scenario_farm.id if scenario_farm else None
+        expense.farm_id = str(scenario_farm.farm_id) if scenario_farm and scenario_farm.farm_id else None
+        expense.category_code = category_code
+        expense.label = label
+        expense.expense_type = expense_type
         if expense_type == "loan":
+            expense.amount = None
+            expense.recurrence = None
+            expense.start_month = None
             expense.loan_principal = cls.parse_money(source.get("loan_principal"), field_name="Loan principal")
             expense.annual_interest_rate = cls.parse_decimal(
                 source.get("annual_interest_rate"),
@@ -367,8 +562,12 @@ class SimulatorService:
             expense.amount = cls.parse_money(source.get("amount"), field_name="Expense amount")
             expense.recurrence = cls.normalize_recurrence(source.get("recurrence"))
             expense.start_month = None
+            expense.loan_principal = None
+            expense.annual_interest_rate = None
+            expense.remaining_term_years = None
+            expense.payment_interval_months = None
+            expense.first_payment_month = None
 
-        db.session.add(expense)
         return expense
 
     @staticmethod
@@ -380,16 +579,6 @@ class SimulatorService:
         if interval not in {option[0] for option in PAYMENT_INTERVAL_OPTIONS}:
             raise ValueError("Payment interval is invalid")
         return interval
-
-    @staticmethod
-    def _optional_farm_id(value: str | None) -> str | None:
-        farm_id = (value or "").strip()
-        if not farm_id:
-            return None
-        farm = Farm.query.filter_by(id=farm_id, active=True).first()
-        if farm is None:
-            raise ValueError("Selected farm is invalid")
-        return str(farm.id)
 
     @classmethod
     def live_adult_female_stock(cls) -> dict[tuple[str, str, str], int]:
@@ -421,11 +610,61 @@ class SimulatorService:
             for farm_id, species, breed, head_count in rows
         }
 
+    @classmethod
+    def _projection_farm_targets(cls, scenario: SimulatorScenario) -> list[dict]:
+        targets = sorted(
+            scenario.farm_targets,
+            key=lambda target: (target.display_name.lower(), str(target.id)),
+        )
+        if targets:
+            return [
+                {
+                    "id": str(target.id),
+                    "farm_id": str(target.farm_id) if target.farm_id else None,
+                    "name": target.display_name,
+                    "is_future": target.farm_id is None,
+                }
+                for target in targets
+            ]
+        return [
+            {
+                "id": str(farm.id),
+                "farm_id": str(farm.id),
+                "name": farm.name,
+                "is_future": False,
+            }
+            for farm in cls.active_farms()
+        ]
+
     @staticmethod
-    def _stock_details_by_farm(scenario: SimulatorScenario) -> dict[str, list[SimulatorStockDetail]]:
+    def _target_key_for_farm_link(
+        *,
+        simulator_farm_id,
+        farm_id,
+        target_id_by_farm_id: dict[str, str],
+    ) -> str | None:
+        if simulator_farm_id:
+            return str(simulator_farm_id)
+        if farm_id:
+            farm_key = str(farm_id)
+            return target_id_by_farm_id.get(farm_key, farm_key)
+        return None
+
+    @classmethod
+    def _stock_details_by_target(
+        cls,
+        scenario: SimulatorScenario,
+        target_id_by_farm_id: dict[str, str],
+    ) -> dict[str, list[SimulatorStockDetail]]:
         rows: dict[str, list[SimulatorStockDetail]] = defaultdict(list)
         for stock_detail in scenario.stock_details:
-            rows[str(stock_detail.farm_id)].append(stock_detail)
+            target_key = cls._target_key_for_farm_link(
+                simulator_farm_id=stock_detail.simulator_farm_id,
+                farm_id=stock_detail.farm_id,
+                target_id_by_farm_id=target_id_by_farm_id,
+            )
+            if target_key:
+                rows[target_key].append(stock_detail)
         for farm_rows in rows.values():
             farm_rows.sort(key=lambda item: (item.species, item.breed.lower()))
         return rows
@@ -543,8 +782,13 @@ class SimulatorService:
 
     @classmethod
     def build_projection(cls, scenario: SimulatorScenario) -> dict:
-        farms = Farm.query.filter_by(active=True).order_by(Farm.name.asc()).all()
-        stock_details_by_farm = cls._stock_details_by_farm(scenario)
+        farm_targets = cls._projection_farm_targets(scenario)
+        target_id_by_farm_id = {
+            target["farm_id"]: target["id"]
+            for target in farm_targets
+            if target["farm_id"]
+        }
+        stock_details_by_target = cls._stock_details_by_target(scenario, target_id_by_farm_id)
         revenue_rates = cls._revenue_lookup(scenario)
 
         farm_results = []
@@ -563,20 +807,31 @@ class SimulatorService:
                 "id": str(expense.id),
                 "label": expense.label,
                 "category": cls.category_label(expense.category_code),
-                "farm_name": expense.farm.name if expense.farm else "Business-wide",
+                "farm_name": (
+                    expense.simulator_farm.display_name
+                    if expense.simulator_farm
+                    else expense.farm.name
+                    if expense.farm
+                    else "Business-wide"
+                ),
                 "annual": annual,
                 "payment_amount": cls.loan_payment_amount(expense) if expense.expense_type == "loan" else None,
             }
-            if expense.farm_id:
-                farm_expense_rows[str(expense.farm_id)].append(row)
+            target_key = cls._target_key_for_farm_link(
+                simulator_farm_id=expense.simulator_farm_id,
+                farm_id=expense.farm_id,
+                target_id_by_farm_id=target_id_by_farm_id,
+            )
+            if target_key:
+                farm_expense_rows[target_key].append(row)
             else:
                 business_expense_rows.append(row)
 
-        for farm in farms:
-            farm_id = str(farm.id)
+        for target in farm_targets:
+            target_id = target["id"]
             stock_rows = []
             annual_income = ZERO_DECIMAL
-            for stock_detail in stock_details_by_farm.get(farm_id, []):
+            for stock_detail in stock_details_by_target.get(target_id, []):
                 revenue_per_head = revenue_rates.get(
                     (stock_detail.species, stock_detail.breed),
                     ZERO_DECIMAL,
@@ -588,7 +843,8 @@ class SimulatorService:
                 stock_rows.append(
                     {
                         "id": str(stock_detail.id),
-                        "farm_id": farm_id,
+                        "simulator_farm_id": target_id,
+                        "farm_id": target["farm_id"],
                         "species": stock_detail.species,
                         "breed": stock_detail.breed,
                         "adult_female_count": adult_female_count,
@@ -599,17 +855,19 @@ class SimulatorService:
                     }
                 )
 
-            annual_expenses = sum((row["annual"] for row in farm_expense_rows[farm_id]), ZERO_DECIMAL).quantize(
+            annual_expenses = sum((row["annual"] for row in farm_expense_rows[target_id]), ZERO_DECIMAL).quantize(
                 MONEY_QUANT,
                 rounding=ROUND_HALF_UP,
             )
             annual_net = (annual_income - annual_expenses).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
             health = cls._health_summary(annual_net)
             result = {
-                "id": farm_id,
-                "name": farm.name,
+                "id": target_id,
+                "farm_id": target["farm_id"],
+                "name": target["name"],
+                "is_future": target["is_future"],
                 "stock_rows": stock_rows,
-                "expense_rows": farm_expense_rows[farm_id],
+                "expense_rows": farm_expense_rows[target_id],
                 "annual_income": annual_income,
                 "annual_expenses": annual_expenses,
                 "annual_net": annual_net,

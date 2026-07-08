@@ -10,6 +10,7 @@
   <article class="card">
     <h2>Create Scenario</h2>
     <form method="post" action="{{ url_for('simulator.create_scenario') }}" class="grid-form">
+      <input type="hidden" name="farm_scope_submitted" value="1" />
       <label>Name
         <input name="name" placeholder="2026 base case" required />
       </label>
@@ -24,6 +25,22 @@
       <label>Expense Inflation %
         <input name="expense_inflation_rate" inputmode="decimal" value="0" />
       </label>
+      <fieldset class="simulator-fieldset">
+        <legend>Scenario Farms</legend>
+        <div class="simulator-farm-choice-list">
+          {% for farm in farms %}
+          <label class="check-row">
+            <input type="checkbox" name="farm_ids" value="{{ farm.id }}" checked />
+            {{ farm.name }}
+          </label>
+          {% else %}
+          <p class="muted">No existing farms yet.</p>
+          {% endfor %}
+        </div>
+        <label>Future Farm
+          <input name="new_farm_name" placeholder="Optional farm not yet created" />
+        </label>
+      </fieldset>
       <label>Notes
         <textarea name="notes" rows="4" placeholder="Assumptions, risks, or planning notes"></textarea>
       </label>

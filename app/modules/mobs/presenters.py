@@ -184,6 +184,6 @@ def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
         "selected_event_tag": selected_event_tag,
         "linked_task_rows": linked_task_rows_for_entity(
             mob_id=str(mob.id),
-            tz_name=mob.farm.timezone if mob.farm else "UTC",
+            tz_name=mob.farm.timezone if mob.farm else "SAST",
         ),
     }

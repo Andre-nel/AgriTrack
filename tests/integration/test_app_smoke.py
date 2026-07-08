@@ -199,7 +199,7 @@ def _post_import_farm(
     *,
     filename: str,
     file_bytes: bytes,
-    timezone: str = "UTC",
+    timezone: str = "SAST",
     follow_redirects: bool = False,
 ):
     return client.post(
@@ -219,7 +219,7 @@ def test_health_endpoint(client):
 
 
 def test_create_farm_via_api(client):
-    response = client.post("/api/farms", json={"name": "Farm A", "timezone": "UTC"})
+    response = client.post("/api/farms", json={"name": "Farm A", "timezone": "SAST"})
     assert response.status_code == 201
     assert "id" in response.json
 
@@ -584,7 +584,7 @@ def test_farm_gates_page_supports_update_delete_and_json_detail(client, app):
 
 
 def _farm_with_two_paddocks_for_gate_route():
-    farm = Farm(name="Gate Route Farm", timezone="UTC", active=True)
+    farm = Farm(name="Gate Route Farm", timezone="SAST", active=True)
     db.session.add(farm)
     db.session.flush()
     north = Paddock(farm_id=farm.id, name="North", area_ha=10, grazeable_area_ha=10)
@@ -621,7 +621,7 @@ def test_import_farm_skips_boundary_placemark_matching_farm_name(client, app, tm
 def test_import_farm_updates_existing_farm_and_overwrites_map_file(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Conflict Farm", timezone="UTC")
+        farm = Farm(name="Conflict Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         db.session.add(
@@ -691,7 +691,7 @@ def test_import_farm_updates_existing_farm_and_overwrites_map_file(client, app, 
 def test_import_farm_transfers_missing_paddock_history_by_overlap_ratio(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Split Farm", timezone="UTC")
+        farm = Farm(name="Split Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         farm_id = str(farm.id)
@@ -805,7 +805,7 @@ def test_import_farm_transfers_missing_paddock_history_by_overlap_ratio(client, 
 
 def test_count_based_mob_move_persists_group_assignments_and_lsu_history(client, app):
     with app.app_context():
-        farm = Farm(name="Count Allocation Farm", timezone="UTC")
+        farm = Farm(name="Count Allocation Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         north = Paddock(farm_id=farm.id, name="North Counts", area_ha=10, grazeable_area_ha=10)
@@ -874,7 +874,7 @@ def test_count_based_mob_move_persists_group_assignments_and_lsu_history(client,
 
 def test_count_based_mob_move_merges_duplicate_destination_paddocks(client, app):
     with app.app_context():
-        farm = Farm(name="Count Merge Farm", timezone="UTC")
+        farm = Farm(name="Count Merge Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         north = Paddock(farm_id=farm.id, name="North Merge", area_ha=10, grazeable_area_ha=10)
@@ -932,7 +932,7 @@ def test_count_based_mob_move_merges_duplicate_destination_paddocks(client, app)
 
 def test_percentage_mob_move_still_rejects_duplicate_destination_paddocks(client, app):
     with app.app_context():
-        farm = Farm(name="Percentage Duplicate Farm", timezone="UTC")
+        farm = Farm(name="Percentage Duplicate Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="One Paddock", area_ha=10, grazeable_area_ha=10)
@@ -958,7 +958,7 @@ def test_percentage_mob_move_still_rejects_duplicate_destination_paddocks(client
 
 def test_count_based_mob_move_requires_whole_mob_coverage(client, app):
     with app.app_context():
-        farm = Farm(name="Count Validation Farm", timezone="UTC")
+        farm = Farm(name="Count Validation Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="Only Counts", area_ha=10, grazeable_area_ha=10)
@@ -989,7 +989,7 @@ def test_count_based_mob_move_requires_whole_mob_coverage(client, app):
 
 def test_farm_detail_marks_unallocated_mobs_in_red(client, app):
     with app.app_context():
-        farm = Farm(name="Unallocated Farm", timezone="UTC")
+        farm = Farm(name="Unallocated Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 
@@ -1152,7 +1152,7 @@ def test_import_farm_imports_polygon_with_hole_area(client, app, tmp_path):
 
 def test_journal_page_can_create_manual_entry(client, app):
     with app.app_context():
-        farm = Farm(name="Manual Journal Farm", timezone="UTC")
+        farm = Farm(name="Manual Journal Farm", timezone="SAST")
         db.session.add(farm)
         db.session.commit()
         farm_id = str(farm.id)
@@ -1186,7 +1186,7 @@ def test_journal_page_can_create_manual_entry(client, app):
 
 def test_stock_tracking_renders_series(client, app):
     with app.app_context():
-        farm = Farm(name="Analytics Farm", timezone="UTC")
+        farm = Farm(name="Analytics Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         farm_id = str(farm.id)
@@ -1231,7 +1231,7 @@ def test_stock_tracking_renders_series(client, app):
 
 def test_stock_tracking_reconciles_latest_to_current_balance(client, app):
     with app.app_context():
-        farm = Farm(name="Reconcile Farm", timezone="UTC")
+        farm = Farm(name="Reconcile Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         farm_id = str(farm.id)
@@ -1288,7 +1288,7 @@ def test_stock_tracking_reconciles_latest_to_current_balance(client, app):
 
 def test_journal_aggregates_entries_with_original_and_auto_tags(client, app):
     with app.app_context():
-        farm = Farm(name="Journal Farm", timezone="UTC")
+        farm = Farm(name="Journal Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         farm_id = str(farm.id)
@@ -1373,7 +1373,7 @@ def test_journal_aggregates_entries_with_original_and_auto_tags(client, app):
 def test_paddock_api_includes_rest_days_and_area_per_current_lsu(client, app):
     with app.app_context():
         now = datetime.now(timezone.utc)
-        farm = Farm(name="Rest Metrics Farm", timezone="UTC")
+        farm = Farm(name="Rest Metrics Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 
@@ -1429,7 +1429,7 @@ def test_paddock_api_includes_rest_days_and_area_per_current_lsu(client, app):
 def test_zero_lsu_allocations_do_not_mark_paddock_as_grazed(client, app):
     with app.app_context():
         now = datetime.now(timezone.utc)
-        farm = Farm(name="Zero LSU Farm", timezone="UTC")
+        farm = Farm(name="Zero LSU Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 
@@ -1506,7 +1506,7 @@ def test_zero_lsu_allocations_do_not_mark_paddock_as_grazed(client, app):
 def test_paddock_page_and_map_data_show_grazed_days_and_area_per_current_lsu(client, app):
     with app.app_context():
         now = datetime.now(timezone.utc)
-        farm = Farm(name="Mapped Metrics Farm", timezone="UTC")
+        farm = Farm(name="Mapped Metrics Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         farm_id = str(farm.id)
@@ -1580,7 +1580,7 @@ def test_paddock_detail_can_rename_name_and_update_farm_kml(client, app, tmp_pat
     app.instance_path = str(tmp_path)
 
     with app.app_context():
-        farm = Farm(name="Rename Map Farm", timezone="UTC")
+        farm = Farm(name="Rename Map Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 
@@ -1615,7 +1615,7 @@ def test_paddock_rename_rejects_blank_and_duplicate_names(client, app, tmp_path)
     app.instance_path = str(tmp_path)
 
     with app.app_context():
-        farm = Farm(name="Rename Validation Farm", timezone="UTC")
+        farm = Farm(name="Rename Validation Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 
@@ -1655,7 +1655,7 @@ def test_paddock_rename_rejects_blank_and_duplicate_names(client, app, tmp_path)
 
 def test_mob_balance_edit_reclassifies_and_records_change(client, app):
     with app.app_context():
-        farm = Farm(name="Reclass Farm", timezone="UTC")
+        farm = Farm(name="Reclass Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 
@@ -1729,7 +1729,7 @@ def test_mob_balance_edit_reclassifies_and_records_change(client, app):
 
 def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
     with app.app_context():
-        farm = Farm(name="Adjust Default Farm", timezone="UTC")
+        farm = Farm(name="Adjust Default Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 
@@ -1783,7 +1783,7 @@ def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
 
 def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):
     with app.app_context():
-        farm = Farm(name="Mob Detail Count Farm", timezone="UTC")
+        farm = Farm(name="Mob Detail Count Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
 

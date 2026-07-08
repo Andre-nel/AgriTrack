@@ -5,7 +5,7 @@ from app.models import Farm, User, UserFarmRole
 
 
 def _create_mobile_user() -> None:
-    farm = Farm(name="Contract Farm", timezone="UTC", active=True)
+    farm = Farm(name="Contract Farm", timezone="SAST", active=True)
     db.session.add(farm)
     db.session.flush()
     user = User(email="contract@example.com", name="Contract User", active=True)

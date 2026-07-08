@@ -10,7 +10,7 @@ from app.services.finance_service import FinanceService
 
 
 def _create_farm(name: str = "Finance Farm") -> Farm:
-    farm = Farm(name=name, timezone="UTC")
+    farm = Farm(name=name, timezone="SAST")
     db.session.add(farm)
     db.session.flush()
     return farm

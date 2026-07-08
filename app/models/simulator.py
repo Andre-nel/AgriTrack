@@ -21,6 +21,11 @@ class SimulatorScenario(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         back_populates="scenario",
         cascade="all, delete-orphan",
     )
+    farm_targets = db.relationship(
+        "SimulatorFarm",
+        back_populates="scenario",
+        cascade="all, delete-orphan",
+    )
     expenses = db.relationship(
         "SimulatorExpense",
         back_populates="scenario",
@@ -39,6 +44,41 @@ class SimulatorScenario(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         db.CheckConstraint(
             "expense_inflation_rate >= 0",
             name="ck_simulator_scenarios_expense_inflation_non_negative",
+        ),
+    )
+
+
+class SimulatorFarm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "simulator_farms"
+
+    scenario_id = db.Column(
+        db.String(36),
+        db.ForeignKey("simulator_scenarios.id"),
+        nullable=False,
+        index=True,
+    )
+    farm_id = db.Column(db.String(36), db.ForeignKey("farms.id"), nullable=True, index=True)
+    name = db.Column(db.String(120), nullable=False)
+
+    scenario = db.relationship("SimulatorScenario", back_populates="farm_targets")
+    farm = db.relationship("Farm")
+    stock_details = db.relationship("SimulatorStockDetail", back_populates="simulator_farm")
+    expenses = db.relationship("SimulatorExpense", back_populates="simulator_farm")
+
+    @property
+    def display_name(self) -> str:
+        return self.farm.name if self.farm else self.name
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "scenario_id",
+            "farm_id",
+            name="uq_simulator_farm_scenario_farm",
+        ),
+        db.UniqueConstraint(
+            "scenario_id",
+            "name",
+            name="uq_simulator_farm_scenario_name",
         ),
     )
 
@@ -85,12 +125,19 @@ class SimulatorStockDetail(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         nullable=False,
         index=True,
     )
-    farm_id = db.Column(db.String(36), db.ForeignKey("farms.id"), nullable=False, index=True)
+    simulator_farm_id = db.Column(
+        db.String(36),
+        db.ForeignKey("simulator_farms.id"),
+        nullable=True,
+        index=True,
+    )
+    farm_id = db.Column(db.String(36), db.ForeignKey("farms.id"), nullable=True, index=True)
     species = db.Column(db.String(20), nullable=False)
     breed = db.Column(db.String(50), nullable=False)
     adult_female_count = db.Column(db.Integer, nullable=False)
 
     scenario = db.relationship("SimulatorScenario", back_populates="stock_details")
+    simulator_farm = db.relationship("SimulatorFarm", back_populates="stock_details")
     farm = db.relationship("Farm")
 
     __table_args__ = (
@@ -109,6 +156,13 @@ class SimulatorStockDetail(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
             "breed",
             name="uq_simulator_stock_detail_scenario_farm_species_breed",
         ),
+        db.UniqueConstraint(
+            "scenario_id",
+            "simulator_farm_id",
+            "species",
+            "breed",
+            name="uq_simulator_stock_detail_scenario_target_species_breed",
+        ),
     )
 
 
@@ -119,6 +173,12 @@ class SimulatorExpense(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         db.String(36),
         db.ForeignKey("simulator_scenarios.id"),
         nullable=False,
+        index=True,
+    )
+    simulator_farm_id = db.Column(
+        db.String(36),
+        db.ForeignKey("simulator_farms.id"),
+        nullable=True,
         index=True,
     )
     farm_id = db.Column(db.String(36), db.ForeignKey("farms.id"), nullable=True, index=True)
@@ -135,6 +195,7 @@ class SimulatorExpense(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     first_payment_month = db.Column(db.Integer, nullable=True)
 
     scenario = db.relationship("SimulatorScenario", back_populates="expenses")
+    simulator_farm = db.relationship("SimulatorFarm", back_populates="expenses")
     farm = db.relationship("Farm")
 
     __table_args__ = (

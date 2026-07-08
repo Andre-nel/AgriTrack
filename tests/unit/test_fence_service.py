@@ -18,7 +18,7 @@ def _square(lon, lat, size=0.001):
 
 
 def _farm_with_adjacent_paddocks():
-    farm = Farm(name="Fence Farm", timezone="UTC", active=True)
+    farm = Farm(name="Fence Farm", timezone="SAST", active=True)
     db.session.add(farm)
     db.session.flush()
     left = Paddock(farm_id=farm.id, name="Left Camp", area_ha=10, grazeable_area_ha=10)
@@ -210,7 +210,7 @@ def test_kml_sync_preserves_manual_geometry_overrides(app):
 
 def test_create_manual_section_validates_paddock_relationships(app):
     farm, left, right = _farm_with_adjacent_paddocks()
-    other_farm = Farm(name="Other Fence Farm", timezone="UTC", active=True)
+    other_farm = Farm(name="Other Fence Farm", timezone="SAST", active=True)
     db.session.add(other_farm)
     db.session.flush()
     other_paddock = Paddock(farm_id=other_farm.id, name="Other Camp", area_ha=1, grazeable_area_ha=1)

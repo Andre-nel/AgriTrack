@@ -30,12 +30,16 @@
       <span class="badge {{ farm['health']['class'] }}">{{ farm["health"]["label"] }}</span>
     </p>
     <p class="muted">Income {{ format_currency(farm["annual_income"]) }} | Expenses {{ format_currency(farm["annual_expenses"]) }}</p>
+    {% if farm["is_future"] %}
+    <p class="muted">Future farm</p>
+    {% endif %}
   </article>
   {% endfor %}
 </section>
 
-<section class="card">
-  <h2>Scenario Details</h2>
+<details class="card simulator-fold-card" open>
+  <summary class="simulator-card-summary"><span>Scenario Details</span></summary>
+  <div class="simulator-fold-body">
   <form method="post" action="{{ url_for('simulator.edit_scenario', scenario_id=scenario.id) }}" class="grid-form">
     <div class="grid-two">
       <label>Name
@@ -60,12 +64,14 @@
       <button type="submit" class="btn">Save Details</button>
     </div>
   </form>
-</section>
+  </div>
+</details>
 
-<section class="card">
+<details class="card simulator-fold-card" open>
+  <summary class="simulator-card-summary"><span>Yearly Projection</span></summary>
+  <div class="simulator-fold-body">
   <div class="row-actions simulator-section-header">
     <div>
-      <h2>Yearly Projection</h2>
       <p class="muted">Farm rows exclude business-wide expenses. Overall includes all farm and business-wide expenses.</p>
     </div>
   </div>
@@ -93,12 +99,14 @@
       </tbody>
     </table>
   </div>
-</section>
+</div>
+</details>
 
-<section class="card">
+<details class="card simulator-fold-card" open>
+  <summary class="simulator-card-summary"><span>Overall Net Forecast</span></summary>
+  <div class="simulator-fold-body">
   <div class="row-actions simulator-section-header">
     <div>
-      <h2>Overall Net Forecast</h2>
       <p class="muted">
         {{ projection["overall_forecast"]["horizon_years"] }} years, using {{ projection["overall_forecast"]["income_inflation_rate"] or 0 }}% income inflation and {{ projection["overall_forecast"]["expense_inflation_rate"] or 0 }}% expense inflation.
       </p>
@@ -139,11 +147,13 @@
       </tbody>
     </table>
   </div>
-</section>
+  </div>
+</details>
 
 <section class="split">
-  <article class="card">
-    <h2>Revenue Assumptions</h2>
+  <details class="card simulator-fold-card" open>
+    <summary class="simulator-card-summary"><span>Revenue Assumptions</span></summary>
+    <div class="simulator-fold-body">
     <form method="post" action="{{ url_for('simulator.upsert_revenue_assumption', scenario_id=scenario.id) }}" class="grid-form">
       <div class="grid-three">
         <label>Species
@@ -185,16 +195,18 @@
         </tbody>
       </table>
     </div>
-  </article>
+    </div>
+  </details>
 
-  <article class="card">
-    <h2>Scenario Stock</h2>
+  <details class="card simulator-fold-card" open>
+    <summary class="simulator-card-summary"><span>Scenario Stock</span></summary>
+    <div class="simulator-fold-body">
     <form method="post" action="{{ url_for('simulator.upsert_stock_detail', scenario_id=scenario.id) }}" class="grid-form">
       <div class="grid-two">
         <label>Farm
-          <select name="farm_id" required>
-            {% for farm in farms %}
-            <option value="{{ farm.id }}">{{ farm.name }}</option>
+          <select name="simulator_farm_id" required>
+            {% for farm in farm_options %}
+            <option value="{{ farm.value }}">{{ farm.label }}{% if farm.is_future %} (future){% endif %}</option>
             {% endfor %}
           </select>
         </label>
@@ -226,11 +238,13 @@
         <button type="submit" class="btn btn-danger">Clear Stock</button>
       </form>
     </div>
-  </article>
+    </div>
+  </details>
 </section>
 
-<section class="card">
-  <h2>Stock Income Detail</h2>
+<details class="card simulator-fold-card" open>
+  <summary class="simulator-card-summary"><span>Stock Income Detail</span></summary>
+  <div class="simulator-fold-body">
   <div class="cash-flow-table-wrap">
     <table class="cash-flow-table simulator-stock-table">
       <thead>
@@ -243,9 +257,9 @@
           {% for row in farm["stock_rows"] %}
           <tr>
             <td>
-              <select name="farm_id" form="stock-edit-{{ row['id'] }}" required>
-                {% for option_farm in farms %}
-                <option value="{{ option_farm.id }}" {% if option_farm.id == row["farm_id"] %}selected{% endif %}>{{ option_farm.name }}</option>
+              <select name="simulator_farm_id" form="stock-edit-{{ row['id'] }}" required>
+                {% for option_farm in farm_options %}
+                <option value="{{ option_farm.value }}" {% if option_farm.value == row["simulator_farm_id"] %}selected{% endif %}>{{ option_farm.label }}{% if option_farm.is_future %} (future){% endif %}</option>
                 {% endfor %}
               </select>
             </td>
@@ -277,19 +291,21 @@
       </tbody>
     </table>
   </div>
-</section>
+</div>
+</details>
 
 <section class="split">
-  <article class="card">
-    <h2>Add Standard Expense</h2>
+  <details class="card simulator-fold-card" open>
+    <summary class="simulator-card-summary"><span>Add Standard Expense</span></summary>
+    <div class="simulator-fold-body">
     <form method="post" action="{{ url_for('simulator.create_expense', scenario_id=scenario.id) }}" class="grid-form">
       <input type="hidden" name="expense_type" value="standard" />
       <div class="grid-two">
         <label>Farm
-          <select name="farm_id">
+          <select name="simulator_farm_id">
             <option value="">Business-wide</option>
-            {% for farm in farms %}
-            <option value="{{ farm.id }}">{{ farm.name }}</option>
+            {% for farm in farm_options %}
+            <option value="{{ farm.value }}">{{ farm.label }}{% if farm.is_future %} (future){% endif %}</option>
             {% endfor %}
           </select>
         </label>
@@ -320,19 +336,21 @@
         <button type="submit" class="btn">Save Expense</button>
       </div>
     </form>
-  </article>
+    </div>
+  </details>
 
-  <article class="card">
-    <h2>Add Loan</h2>
+  <details class="card simulator-fold-card" open>
+    <summary class="simulator-card-summary"><span>Add Loan</span></summary>
+    <div class="simulator-fold-body">
     <form method="post" action="{{ url_for('simulator.create_expense', scenario_id=scenario.id) }}" class="grid-form">
       <input type="hidden" name="expense_type" value="loan" />
       <input type="hidden" name="category_code" value="loan" />
       <div class="grid-two">
         <label>Farm
-          <select name="farm_id">
+          <select name="simulator_farm_id">
             <option value="">Business-wide</option>
-            {% for farm in farms %}
-            <option value="{{ farm.id }}">{{ farm.name }}</option>
+            {% for farm in farm_options %}
+            <option value="{{ farm.value }}">{{ farm.label }}{% if farm.is_future %} (future){% endif %}</option>
             {% endfor %}
           </select>
         </label>
@@ -371,11 +389,13 @@
         <button type="submit" class="btn">Save Loan</button>
       </div>
     </form>
-  </article>
+    </div>
+  </details>
 </section>
 
-<section class="card">
-  <h2>Expenses</h2>
+<details class="card simulator-fold-card" open>
+  <summary class="simulator-card-summary"><span>Expenses</span></summary>
+  <div class="simulator-fold-body">
   <div class="cash-flow-table-wrap">
     <table class="cash-entry-table simulator-expense-table">
       <thead>
@@ -385,16 +405,14 @@
         {% for row in expense_rows %}
         {% set expense = row["expense"] %}
         <tr>
-          <td>{{ expense.farm.name if expense.farm else "Business-wide" }}</td>
+          <td>{{ expense.simulator_farm.display_name if expense.simulator_farm else expense.farm.name if expense.farm else "Business-wide" }}</td>
           <td>{{ category_label(expense.category_code) }}</td>
           <td>{{ expense.label }}</td>
           <td>{{ "Loan" if expense.expense_type == "loan" else expense.recurrence|replace("_", " ")|title }}</td>
           <td>{% if row["monthly_outflow"] %}{{ format_currency(row["monthly_outflow"]) }}{% endif %}</td>
           <td>{{ format_currency(row["annual"]) }}</td>
           <td>
-            <form method="post" action="{{ url_for('simulator.delete_expense', scenario_id=scenario.id, expense_id=expense.id) }}">
-              <button type="submit" class="btn btn-secondary">Remove</button>
-            </form>
+            <button type="button" class="btn btn-secondary btn-small" data-open-expense-modal="expense-modal-{{ expense.id }}">Edit</button>
           </td>
         </tr>
         {% else %}
@@ -403,5 +421,157 @@
       </tbody>
     </table>
   </div>
-</section>
+
+  {% for row in expense_rows %}
+  {% set expense = row["expense"] %}
+  <dialog id="expense-modal-{{ expense.id }}" class="entity-edit-modal simulator-expense-modal">
+    <div class="entity-edit-modal-header">
+      <div>
+        <h2>Edit {{ "Loan" if expense.expense_type == "loan" else "Standard Expense" }}</h2>
+        <p class="muted">{{ expense.label }}</p>
+      </div>
+      <button type="button" class="btn btn-secondary" data-close-expense-modal>Close</button>
+    </div>
+
+    {% if expense.expense_type == "loan" %}
+    <form method="post" action="{{ url_for('simulator.edit_expense', scenario_id=scenario.id, expense_id=expense.id) }}" class="grid-form simulator-expense-edit-form">
+      <input type="hidden" name="expense_type" value="loan" />
+      <input type="hidden" name="category_code" value="loan" />
+      <div class="grid-two">
+        <label>Farm
+          <select name="simulator_farm_id">
+            <option value="">Business-wide</option>
+            {% for farm in farm_options %}
+            <option value="{{ farm.value }}" {% if farm.value == row["farm_option_value"] %}selected{% endif %}>{{ farm.label }}{% if farm.is_future %} (future){% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Label
+          <input name="label" value="{{ expense.label }}" required />
+        </label>
+      </div>
+      <div class="grid-three">
+        <label>Principal
+          <input name="loan_principal" inputmode="decimal" value="{{ expense.loan_principal or '' }}" required />
+        </label>
+        <label>Annual Interest %
+          <input name="annual_interest_rate" inputmode="decimal" value="{{ expense.annual_interest_rate or 0 }}" required />
+        </label>
+        <label>Term Years
+          <input name="remaining_term_years" inputmode="decimal" value="{{ expense.remaining_term_years or '' }}" required />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>Payment Interval
+          <select name="payment_interval_months" required>
+            {% for option in payment_interval_options %}
+            <option value="{{ option.value }}" {% if option.value == expense.payment_interval_months %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>First Payment Month
+          <select name="first_payment_month" required>
+            {% for month in month_options %}
+            <option value="{{ month.value }}" {% if month.value == expense.first_payment_month %}selected{% endif %}>{{ month.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="row-actions">
+        <button type="submit" class="btn">Save Loan</button>
+      </div>
+    </form>
+    {% else %}
+    <form method="post" action="{{ url_for('simulator.edit_expense', scenario_id=scenario.id, expense_id=expense.id) }}" class="grid-form simulator-expense-edit-form">
+      <input type="hidden" name="expense_type" value="standard" />
+      <div class="grid-two">
+        <label>Farm
+          <select name="simulator_farm_id">
+            <option value="">Business-wide</option>
+            {% for farm in farm_options %}
+            <option value="{{ farm.value }}" {% if farm.value == row["farm_option_value"] %}selected{% endif %}>{{ farm.label }}{% if farm.is_future %} (future){% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Category
+          <select name="category_code" required>
+            {% for category in expense_categories %}
+            <option value="{{ category.value }}" {% if category.value == expense.category_code %}selected{% endif %}>{{ category.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Label
+        <input name="label" value="{{ expense.label }}" required />
+      </label>
+      <div class="grid-two">
+        <label>Amount
+          <input name="amount" inputmode="decimal" value="{{ expense.amount or '' }}" required />
+        </label>
+        <label>Recurrence
+          <select name="recurrence" required>
+            {% for option in recurrence_options %}
+            <option value="{{ option.value }}" {% if option.value == expense.recurrence %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="row-actions">
+        <button type="submit" class="btn">Save Expense</button>
+      </div>
+    </form>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('simulator.delete_expense', scenario_id=scenario.id, expense_id=expense.id) }}" class="simulator-expense-delete-form">
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
+  </dialog>
+  {% endfor %}
+  </div>
+</details>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    function closeDialog(dialog) {
+      if (typeof dialog.close === "function") {
+        dialog.close();
+      } else {
+        dialog.removeAttribute("open");
+      }
+    }
+
+    document.querySelectorAll("[data-open-expense-modal]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var dialog = document.getElementById(button.dataset.openExpenseModal);
+        if (!dialog) return;
+        if (typeof dialog.showModal === "function") {
+          dialog.showModal();
+        } else {
+          dialog.setAttribute("open", "open");
+        }
+      });
+    });
+
+    document.querySelectorAll(".simulator-expense-modal").forEach(function (dialog) {
+      dialog.querySelectorAll("[data-close-expense-modal]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          closeDialog(dialog);
+        });
+      });
+      dialog.addEventListener("click", function (event) {
+        var rect = dialog.getBoundingClientRect();
+        var outside =
+          event.clientX < rect.left ||
+          event.clientX > rect.right ||
+          event.clientY < rect.top ||
+          event.clientY > rect.bottom;
+        if (outside) {
+          closeDialog(dialog);
+        }
+      });
+    });
+  })();
+</script>
 {% endblock %}

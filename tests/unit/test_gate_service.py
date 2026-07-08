@@ -21,7 +21,7 @@ def _square(lon, lat, size=0.001):
 
 
 def _farm_with_paddocks(*areas):
-    farm = Farm(name="Gate Farm", timezone="UTC", active=True)
+    farm = Farm(name="Gate Farm", timezone="SAST", active=True)
     db.session.add(farm)
     db.session.flush()
     paddocks = []

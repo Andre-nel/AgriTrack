@@ -106,7 +106,7 @@ def _kml_bytes(*bits: str) -> bytes:
     ).encode("utf-8")
 
 
-def _post_import_farm(client, *, filename: str, file_bytes: bytes, timezone: str = "UTC", extra_form=None):
+def _post_import_farm(client, *, filename: str, file_bytes: bytes, timezone: str = "SAST", extra_form=None):
     form = {
         "timezone": timezone,
         "farm_kml": (BytesIO(file_bytes), filename),
@@ -313,7 +313,7 @@ def test_import_farm_reimports_water_assets_and_archives_missing_imported_rows(c
 def test_import_farm_redirects_to_non_imported_water_asset_review(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Manual Review Farm", timezone="UTC")
+        farm = Farm(name="Manual Review Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         manual_asset = WaterAsset(
@@ -347,7 +347,7 @@ def test_import_farm_redirects_to_non_imported_water_asset_review(client, app, t
 
 def test_import_review_can_delete_selected_non_imported_water_assets(client, app):
     with app.app_context():
-        farm = Farm(name="Manual Delete Farm", timezone="UTC")
+        farm = Farm(name="Manual Delete Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         manual_tank = WaterAsset(
@@ -479,7 +479,7 @@ def test_import_farm_applies_weir_defaults_when_missing(client, app, tmp_path):
 
 def test_water_asset_and_connection_api_validation(client, app):
     with app.app_context():
-        farm = Farm(name="Water API Farm", timezone="UTC")
+        farm = Farm(name="Water API Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=12, grazeable_area_ha=12)
@@ -676,7 +676,7 @@ def test_water_asset_and_connection_api_validation(client, app):
 
 def test_update_water_asset_type_change_clears_hidden_solar_fields(client, app):
     with app.app_context():
-        farm = Farm(name="Solar Edit Farm", timezone="UTC")
+        farm = Farm(name="Solar Edit Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         asset = WaterAsset(
@@ -720,7 +720,7 @@ def test_update_water_asset_type_change_clears_hidden_solar_fields(client, app):
 
 def test_water_asset_state_history_records_create_and_future_state_updates(client, app):
     with app.app_context():
-        farm = Farm(name="Water History Farm", timezone="UTC")
+        farm = Farm(name="Water History Farm", timezone="SAST")
         db.session.add(farm)
         db.session.commit()
         farm_id = str(farm.id)
@@ -776,7 +776,7 @@ def test_water_asset_state_history_records_create_and_future_state_updates(clien
 
 def test_update_water_asset_type_change_clears_hidden_windmill_fields(client, app):
     with app.app_context():
-        farm = Farm(name="Windmill Edit Farm", timezone="UTC")
+        farm = Farm(name="Windmill Edit Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         asset = WaterAsset(
@@ -812,7 +812,7 @@ def test_update_water_asset_type_change_clears_hidden_windmill_fields(client, ap
 
 def test_weir_defaults_apply_when_blank_on_update(client, app):
     with app.app_context():
-        farm = Farm(name="Weir Default Update Farm", timezone="UTC")
+        farm = Farm(name="Weir Default Update Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         asset = WaterAsset(
@@ -848,7 +848,7 @@ def test_weir_defaults_apply_when_blank_on_update(client, app):
 
 def test_location_bound_served_paddocks_follow_ground_dam_and_weir_location(client, app):
     with app.app_context():
-        farm = Farm(name="Location Bound Water Farm", timezone="UTC")
+        farm = Farm(name="Location Bound Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         north = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)
@@ -904,7 +904,7 @@ def test_location_bound_served_paddocks_follow_ground_dam_and_weir_location(clie
 
 def test_water_assets_auto_connect_troughs_to_nearest_cement_dam(client, app):
     with app.app_context():
-        farm = Farm(name="Default Trough Link Farm", timezone="UTC")
+        farm = Farm(name="Default Trough Link Farm", timezone="SAST")
         db.session.add(farm)
         db.session.commit()
         farm_id = str(farm.id)
@@ -965,7 +965,7 @@ def test_water_assets_auto_connect_troughs_to_nearest_cement_dam(client, app):
 
 def test_water_assets_do_not_auto_connect_troughs_with_existing_manual_connections(client, app):
     with app.app_context():
-        farm = Farm(name="Manual Trough Link Farm", timezone="UTC")
+        farm = Farm(name="Manual Trough Link Farm", timezone="SAST")
         db.session.add(farm)
         db.session.commit()
         farm_id = str(farm.id)
@@ -1035,7 +1035,7 @@ def test_water_assets_do_not_auto_connect_troughs_with_existing_manual_connectio
 def test_farm_map_data_propagates_empty_dam_water_levels_to_connected_troughs(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Empty Dam Water Farm", timezone="UTC")
+        farm = Farm(name="Empty Dam Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=12, grazeable_area_ha=12)
@@ -1104,7 +1104,7 @@ def test_farm_map_data_propagates_empty_dam_water_levels_to_connected_troughs(cl
 def test_operational_trough_mirrors_connected_source_water_level(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Mirrored Trough Water Farm", timezone="UTC")
+        farm = Farm(name="Mirrored Trough Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=12, grazeable_area_ha=12)
@@ -1177,7 +1177,7 @@ def test_operational_trough_mirrors_connected_source_water_level(client, app, tm
 def test_farm_map_data_returns_water_features_with_and_without_kml(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Mapped Water Farm", timezone="UTC")
+        farm = Farm(name="Mapped Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=12, grazeable_area_ha=12)
@@ -1255,7 +1255,7 @@ def test_farm_map_data_returns_water_features_with_and_without_kml(client, app, 
     assert "water_connection" not in dashboard_feature_types
 
     with app.app_context():
-        farm = Farm(name="No Kml Water Farm", timezone="UTC")
+        farm = Farm(name="No Kml Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         trough = WaterAsset(
@@ -1281,7 +1281,7 @@ def test_farm_map_data_returns_water_features_with_and_without_kml(client, app, 
 def test_farm_map_data_marks_paddocks_with_critical_water_alerts(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Pump Alert Water Farm", timezone="UTC")
+        farm = Farm(name="Pump Alert Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=12, grazeable_area_ha=12)
@@ -1377,7 +1377,7 @@ def test_farm_map_data_marks_paddocks_with_critical_water_alerts(client, app, tm
 def test_farm_map_data_counts_served_ground_dams_and_weirs_for_paddock_water(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Mixed Water Point Farm", timezone="UTC")
+        farm = Farm(name="Mixed Water Point Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=12, grazeable_area_ha=12)
@@ -1491,7 +1491,7 @@ def test_farm_map_data_counts_served_ground_dams_and_weirs_for_paddock_water(cli
 
 def test_farm_water_workspace_renders_map_filters_and_satellite_mode(client, app):
     with app.app_context():
-        farm = Farm(name="Filtered Water Farm", timezone="UTC")
+        farm = Farm(name="Filtered Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.commit()
         farm_id = str(farm.id)
@@ -1513,7 +1513,7 @@ def test_farm_water_workspace_renders_map_filters_and_satellite_mode(client, app
 
 def test_farm_water_workspace_collapses_create_forms_and_filters_water_assets(client, app):
     with app.app_context():
-        farm = Farm(name="Water Asset Filter Farm", timezone="UTC")
+        farm = Farm(name="Water Asset Filter Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         north = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)
@@ -1571,7 +1571,7 @@ def test_farm_water_workspace_collapses_create_forms_and_filters_water_assets(cl
 
 def test_farm_water_workspace_renders_asset_modal_launchers(client, app):
     with app.app_context():
-        farm = Farm(name="Modal Water Farm", timezone="UTC")
+        farm = Farm(name="Modal Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)
@@ -1628,7 +1628,7 @@ def test_farm_water_workspace_renders_asset_modal_launchers(client, app):
 def test_farm_water_workspace_records_water_asset_note_with_image(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():
-        farm = Farm(name="Water Note Farm", timezone="UTC", active=True)
+        farm = Farm(name="Water Note Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
         asset = WaterAsset(
@@ -1676,7 +1676,7 @@ def test_farm_water_workspace_records_water_asset_note_with_image(client, app, t
 
 def test_update_water_asset_form_reopens_asset_modal_on_validation_error(client, app):
     with app.app_context():
-        farm = Farm(name="Water Redirect Farm", timezone="UTC")
+        farm = Farm(name="Water Redirect Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         asset = WaterAsset(
@@ -1705,7 +1705,7 @@ def test_update_water_asset_form_reopens_asset_modal_on_validation_error(client,
 
 def test_create_water_connection_form_accepts_locked_flow_type_fallback(client, app):
     with app.app_context():
-        farm = Farm(name="Water Connection Form Farm", timezone="UTC")
+        farm = Farm(name="Water Connection Form Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         source_asset = WaterAsset(
@@ -1760,7 +1760,7 @@ def test_create_water_connection_form_accepts_locked_flow_type_fallback(client, 
 
 def test_farm_water_mass_update_renders_weir_table(client, app):
     with app.app_context():
-        farm = Farm(name="Weir Mass Update Farm", timezone="UTC")
+        farm = Farm(name="Weir Mass Update Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         first_weir = WaterAsset(farm_id=farm.id, name="Weir Alpha", asset_type="weir", active=True)
@@ -1788,7 +1788,7 @@ def test_farm_water_mass_update_renders_weir_table(client, app):
 
 def test_farm_water_mass_update_updates_weirs(client, app):
     with app.app_context():
-        farm = Farm(name="Weir Mass Save Farm", timezone="UTC")
+        farm = Farm(name="Weir Mass Save Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         north = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)
@@ -1884,7 +1884,7 @@ def test_farm_water_mass_update_updates_weirs(client, app):
 
 def test_paddock_detail_shows_local_assets_and_serving_water_points(client, app):
     with app.app_context():
-        farm = Farm(name="Paddock Water Farm", timezone="UTC")
+        farm = Farm(name="Paddock Water Farm", timezone="SAST")
         db.session.add(farm)
         db.session.flush()
         north = Paddock(farm_id=farm.id, name="North Camp", area_ha=10, grazeable_area_ha=10)

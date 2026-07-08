@@ -4,7 +4,7 @@ from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_bal
 
 
 def _create_mob_with_balance(head_count: int = 5):
-    farm = Farm(name="Service Farm", timezone="UTC", active=True)
+    farm = Farm(name="Service Farm", timezone="SAST", active=True)
     db.session.add(farm)
     db.session.flush()
     mob = Mob(farm_id=farm.id, name="Service Mob", status="active")

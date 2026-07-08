@@ -6,7 +6,7 @@ class Farm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     __tablename__ = "farms"
 
     name = db.Column(db.String(120), nullable=False, unique=True)
-    timezone = db.Column(db.String(64), nullable=False, default="UTC")
+    timezone = db.Column(db.String(64), nullable=False, default="SAST")
     active = db.Column(db.Boolean, nullable=False, default=True)
     default_stocking_rate_ha_per_lsu = db.Column(db.Numeric(8, 2), nullable=False, default=6)
 

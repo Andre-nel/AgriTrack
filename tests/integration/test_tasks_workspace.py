@@ -20,7 +20,7 @@ from app.services.task_service import TaskService
 
 
 def _create_farm(name: str) -> Farm:
-    farm = Farm(name=name, timezone="UTC")
+    farm = Farm(name=name, timezone="SAST")
     db.session.add(farm)
     db.session.flush()
     return farm

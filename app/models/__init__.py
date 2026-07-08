@@ -23,6 +23,7 @@ from app.models.rainfall import RainfallRecord
 from app.models.shearing import Shearer, ShearingBale, ShearingBaleCode, ShearingEntry, ShearingSession
 from app.models.simulator import (
     SimulatorExpense,
+    SimulatorFarm,
     SimulatorRevenueAssumption,
     SimulatorScenario,
     SimulatorStockDetail,
@@ -79,6 +80,7 @@ __all__ = [
     "ShearingEntry",
     "ShearingSession",
     "SimulatorExpense",
+    "SimulatorFarm",
     "SimulatorRevenueAssumption",
     "SimulatorScenario",
     "SimulatorStockDetail",

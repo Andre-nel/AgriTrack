@@ -6,7 +6,7 @@ from app.services.grazing_service import GrazingService
 
 
 def _create_lsu_tracking_dataset():
-    farm = Farm(name="LSU Tracking Farm", timezone="UTC", default_stocking_rate_ha_per_lsu=6)
+    farm = Farm(name="LSU Tracking Farm", timezone="SAST", default_stocking_rate_ha_per_lsu=6)
     db.session.add(farm)
     db.session.flush()
     north = Paddock(farm_id=farm.id, name="North 1", area_ha=12, grazeable_area_ha=10)

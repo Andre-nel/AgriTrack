@@ -17,7 +17,7 @@ from app.services.simulator_service import SimulatorService
 
 
 def _farm(name: str) -> Farm:
-    farm = Farm(name=name, timezone="UTC", active=True)
+    farm = Farm(name=name, timezone="SAST", active=True)
     db.session.add(farm)
     db.session.flush()
     return farm

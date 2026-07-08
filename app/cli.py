@@ -71,7 +71,7 @@ def init_cli(app: Flask) -> None:
             print("Seed skipped: farms already exist")
             return
 
-        farm = Farm(name="Demo Farm", timezone="UTC", active=True)
+        farm = Farm(name="Demo Farm", timezone="SAST", active=True)
         db.session.add(farm)
         db.session.flush()
 
