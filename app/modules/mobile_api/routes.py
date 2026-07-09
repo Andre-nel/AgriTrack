@@ -18,6 +18,7 @@ from app.models import (
     FenceEvent,
     FenceSection,
     GrazingSession,
+    Incident,
     MobileAuthToken,
     MobileSyncCommand,
     Mob,
@@ -46,6 +47,7 @@ from app.modules.farms.map_routes import _build_farm_map_feature_collection
 from app.services.calendar_service import CalendarService
 from app.services.fence_service import FenceService
 from app.services.gate_service import GateService
+from app.services.incident_service import IncidentService
 from app.services.mob_event_service import MobEventService
 from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
@@ -424,6 +426,19 @@ def _serialize_fence_event(event: FenceEvent) -> dict:
     return payload
 
 
+def _serialize_incident(incident: Incident) -> dict:
+    return {
+        "id": str(incident.id),
+        "farm_id": str(incident.farm_id),
+        "occurred_on": incident.occurred_on.isoformat(),
+        "category": incident.category,
+        "note": incident.note,
+        "tags": IncidentService.tags_from_csv(incident.tags_csv),
+        "reported_by": incident.reported_by,
+        "updated_at": _iso_datetime(incident.updated_at),
+    }
+
+
 def _serialize_task_space(space: TaskSpace) -> dict:
     return {
         "id": str(space.id),
@@ -623,6 +638,7 @@ def _mobile_calendar_items(
                     "source_id": item.get("source_id"),
                     "task_id": item.get("task_id"),
                     "activity_id": item.get("activity_id"),
+                    "incident_id": item.get("incident_id"),
                     "title": item["title"],
                     "description": item.get("description"),
                     "subtitle": item.get("subtitle"),
@@ -947,6 +963,7 @@ def bootstrap():
                     "paddock_event.create",
                     "water_asset_event.create",
                     "fence_event.create",
+                    "incident.create",
                     "stock_count.record",
                     "mob.move",
                     "mob.transfer",
@@ -954,6 +971,7 @@ def bootstrap():
                     "shearing_session.create",
                     "shearing_session.update",
                     "shearing_entry.record",
+                    "shearing_entry.delete",
                     "shearing_bale_code.upsert",
                     "shearing_bale.record",
                     "shearing_bale.delete",
@@ -1053,6 +1071,12 @@ def farm_snapshot(farm_id):
         .limit(200)
         .all()
     )
+    incidents = (
+        Incident.query.filter_by(farm_id=farm.id)
+        .order_by(Incident.occurred_on.desc(), Incident.created_at.desc())
+        .limit(200)
+        .all()
+    )
     water_asset_state_history = WaterNetworkService.recent_state_history_for_farm(
         str(farm.id),
         limit=500,
@@ -1120,6 +1144,7 @@ def farm_snapshot(farm_id):
             ],
             "fence_sections": [_serialize_fence_section(section) for section in fence_sections],
             "fence_events": [_serialize_fence_event(event) for event in fence_events],
+            "incidents": [_serialize_incident(incident) for incident in incidents],
             "water_asset_state_history": [
                 WaterNetworkService.serialize_asset_state_history(row)
                 for row in water_asset_state_history
@@ -1597,6 +1622,7 @@ def _dispatch_command(command_type: str, farm: Farm, payload) -> dict:
         "paddock_event.create": _handle_paddock_event_create,
         "water_asset_event.create": _handle_water_asset_event_create,
         "fence_event.create": _handle_fence_event_create,
+        "incident.create": _handle_incident_create,
         "stock_count.record": _handle_stock_count_record,
         "mob.move": _handle_mob_move,
         "mob.transfer": _handle_mob_transfer,
@@ -1604,6 +1630,7 @@ def _dispatch_command(command_type: str, farm: Farm, payload) -> dict:
         "shearing_session.create": _handle_shearing_session_create,
         "shearing_session.update": _handle_shearing_session_update,
         "shearing_entry.record": _handle_shearing_entry_record,
+        "shearing_entry.delete": _handle_shearing_entry_delete,
         "shearing_bale_code.upsert": _handle_shearing_bale_code_upsert,
         "shearing_bale.record": _handle_shearing_bale_record,
         "shearing_bale.delete": _handle_shearing_bale_delete,
@@ -1741,6 +1768,22 @@ def _handle_fence_event_create(farm: Farm, payload: dict) -> dict:
     )
     db.session.flush()
     return {"event": _serialize_fence_event(event), "event_id": str(event.id)}
+
+
+def _handle_incident_create(farm: Farm, payload: dict) -> dict:
+    raw_tags = payload.get("tags")
+    if isinstance(raw_tags, list):
+        raw_tags = ",".join(str(value) for value in raw_tags)
+    incident = IncidentService.create_incident(
+        farm_id=farm.id,
+        occurred_on=payload.get("occurred_on"),
+        category=payload.get("category"),
+        note=payload.get("note") or payload.get("description"),
+        raw_tags=raw_tags,
+        reported_by=payload.get("reported_by") or g.mobile_user.name or g.mobile_user.email or "Mobile user",
+    )
+    db.session.flush()
+    return {"incident": _serialize_incident(incident), "incident_id": str(incident.id)}
 
 
 def _resolve_stock_count_group(payload: dict) -> tuple[AnimalGroupType, bool]:
@@ -1939,11 +1982,27 @@ def _handle_shearing_entry_record(farm: Farm, payload: dict) -> dict:
     if entry is None:
         return {
             "session_id": str(session.id),
+            "entry_id": str(payload.get("id") or payload.get("entry_id") or ""),
             "deleted": True,
             "shearing_session": _serialize_shearing_session(session),
         }
     return {
         "entry": ShearingService.serialize_entry(entry, session=session),
+        "shearing_session": _serialize_shearing_session(session),
+    }
+
+
+def _handle_shearing_entry_delete(farm: Farm, payload: dict) -> dict:
+    session = _get_shearing_session_for_farm(farm, str(payload.get("session_id") or "").strip())
+    entry_id = str(payload.get("entry_id") or payload.get("id") or "").strip()
+    if not entry_id:
+        raise ValueError("entry_id is required")
+    ShearingService.delete_entry(session=session, entry_id=entry_id)
+    db.session.flush()
+    return {
+        "session_id": str(session.id),
+        "entry_id": entry_id,
+        "deleted": True,
         "shearing_session": _serialize_shearing_session(session),
     }
 

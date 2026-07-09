@@ -415,11 +415,11 @@ class ShearingService:
         unit_rate=_UNCHANGED,
         line_amount=_UNCHANGED,
     ) -> ShearingEntry | None:
-        if session.status == "closed":
-            raise ValueError("Cannot record counts against a closed shearing session")
         entry = db.session.get(ShearingEntry, str(entry_id)) if entry_id else None
         if entry is not None and str(entry.session_id) != str(session.id):
             raise ValueError("Shearing entry does not belong to this shearing session")
+        if session.status == "closed" and entry is None:
+            raise ValueError("Cannot add counts against a closed shearing session")
         date_value = cls.parse_date(work_date, "work_date")
         cls.validate_work_date(session, date_value)
         shearer = db.session.get(Shearer, str(shearer_id or ""))
@@ -475,6 +475,17 @@ class ShearingService:
             unit_rate=unit_rate,
             line_amount=line_amount,
         )
+        db.session.flush()
+        return entry
+
+    @classmethod
+    def delete_entry(cls, *, session: ShearingSession, entry_id: str) -> ShearingEntry | None:
+        entry = db.session.get(ShearingEntry, str(entry_id or ""))
+        if entry is None:
+            return None
+        if str(entry.session_id) != str(session.id):
+            raise ValueError("Shearing entry does not belong to this shearing session")
+        db.session.delete(entry)
         db.session.flush()
         return entry
 

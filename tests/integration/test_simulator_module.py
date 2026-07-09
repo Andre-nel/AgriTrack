@@ -67,6 +67,12 @@ def test_simulator_create_can_scope_existing_and_future_farms(client, app):
     body = create_response.data.decode("utf-8")
     assert "Planned Lease Farm" in body
     assert "Future farm" in body
+    assert "Initial Farm Value" in body
+    assert "Farm Value Inflation %" in body
+    assert "Overall Equity Forecast" in body
+    assert "simulatorEquityForecastData" in body
+    assert 'data-equity-series-toggle value="cumulative_profit_loss"' in body
+    assert 'data-equity-series-toggle value="cumulative_equity"' in body
 
     with app.app_context():
         scenario = SimulatorScenario.query.filter_by(name="Scoped Farm Cash Flow").first()
@@ -86,6 +92,42 @@ def test_simulator_create_can_scope_existing_and_future_farms(client, app):
         assert farm_names == {"Planned Lease Farm", "Selected Simulator Farm"}
         future_result = next(row for row in projection["farms"] if row["name"] == "Planned Lease Farm")
         assert future_result["stock_rows"] == []
+        target_values = {target.name: target for target in targets}
+        assert target_values["Selected Simulator Farm"].initial_farm_value == Decimal("0.00")
+        assert target_values["Selected Simulator Farm"].farm_value_inflation_rate == Decimal("0.0000")
+        selected_target_id = str(target_values["Selected Simulator Farm"].id)
+        future_target_id = str(target_values["Planned Lease Farm"].id)
+
+    update_response = client.post(
+        f"/simulator/scenarios/{scenario_id}/edit",
+        data={
+            "farm_values_submitted": "1",
+            "name": "Scoped Farm Cash Flow",
+            "projection_year": "2026",
+            "income_inflation_rate": "0",
+            "expense_inflation_rate": "0",
+            "notes": "",
+            f"initial_farm_value__{selected_target_id}": "1000000",
+            f"farm_value_inflation_rate__{selected_target_id}": "5",
+            f"initial_farm_value__{future_target_id}": "250000",
+            f"farm_value_inflation_rate__{future_target_id}": "2.5",
+        },
+        follow_redirects=True,
+    )
+
+    assert update_response.status_code == 200
+    update_body = update_response.data.decode("utf-8")
+    assert "Scenario updated" in update_body
+    assert "R1 250 000,00" in update_body
+    assert "Overall Equity Forecast" in update_body
+
+    with app.app_context():
+        selected_target = db.session.get(SimulatorFarm, selected_target_id)
+        future_target = db.session.get(SimulatorFarm, future_target_id)
+        assert selected_target.initial_farm_value == Decimal("1000000.00")
+        assert selected_target.farm_value_inflation_rate == Decimal("5.0000")
+        assert future_target.initial_farm_value == Decimal("250000.00")
+        assert future_target.farm_value_inflation_rate == Decimal("2.5000")
 
 
 def test_simulator_expense_update_and_delete(client, app):
@@ -202,6 +244,7 @@ def test_simulator_web_flow_create_stock_crud_clear_inputs_and_delete(client, ap
     assert "Income Inflation %" in body
     assert "Expense Inflation %" in body
     assert "Overall Net Forecast" in body
+    assert "Overall Equity Forecast" in body
 
     with app.app_context():
         scenario = SimulatorScenario.query.filter_by(name="Angora Expansion").first()

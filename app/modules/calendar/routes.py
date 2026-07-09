@@ -1,7 +1,7 @@
 import calendar as calendar_lib
 from datetime import date, timedelta
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, g, redirect, render_template, request, url_for
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db
@@ -58,6 +58,13 @@ def _day_heading(day: date) -> str:
 def _item_count_label(count: int, singular: str, plural: str | None = None) -> str:
     item_label = singular if count == 1 else (plural or f"{singular}s")
     return f"{count} {item_label}"
+
+
+def _web_actor_name() -> str:
+    user = getattr(g, "web_user", None)
+    if user is not None and user.name:
+        return user.name
+    return "Web User"
 
 
 def _calendar_url(
@@ -170,6 +177,13 @@ def _build_day_cell(
             selected_date=day,
         ),
         "create_task_url": create_task_url,
+        "create_incident_next_url": _calendar_url(
+            view="month",
+            year=day.year,
+            month=day.month,
+            farm_id=selected_farm_id or None,
+            selected_date=day,
+        ),
     }
 
 
@@ -301,6 +315,7 @@ def index():
         )
         activity_count = sum(1 for item in selected_day["all_items"] if item["kind"] == "activity")
         task_count = sum(1 for item in selected_day["all_items"] if item["kind"] == "task")
+        incident_count = sum(1 for item in selected_day["all_items"] if item["kind"] == "incident")
         total_count = len(selected_day["all_items"])
         occupancy_count = len(selected_day["all_occupancy"])
         selected_day["heading"] = _day_heading(selected_day["date"])
@@ -308,7 +323,8 @@ def index():
             f"{selected_day['date'].isoformat()} | "
             f"{_item_count_label(total_count, 'scheduled item')} | "
             f"{_item_count_label(activity_count, 'activity')} | "
-            f"{_item_count_label(task_count, 'task')}"
+            f"{_item_count_label(task_count, 'task')} | "
+            f"{_item_count_label(incident_count, 'incident')}"
         )
         selected_day["occupancy_summary"] = (
             _item_count_label(occupancy_count, "occupying activity") if occupancy_count else None
@@ -353,6 +369,21 @@ def index():
             "repeat_unit": "months",
             "repeat_until": "",
         },
+        create_incident_defaults={
+            "farm_id": state["farm_id"],
+            "occurred_on": create_start_date.isoformat(),
+            "category": "",
+            "note": "",
+            "tags": "",
+            "reported_by": _web_actor_name(),
+        },
+        create_incident_next_url=_calendar_url(
+            view=state["view"],
+            year=state["year"],
+            month=state["month"] if state["view"] == "month" else None,
+            farm_id=state["farm_id"] or None,
+            selected_date=create_start_date,
+        ),
         selected_day=selected_day,
         clear_selected_day_url=_calendar_url(
             view=state["view"],

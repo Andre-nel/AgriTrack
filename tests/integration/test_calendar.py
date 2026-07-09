@@ -1,8 +1,9 @@
 from datetime import date
 
 from app.extensions import db
-from app.models import CalendarActivity, Farm, Task, TaskSpace
+from app.models import CalendarActivity, Farm, Incident, Task, TaskSpace
 from app.services.calendar_service import CalendarService
+from app.services.incident_service import IncidentService
 from app.services.task_service import TaskService
 
 
@@ -60,6 +61,26 @@ def _create_task(space: TaskSpace, heading: str, due_date: date) -> Task:
     )
     db.session.flush()
     return task
+
+
+def _create_incident(
+    farm: Farm,
+    *,
+    category: str,
+    occurred_on: date,
+    note: str,
+    tags: str = "",
+) -> Incident:
+    incident = IncidentService.create_incident(
+        farm_id=farm.id,
+        occurred_on=occurred_on,
+        category=category,
+        note=note,
+        raw_tags=tags,
+        reported_by="Reporter",
+    )
+    db.session.flush()
+    return incident
 
 
 def test_dashboard_renders_calendar_nav(client):
@@ -426,6 +447,13 @@ def test_selected_day_detail_view_renders_items_and_actions(client, app):
         space = _create_space(farm, "DAY", "Day Space")
         _create_activity(farm, title="Pasture walk", start_date=date(2026, 4, 12), duration_days="2")
         _create_task(space, "Check troughs", date(2026, 4, 12))
+        _create_incident(
+            farm,
+            category="Stock missing",
+            occurred_on=date(2026, 4, 12),
+            note="Two ewes missing from North Camp",
+            tags="stock,security",
+        )
         db.session.commit()
         farm_id = str(farm.id)
 
@@ -435,9 +463,11 @@ def test_selected_day_detail_view_renders_items_and_actions(client, app):
     assert response.status_code == 200
     body = response.data.decode("utf-8")
     assert "Selected Day" in body
-    assert "2026-04-12 | 2 scheduled items | 1 activity | 1 task" in body
+    assert "2026-04-12 | 3 scheduled items | 1 activity | 1 task | 1 incident" in body
     assert "Pasture walk" in body
     assert "Check troughs" in body
+    assert "Stock missing" in body
+    assert "Record Incident" in body
     assert "Close Day" in body
 
 
@@ -460,4 +490,37 @@ def test_selected_day_detail_shows_continuing_occupancy_without_new_start_item(c
     body = response.data.decode("utf-8")
     assert "1 occupying activity" in body
     assert "Lambing watch" in body
-    assert "No tasks or activities start or are due on this day." in body
+    assert "No tasks, incidents, or activities start or are due on this day." in body
+
+
+def test_calendar_can_record_incident_and_search_incidents_page(client, app):
+    with app.app_context():
+        farm = _create_farm("Incident Farm")
+        db.session.commit()
+        farm_id = str(farm.id)
+
+    response = client.post(
+        "/incidents",
+        data={
+            "farm_id": farm_id,
+            "occurred_on": "2026-05-03",
+            "category": "Stock missing",
+            "note": "Two ewes missing from North Camp",
+            "tags": "stock, security",
+            "reported_by": "Field Team",
+            "next": f"/calendar?view=month&year=2026&month=5&farm_id={farm_id}&selected_date=2026-05-03",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "Incident &#39;Stock missing&#39; recorded" in body
+    assert "Stock missing" in body
+    assert "Two ewes missing from North Camp" in body
+
+    search_response = client.get(f"/incidents?farm_id={farm_id}&tag=security&q=ewes")
+    assert search_response.status_code == 200
+    search_body = search_response.data.decode("utf-8")
+    assert "Incident Notes" in search_body
+    assert "Stock missing" in search_body
+    assert "security" in search_body

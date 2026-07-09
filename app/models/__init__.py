@@ -11,6 +11,7 @@ from app.models.grazing import (
     GrazingAllocationLsuHistory,
     GrazingSession,
 )
+from app.models.incident import Incident
 from app.models.journal import JournalEntry
 from app.models.mobile import MobileAuthToken, MobileSyncCommand
 from app.models.mob import Mob
@@ -61,6 +62,7 @@ __all__ = [
     "GrazingAllocationLsuBreakdownHistory",
     "GrazingAllocationLsuHistory",
     "GrazingSession",
+    "Incident",
     "JournalEntry",
     "MobileAuthToken",
     "MobileSyncCommand",

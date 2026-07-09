@@ -228,6 +228,28 @@ data class MobileCommand(
             )
         }
 
+        fun incidentCreate(
+            farmId: String,
+            occurredOn: String,
+            category: String,
+            note: String,
+            tags: List<String>,
+            reportedBy: String = "Mobile user",
+        ): MobileCommand {
+            val payload = JSONObject()
+                .put("occurred_on", occurredOn.trim())
+                .put("category", category.trim())
+                .put("note", note.trim())
+                .put("tags", JSONArray(tags))
+                .put("reported_by", reportedBy.trim().ifBlank { "Mobile user" })
+            return MobileCommand(
+                clientCommandId = UUID.randomUUID().toString(),
+                type = "incident.create",
+                farmId = farmId,
+                payload = payload,
+            )
+        }
+
         fun stockCount(
             farmId: String,
             mobId: String,
@@ -584,6 +606,19 @@ data class MobileCommand(
                 payload = payload,
             )
         }
+
+        fun shearingEntryDelete(
+            farmId: String,
+            sessionId: String,
+            entryId: String,
+        ): MobileCommand = MobileCommand(
+            clientCommandId = UUID.randomUUID().toString(),
+            type = "shearing_entry.delete",
+            farmId = farmId,
+            payload = JSONObject()
+                .put("session_id", sessionId)
+                .put("entry_id", entryId),
+        )
 
         fun shearingBaleCodeUpsert(
             farmId: String,

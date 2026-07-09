@@ -16,6 +16,7 @@ from app.models import (
     GrazingAllocation,
     GrazingAllocationLsuHistory,
     GrazingSession,
+    Incident,
     JournalEntry,
     Mob,
     MobEvent,
@@ -240,6 +241,7 @@ class FarmDeletionService:
         cls._delete_where(DailyStockSnapshot, cls._in_if_any(DailyStockSnapshot.paddock_id, paddock_ids))
         cls._delete_where(RainfallRecord, RainfallRecord.farm_id == farm_id)
         cls._delete_where(JournalEntry, JournalEntry.farm_id == farm_id)
+        cls._delete_where(Incident, Incident.farm_id == farm_id)
         cls._delete_where(
             CalendarActivityException,
             cls._in_if_any(CalendarActivityException.calendar_activity_id, calendar_activity_ids),

@@ -9,6 +9,7 @@ from app.models.movement import MobLineage, MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.grazing_service import GrazingService
+from app.services.mob_event_service import MobEventService
 from app.services.mob_service import MobService
 from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
@@ -167,6 +168,20 @@ class MovementService:
         if quantity < 0:
             raise ValueError("Count allocations cannot be negative")
         return quantity
+
+    @staticmethod
+    def _animal_group_log_label(group) -> str:
+        return f"{group.species} | {group.breed} | {group.sex} | {group.age_class}"
+
+    @staticmethod
+    def _transfer_summary(group_labels: dict[str, str], transfers: dict[str, int]) -> str:
+        parts = [
+            f"{quantity} head {group_labels.get(group_id, group_id)}"
+            for group_id, quantity in transfers.items()
+        ]
+        if len(parts) <= 1:
+            return parts[0] if parts else "stock"
+        return f"{', '.join(parts[:-1])} and {parts[-1]}"
 
     @staticmethod
     def _normalize_count_allocations(mob: Mob, allocations: list[dict]) -> list[dict]:
@@ -355,10 +370,17 @@ class MovementService:
         if str(destination_mob.farm_id) != selected_destination_farm_id:
             raise ValueError("Destination mob is invalid for the selected destination farm")
 
-        source_balances = {
-            str(balance.animal_group_type_id): int(balance.head_count)
+        source_balance_rows = {
+            str(balance.animal_group_type_id): balance
             for balance in source_mob.balances
             if int(balance.head_count) > 0
+        }
+        source_balances = {
+            group_id: int(balance.head_count) for group_id, balance in source_balance_rows.items()
+        }
+        group_labels = {
+            group_id: MovementService._animal_group_log_label(balance.animal_group_type)
+            for group_id, balance in source_balance_rows.items()
         }
         if not source_balances:
             raise ValueError("Source mob has no stock to transfer")
@@ -386,6 +408,7 @@ class MovementService:
                     f"(group {group_id}: transfer {quantity}, available {available})"
                 )
 
+        note_text = " ".join((note or "").strip().split())
         source_note = note or f"transfer to {destination_mob.name}"
         destination_note = note or f"transfer from {source_mob.name}"
         for group_id, quantity in normalized.items():
@@ -409,6 +432,28 @@ class MovementService:
                 event_time=when,
                 sync_grazing_history=False,
             )
+
+        transfer_summary = MovementService._transfer_summary(group_labels, normalized)
+        source_description = f"Stock transfer out to {destination_mob.name}: {transfer_summary}."
+        destination_description = f"Stock transfer in from {source_mob.name}: {transfer_summary}."
+        if note_text:
+            source_description = f"{source_description} Note: {note_text}"
+            destination_description = f"{destination_description} Note: {note_text}"
+
+        MobEventService.create_event(
+            mob_id=source_mob.id,
+            farm_id=source_mob.farm_id,
+            description=source_description,
+            raw_tags="stock,transfer out,stock adjustment",
+            event_at=when,
+        )
+        MobEventService.create_event(
+            mob_id=destination_mob.id,
+            farm_id=destination_mob.farm_id,
+            description=destination_description,
+            raw_tags="stock,transfer in,stock adjustment",
+            event_at=when,
+        )
 
         GrazingHistoryService.sync_live_history_for_mob(source_mob, effective_at=when)
         GrazingHistoryService.sync_live_history_for_mob(destination_mob, effective_at=when)

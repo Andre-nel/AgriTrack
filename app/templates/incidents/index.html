@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% from "incidents/_form.html" import render_incident_form %}
+{% block title %}Incidents | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Incidents</h1>
+  <p>Search dated incident notes by category, tag, farm, date, reporter, and note text.</p>
+</section>
+
+<div class="cards">
+  <article class="card stat"><h2>Matches</h2><p>{{ summary.total_count }}</p></article>
+  <article class="card stat"><h2>Categories</h2><p>{{ summary.category_count }}</p></article>
+</div>
+
+<section class="split">
+  <article class="card">
+    <h2>Search</h2>
+    <form method="get" action="{{ url_for('incidents.index') }}" class="grid-form">
+      <label>Search Text
+        <input name="q" value="{{ filters.q }}" placeholder="stock missing, staff, vehicle..." />
+      </label>
+      <div class="grid-two">
+        <label>Farm
+          <select name="farm_id">
+            <option value="">All farms</option>
+            {% for farm in farms %}
+            <option value="{{ farm.id }}" {% if filters.farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Category
+          <input name="category" value="{{ filters.category }}" />
+        </label>
+      </div>
+      <div class="grid-three">
+        <label>Tag
+          <input name="tag" value="{{ filters.tag }}" list="incident-tag-options" />
+        </label>
+        <label>Start Date
+          <input type="date" name="start_date" value="{{ filters.start_date }}" />
+        </label>
+        <label>End Date
+          <input type="date" name="end_date" value="{{ filters.end_date }}" />
+        </label>
+      </div>
+      <datalist id="incident-tag-options">
+        {% for tag in available_tags %}
+        <option value="{{ tag }}"></option>
+        {% endfor %}
+      </datalist>
+      <div class="row-actions">
+        <button type="submit" class="btn">Search</button>
+        <a class="btn btn-secondary" href="{{ url_for('incidents.index') }}">Clear</a>
+      </div>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Record Incident</h2>
+    {{ render_incident_form(form_values, farms, url_for('incidents.create_incident')) }}
+  </article>
+</section>
+
+<section class="card">
+  <div class="task-section-heading">
+    <h2>Incident Notes</h2>
+    <p class="muted">{{ summary.total_count }} result{{ '' if summary.total_count == 1 else 's' }}</p>
+  </div>
+  <div class="incident-list">
+    {% for row in incident_rows %}
+    <article class="incident-card">
+      <div class="task-card-topline">
+        <div>
+          <span class="space-key">{{ row.incident.occurred_on.isoformat() }}</span>
+          <a href="{{ row.detail_url }}"><strong>{{ row.incident.category }}</strong></a>
+        </div>
+        <span class="muted">{{ row.incident.farm.name if row.incident.farm else "Unassigned" }}</span>
+      </div>
+      <div class="task-chip-row">
+        {% for tag in row.tags %}
+        <span class="tag-pill">{{ tag }}</span>
+        {% else %}
+        <span class="tag-pill">untagged</span>
+        {% endfor %}
+      </div>
+      <p class="text-body">{{ row.incident.note }}</p>
+      <p class="muted">Reported by {{ row.incident.reported_by }}</p>
+    </article>
+    {% else %}
+    <div class="task-empty-state">No incident notes match the current search.</div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -106,6 +106,7 @@ import com.agritrack.mobile.data.PaddockSummary
 import com.agritrack.mobile.data.SecureTokenStore
 import com.agritrack.mobile.data.ShearerSummary
 import com.agritrack.mobile.data.ShearingBaleCodeSummary
+import com.agritrack.mobile.data.ShearingEntrySummary
 import com.agritrack.mobile.data.ShearingSessionSummary
 import com.agritrack.mobile.data.SyncResult
 import com.agritrack.mobile.data.SyncSummary
@@ -419,7 +420,13 @@ class MainActivity : ComponentActivity() {
                     onBaseUrlChange = { uiState = uiState.copy(baseUrl = it) },
                     onEmailChange = { uiState = uiState.copy(email = it) },
                     onPasswordChange = { uiState = uiState.copy(password = it) },
-                    onOpenScreen = { uiState = uiState.copy(currentScreen = it) },
+                    onOpenScreen = { screen ->
+                        uiState = if (screen == AppScreen.ShearingEntry) {
+                            startNewShearingEntry(uiState)
+                        } else {
+                            uiState.copy(currentScreen = screen)
+                        }
+                    },
                     onBackHome = { uiState = uiState.copy(currentScreen = AppScreen.Home) },
                     onFarmSelected = { farmId ->
                         runTask(
@@ -469,6 +476,10 @@ class MainActivity : ComponentActivity() {
                     onRainfallDateChange = { uiState = uiState.copy(rainfallDate = it) },
                     onRainfallMmChange = { uiState = uiState.copy(rainfallMm = it) },
                     onRainfallNoteChange = { uiState = uiState.copy(rainfallNote = it) },
+                    onIncidentDateChange = { uiState = uiState.copy(incidentOccurredOn = it) },
+                    onIncidentCategoryChange = { uiState = uiState.copy(incidentCategory = it) },
+                    onIncidentNoteChange = { uiState = uiState.copy(incidentNote = it) },
+                    onIncidentTagsChange = { uiState = uiState.copy(incidentTags = it) },
                     onMobNameChange = { uiState = uiState.copy(createMobName = it) },
                     onMobOriginNoteChange = { uiState = uiState.copy(createMobOriginNote = it) },
                     onMobSelected = { uiState = selectMob(uiState, it) },
@@ -499,6 +510,7 @@ class MainActivity : ComponentActivity() {
                     onShearingLootjieRateChange = { uiState = uiState.copy(shearingLootjieRate = it) },
                     onShearingNotesChange = { uiState = uiState.copy(shearingNotes = it) },
                     onShearingSessionSelected = { sessionId -> uiState = selectShearingSessionForDetail(uiState, sessionId) },
+                    onShearingEntrySelected = { entryId -> uiState = selectShearingEntryForEdit(uiState, entryId) },
                     onShearerSelected = { uiState = uiState.copy(selectedShearerId = it) },
                     onShearingWorkDateChange = { uiState = uiState.copy(shearingWorkDate = it) },
                     onShearingQuantityChange = { uiState = uiState.copy(shearingQuantity = it) },
@@ -555,6 +567,7 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     onQueueRainfall = { queueAndMaybeSync(queueRainfall(uiState, repository())) },
+                    onQueueIncident = { queueAndMaybeSync(queueIncident(uiState, repository())) },
                     onQueueMobCreate = { queueAndMaybeSync(queueMobCreate(uiState, repository())) },
                     onQueueMobMove = { mode, allocations, countAllocations ->
                         queueAndMaybeSync(queueMobMove(uiState, repository(), mode, allocations, countAllocations))
@@ -574,6 +587,9 @@ class MainActivity : ComponentActivity() {
                     onQueueShearerCreate = { queueAndMaybeSync(queueShearerCreate(uiState, repository())) },
                     onQueueShearingSessionCreate = { queueAndMaybeSync(queueShearingSessionCreate(uiState, repository())) },
                     onQueueShearingEntry = { newGroup -> queueAndMaybeSync(queueShearingEntry(uiState, repository(), newGroup)) },
+                    onQueueShearingEntryDelete = { entryId ->
+                        queueAndMaybeSync(queueShearingEntryDelete(uiState, repository(), entryId))
+                    },
                     onQueueShearingSessionStatus = { status ->
                         queueAndMaybeSync(queueShearingSessionStatus(uiState, repository(), status))
                     },
@@ -732,6 +748,10 @@ private data class FieldUiState(
     val rainfallDate: String = LocalDate.now().toString(),
     val rainfallMm: String = "",
     val rainfallNote: String = "",
+    val incidentOccurredOn: String = LocalDate.now().toString(),
+    val incidentCategory: String = "",
+    val incidentNote: String = "",
+    val incidentTags: String = "",
     val createMobName: String = "",
     val createMobOriginNote: String = "",
     val selectedMobId: String = "",
@@ -739,6 +759,7 @@ private data class FieldUiState(
     val selectedWaterAssetId: String = "",
     val selectedFenceSectionId: String = "",
     val selectedShearingSessionId: String = "",
+    val editingShearingEntryId: String = "",
     val selectedShearerId: String = "",
     val selectedAnimalGroupTypeId: String = "",
     val selectedShearingBaleCodeId: String = "",
@@ -949,6 +970,7 @@ private enum class AppScreen {
     ShearingBaleCodeCreate,
     ShearingBaleRecord,
     Rainfall,
+    Incident,
     MoveMob,
     StockCount,
     TransferMob,
@@ -994,6 +1016,10 @@ private fun AgriTrackApp(
     onRainfallDateChange: (String) -> Unit,
     onRainfallMmChange: (String) -> Unit,
     onRainfallNoteChange: (String) -> Unit,
+    onIncidentDateChange: (String) -> Unit,
+    onIncidentCategoryChange: (String) -> Unit,
+    onIncidentNoteChange: (String) -> Unit,
+    onIncidentTagsChange: (String) -> Unit,
     onMobNameChange: (String) -> Unit,
     onMobOriginNoteChange: (String) -> Unit,
     onMobSelected: (String) -> Unit,
@@ -1024,6 +1050,7 @@ private fun AgriTrackApp(
     onShearingLootjieRateChange: (String) -> Unit,
     onShearingNotesChange: (String) -> Unit,
     onShearingSessionSelected: (String) -> Unit,
+    onShearingEntrySelected: (String) -> Unit,
     onShearerSelected: (String) -> Unit,
     onShearingWorkDateChange: (String) -> Unit,
     onShearingQuantityChange: (String) -> Unit,
@@ -1063,6 +1090,7 @@ private fun AgriTrackApp(
     onAttachTaskPhoto: (TaskSummary) -> Unit,
     onStartTaskForEntity: (String, String, String) -> Unit,
     onQueueRainfall: () -> Unit,
+    onQueueIncident: () -> Unit,
     onQueueMobCreate: () -> Unit,
     onQueueMobMove: (MoveAllocationMode, List<MoveAllocationDraft>, List<CountMoveAllocationDraft>) -> Unit,
     onQueueStockCount: (List<StockCountRowDraft>, NewStockGroupDraft) -> Unit,
@@ -1078,6 +1106,7 @@ private fun AgriTrackApp(
     onQueueShearerCreate: () -> Unit,
     onQueueShearingSessionCreate: () -> Unit,
     onQueueShearingEntry: (NewStockGroupDraft) -> Unit,
+    onQueueShearingEntryDelete: (String) -> Unit,
     onQueueShearingSessionStatus: (String) -> Unit,
     onQueueShearingBaleCode: () -> Unit,
     onQueueShearingBale: () -> Unit,
@@ -1269,7 +1298,9 @@ private fun AgriTrackApp(
                     state,
                     { onOpenScreen(AppScreen.Shearing) },
                     onOpenScreen,
+                    onShearingEntrySelected,
                     onQueueShearingSessionStatus,
+                    onQueueShearingEntryDelete,
                     onQueueShearingBaleDelete,
                 )
                 AppScreen.ShearerCreate -> ShearerCreateScreen(
@@ -1287,6 +1318,7 @@ private fun AgriTrackApp(
                     onShearingQuantityChange,
                     onShearingNoteChange,
                     onQueueShearingEntry,
+                    onQueueShearingEntryDelete,
                 )
                 AppScreen.ShearingBaleCodeCreate -> ShearingBaleCodeCreateScreen(
                     state,
@@ -1327,6 +1359,15 @@ private fun AgriTrackApp(
                     onRainfallMmChange,
                     onRainfallNoteChange,
                     onQueueRainfall,
+                )
+                AppScreen.Incident -> IncidentScreen(
+                    state,
+                    onBackHome,
+                    onIncidentDateChange,
+                    onIncidentCategoryChange,
+                    onIncidentNoteChange,
+                    onIncidentTagsChange,
+                    onQueueIncident,
                 )
                 AppScreen.MoveMob -> MoveMobScreen(
                     state,
@@ -1608,6 +1649,9 @@ private fun DashboardMenu(state: FieldUiState, onOpenScreen: (AppScreen) -> Unit
         }
         DashboardButton("Rainfall", "View recent rain and record a reading", state.snapshot != null) {
             onOpenScreen(AppScreen.Rainfall)
+        }
+        DashboardButton("Incidents", "Record field incident notes with tags", state.snapshot != null) {
+            onOpenScreen(AppScreen.Incident)
         }
     }
 }
@@ -2689,8 +2733,13 @@ private fun CalendarScreen(
         var filters by remember(snapshot.farm.id) { mutableStateOf(CalendarFilterState(startDate = LocalDate.now().toString())) }
         val filteredItems = filterCalendarItems(snapshot.calendarItems, filters)
 
-        Button(onClick = { onOpenScreen(AppScreen.TaskCreate) }, modifier = Modifier.fillMaxWidth()) {
-            Text("New Task")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { onOpenScreen(AppScreen.TaskCreate) }, modifier = Modifier.weight(1f)) {
+                Text("New Task")
+            }
+            OutlinedButton(onClick = { onOpenScreen(AppScreen.Incident) }, modifier = Modifier.weight(1f)) {
+                Text("New Incident")
+            }
         }
         CalendarFilters(
             filters = filters,
@@ -2698,7 +2747,7 @@ private fun CalendarScreen(
             onFiltersChange = { filters = it },
         )
         if (filteredItems.isEmpty()) {
-            EntityCard("No calendar items", "No tasks or activities match the current filters.")
+            EntityCard("No calendar items", "No tasks, incidents, or activities match the current filters.")
         }
         filteredItems.take(80).forEach { item ->
             val task = item.taskId?.let { id -> snapshot.tasks.firstOrNull { it.id == id } }
@@ -2747,8 +2796,13 @@ private fun CalendarFilters(
             FilterChoice("Tasks", filters.itemType == "task", Modifier.weight(1f)) {
                 onFiltersChange(filters.copy(itemType = "task"))
             }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             FilterChoice("Activity", filters.itemType == "activity", Modifier.weight(1f)) {
                 onFiltersChange(filters.copy(itemType = "activity"))
+            }
+            FilterChoice("Incident", filters.itemType == "incident", Modifier.weight(1f)) {
+                onFiltersChange(filters.copy(itemType = "incident"))
             }
         }
         OutlinedTextField(
@@ -2857,21 +2911,33 @@ private fun CalendarItemCard(
 private fun CalendarItemDetailScreen(state: FieldUiState, onBackHome: () -> Unit) {
     FormScaffold("Calendar Detail", onBackHome) {
         val selectedSourceId = state.selectedCalendarItemSourceId
-        val item = state.snapshot?.calendarItems?.firstOrNull {
+        val snapshot = state.snapshot ?: return@FormScaffold
+        val item = snapshot.calendarItems.firstOrNull {
             it.date == state.selectedCalendarItemDate &&
-                (it.sourceId == selectedSourceId || it.activityId == selectedSourceId || it.taskId == selectedSourceId)
-        } ?: state.snapshot?.calendarItems?.firstOrNull() ?: return@FormScaffold
+                (
+                    it.sourceId == selectedSourceId ||
+                        it.activityId == selectedSourceId ||
+                        it.taskId == selectedSourceId ||
+                        it.incidentId == selectedSourceId
+                )
+        } ?: snapshot.calendarItems.firstOrNull() ?: return@FormScaffold
+        val incident = item.incidentId?.let { incidentId ->
+            snapshot.incidents.firstOrNull { it.id == incidentId }
+        }
         EntityCard(item.title, "${item.date} | ${item.stageLabel ?: item.badgeText ?: item.kind}")
         item.description?.takeIf { it.isNotBlank() }?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium)
         }
-        MetricRows(
-            listOf(
-                "Type" to item.kind.replaceFirstChar(Char::titlecase),
-                "Duration" to (item.durationText ?: "-"),
-                "Recurrence" to (item.recurrenceText ?: "-"),
-            )
+        incident?.tags?.takeIf { it.isNotEmpty() }?.let { tags ->
+            Text(tags.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
+        }
+        val rows = mutableListOf(
+            "Type" to item.kind.replaceFirstChar(Char::titlecase),
+            "Duration" to (item.durationText ?: "-"),
+            "Recurrence" to (item.recurrenceText ?: "-"),
         )
+        incident?.let { rows.add("Reported by" to it.reportedBy) }
+        MetricRows(rows)
     }
 }
 
@@ -3941,7 +4007,9 @@ private fun ShearingSessionDetailScreen(
     state: FieldUiState,
     onBackToList: () -> Unit,
     onOpenScreen: (AppScreen) -> Unit,
+    onShearingEntrySelected: (String) -> Unit,
     onQueueStatus: (String) -> Unit,
+    onQueueEntryDelete: (String) -> Unit,
     onQueueBaleDelete: (String) -> Unit,
 ) {
     val session = selectedShearingSession(state)
@@ -4025,10 +4093,20 @@ private fun ShearingSessionDetailScreen(
         }
         SectionCard("Entries") {
             session.entries.take(20).forEach { entry ->
-                EntityCard(
-                    "${entry.workDate} | ${entry.shearerName}",
-                    "${entry.animalGroupType.label} | ${entry.quantity} | ${formatMoney(entry.lineAmount)}",
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    EntityCard(
+                        "${entry.workDate} | ${entry.shearerName}",
+                        "${entry.animalGroupType.label} | ${entry.quantity} | ${formatMoney(entry.lineAmount)}",
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { onShearingEntrySelected(entry.id) }, modifier = Modifier.weight(1f)) {
+                            Text("Edit Count")
+                        }
+                        OutlinedButton(onClick = { onQueueEntryDelete(entry.id) }, modifier = Modifier.weight(1f)) {
+                            Text("Delete Count")
+                        }
+                    }
+                }
             }
             if (session.entries.isEmpty()) {
                 Text("No daily counts recorded yet.", color = Color(0xFF516052))
@@ -4047,20 +4125,31 @@ private fun ShearingEntryScreen(
     onQuantityChange: (String) -> Unit,
     onNoteChange: (String) -> Unit,
     onQueue: (NewStockGroupDraft) -> Unit,
+    onDelete: (String) -> Unit,
 ) {
     val session = selectedShearingSession(state)
     val snapshot = state.snapshot
-    var newGroup by remember(session?.species) {
+    val editingEntry = selectedShearingEntry(state)
+    var newGroup by remember(session?.id, state.editingShearingEntryId) {
         mutableStateOf(defaultNewStockGroupDraft(state.formOptions).copy(species = session?.species ?: "Sheep", ageClass = "adult"))
     }
     val animalGroups = shearingAnimalGroupOptions(state, session?.species.orEmpty())
-    FormScaffold("Record Shearing Count", onBackToDetail) {
+    val isEditing = editingEntry != null
+    FormScaffold(if (isEditing) "Edit Shearing Count" else "Record Shearing Count", onBackToDetail) {
         if (session == null || snapshot == null) {
             Text("Choose a shearing session first.", color = Color(0xFF516052))
             return@FormScaffold
         }
         SectionCard(session.name) {
-            ShearerPicker(snapshot.shearers.filter { it.active }, state.selectedShearerId, onShearerSelected)
+            if (editingEntry != null) {
+                Text(
+                    "Editing ${editingEntry.workDate} | ${editingEntry.shearerName}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF516052),
+                )
+            }
+            val shearerOptions = snapshot.shearers.filter { it.active || it.id == editingEntry?.shearerId }
+            ShearerPicker(shearerOptions, state.selectedShearerId, onShearerSelected)
             CheckboxRow("Create new animal type", newGroup.enabled) { enabled -> newGroup = newGroup.copy(enabled = enabled) }
             if (newGroup.enabled) {
                 BreedEntry(newGroup.breed, breedSuggestionsForSpecies(snapshot, session.species)) { breed -> newGroup = newGroup.copy(breed = breed) }
@@ -4080,7 +4169,12 @@ private fun ShearingEntryScreen(
             )
             OutlinedTextField(state.shearingNote, onNoteChange, label = { Text("Note") }, modifier = Modifier.fillMaxWidth())
             Button(onClick = { onQueue(newGroup) }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
-                Text("Queue Count")
+                Text(if (isEditing) "Queue Count Update" else "Queue Count")
+            }
+            if (editingEntry != null) {
+                OutlinedButton(onClick = { onDelete(editingEntry.id) }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                    Text("Queue Count Delete")
+                }
             }
         }
     }
@@ -4235,6 +4329,60 @@ private fun RainfallScreen(
         SectionTitle("Recent Rain")
         state.snapshot?.rainfall.orEmpty().take(20).forEach { rain ->
             EntityCard(rain.recordedOn, "${rain.mm} mm${rain.note?.let { " | $it" } ?: ""}")
+        }
+    }
+}
+
+@Composable
+private fun IncidentScreen(
+    state: FieldUiState,
+    onBackHome: () -> Unit,
+    onIncidentDateChange: (String) -> Unit,
+    onIncidentCategoryChange: (String) -> Unit,
+    onIncidentNoteChange: (String) -> Unit,
+    onIncidentTagsChange: (String) -> Unit,
+    onQueueIncident: () -> Unit,
+) {
+    FormScaffold("Incident", onBackHome) {
+        OutlinedTextField(
+            state.incidentOccurredOn,
+            onIncidentDateChange,
+            label = { Text("Occurred on") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            state.incidentCategory,
+            onIncidentCategoryChange,
+            label = { Text("Category") },
+            placeholder = { Text("Stock missing") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            state.incidentNote,
+            onIncidentNoteChange,
+            label = { Text("Note") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            state.incidentTags,
+            onIncidentTagsChange,
+            label = { Text("Tags") },
+            placeholder = { Text("stock, safety") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = onQueueIncident,
+            enabled = state.snapshot != null && state.incidentCategory.isNotBlank() && state.incidentNote.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Queue Incident")
+        }
+        SectionTitle("Recent Incidents")
+        state.snapshot?.incidents.orEmpty().take(20).forEach { incident ->
+            EntityCard(
+                title = "${incident.occurredOn} | ${incident.category}",
+                detail = incident.tags.joinToString(", ").ifBlank { incident.note },
+            )
         }
     }
 }
@@ -5315,7 +5463,7 @@ private fun selectCalendarItem(state: FieldUiState, item: CalendarItemSummary): 
         state.copy(selectedTaskId = item.taskId, currentScreen = AppScreen.TaskDetail)
     } else {
         state.copy(
-            selectedCalendarItemSourceId = item.sourceId ?: item.activityId ?: item.taskId ?: "",
+            selectedCalendarItemSourceId = item.sourceId ?: item.incidentId ?: item.activityId ?: item.taskId ?: "",
             selectedCalendarItemDate = item.date,
             currentScreen = AppScreen.CalendarItemDetail,
         )
@@ -5361,6 +5509,14 @@ private fun selectDecision(state: FieldUiState, item: DecisionItemSummary): Fiel
             calendarItem?.let { selectCalendarItem(targetState, it) }
                 ?: targetState.copy(currentScreen = AppScreen.Calendar, statusMessage = "Activity is not in the cached calendar.")
         }
+        "incident" -> {
+            val incidentId = entityId
+            val calendarItem = snapshot.calendarItems.firstOrNull {
+                it.incidentId == incidentId || (it.kind == "incident" && it.sourceId == incidentId)
+            }
+            calendarItem?.let { selectCalendarItem(targetState, it) }
+                ?: targetState.copy(currentScreen = AppScreen.Calendar, statusMessage = "Incident is not in the cached calendar.")
+        }
         "paddock" -> {
             if (snapshot.paddocks.any { it.id == entityId }) {
                 selectPaddock(targetState, entityId).copy(currentScreen = AppScreen.PaddockDetail)
@@ -5402,6 +5558,7 @@ private fun decisionOpenLabel(item: DecisionItemSummary): String =
     }) {
         "task" -> "Open Task"
         "activity", "calendar_activity" -> "Open Activity"
+        "incident" -> "Open Incident"
         "paddock" -> "Open Paddock"
         "mob" -> "Open Mob"
         "water_asset" -> "Open Water Asset"
@@ -5592,6 +5749,12 @@ private fun parseNoteTags(raw: String): List<String> {
     return tags.ifEmpty { listOf("field note") }
 }
 
+private fun parseIncidentTags(raw: String): List<String> =
+    raw.split(",", ";", "\n")
+        .map { it.trim().lowercase() }
+        .filter { it.isNotBlank() }
+        .distinct()
+
 private fun queueRainfall(state: FieldUiState, repo: MobileRepository): FieldUiState {
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing rainfall.")
     val recordedOn = runCatching { LocalDate.parse(state.rainfallDate).toString() }
@@ -5600,6 +5763,25 @@ private fun queueRainfall(state: FieldUiState, repo: MobileRepository): FieldUiS
     if (mm < 0) return state.copy(statusMessage = "Rainfall must be zero or more.")
     repo.queueRainfall(farm.id, recordedOn, mm, state.rainfallNote)
     return state.copy(currentScreen = AppScreen.Home, rainfallMm = "", rainfallNote = "", statusMessage = "Queued rainfall.")
+}
+
+private fun queueIncident(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing an incident.")
+    val occurredOn = runCatching { LocalDate.parse(state.incidentOccurredOn).toString() }
+        .getOrElse { return state.copy(statusMessage = "Incident date must use YYYY-MM-DD.") }
+    val category = state.incidentCategory.trim()
+    val note = state.incidentNote.trim()
+    if (category.isBlank()) return state.copy(statusMessage = "Incident category is required.")
+    if (note.isBlank()) return state.copy(statusMessage = "Incident note is required.")
+    repo.queueIncident(farm.id, occurredOn, category, note, parseIncidentTags(state.incidentTags))
+    return state.copy(
+        currentScreen = AppScreen.Home,
+        incidentOccurredOn = LocalDate.now().toString(),
+        incidentCategory = "",
+        incidentNote = "",
+        incidentTags = "",
+        statusMessage = "Queued incident.",
+    )
 }
 
 private fun queueMobCreate(state: FieldUiState, repo: MobileRepository): FieldUiState {
@@ -5840,7 +6022,10 @@ private fun queueShearingEntry(
 ): FieldUiState {
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before recording shearing.")
     val session = selectedShearingSession(state) ?: return state.copy(statusMessage = "Choose a shearing session.")
-    if (session.status == "closed") return state.copy(statusMessage = "Reopen the session before recording counts.")
+    val editingEntry = selectedShearingEntry(state)
+    if (session.status == "closed" && editingEntry == null) {
+        return state.copy(statusMessage = "Reopen the session before adding counts.")
+    }
     val shearerId = state.selectedShearerId.ifBlank {
         state.snapshot?.shearers?.firstOrNull { it.active }?.id.orEmpty()
     }
@@ -5850,6 +6035,9 @@ private fun queueShearingEntry(
     val quantity = state.shearingQuantity.toIntOrNull()
         ?: return state.copy(statusMessage = "Count must be a whole number.")
     if (quantity < 0) return state.copy(statusMessage = "Count must be zero or more.")
+    if (quantity == 0 && editingEntry == null) {
+        return state.copy(statusMessage = "Choose an existing shearing count to delete.")
+    }
     val group = if (newGroup.enabled) {
         val breed = newGroup.breed.trim()
         if (breed.isBlank()) return state.copy(statusMessage = "Breed is required for a new animal type.")
@@ -5877,12 +6065,32 @@ private fun queueShearingEntry(
         group,
         quantity,
         state.shearingNote,
+        editingEntry?.id,
     )
     return state.copy(
         currentScreen = AppScreen.ShearingSessionDetail,
+        editingShearingEntryId = "",
         shearingQuantity = "",
         shearingNote = "",
-        statusMessage = "Queued shearing count.",
+        statusMessage = if (editingEntry == null) "Queued shearing count." else if (quantity == 0) "Queued shearing count delete." else "Queued shearing count update.",
+    )
+}
+
+private fun queueShearingEntryDelete(
+    state: FieldUiState,
+    repo: MobileRepository,
+    entryId: String,
+): FieldUiState {
+    val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before deleting shearing.")
+    val session = selectedShearingSession(state) ?: return state.copy(statusMessage = "Choose a shearing session.")
+    if (entryId.isBlank()) return state.copy(statusMessage = "Choose a shearing count row to delete.")
+    repo.queueShearingEntryDelete(farm.id, session.id, entryId)
+    return state.copy(
+        currentScreen = AppScreen.ShearingSessionDetail,
+        editingShearingEntryId = "",
+        shearingQuantity = "",
+        shearingNote = "",
+        statusMessage = "Queued shearing count delete.",
     )
 }
 
@@ -6071,15 +6279,52 @@ private fun selectedShearingSession(state: FieldUiState): ShearingSessionSummary
     state.snapshot?.shearingSessions?.firstOrNull { it.id == state.selectedShearingSessionId }
         ?: state.snapshot?.shearingSessions?.firstOrNull()
 
+private fun selectedShearingEntry(state: FieldUiState): ShearingEntrySummary? =
+    selectedShearingSession(state)?.entries?.firstOrNull { it.id == state.editingShearingEntryId }
+
 private fun selectShearingSessionForDetail(state: FieldUiState, sessionId: String): FieldUiState {
     val session = state.snapshot?.shearingSessions?.firstOrNull { it.id == sessionId }
     val baleCode = state.snapshot?.shearingBaleCodes
         ?.firstOrNull { it.active && it.species == session?.species }
     return state.copy(
         selectedShearingSessionId = sessionId,
+        editingShearingEntryId = "",
         selectedShearingBaleCodeId = baleCode?.id.orEmpty(),
         baleCodeSpecies = session?.species ?: state.baleCodeSpecies,
         currentScreen = AppScreen.ShearingSessionDetail,
+    )
+}
+
+private fun startNewShearingEntry(state: FieldUiState): FieldUiState {
+    val session = selectedShearingSession(state)
+    val firstGroup = shearingAnimalGroupOptions(state, session?.species.orEmpty()).firstOrNull()
+    val firstShearer = state.snapshot?.shearers?.firstOrNull { it.active }
+    return state.copy(
+        currentScreen = AppScreen.ShearingEntry,
+        editingShearingEntryId = "",
+        selectedShearerId = state.selectedShearerId.takeIf { selected ->
+            state.snapshot?.shearers?.any { it.active && it.id == selected } == true
+        } ?: firstShearer?.id.orEmpty(),
+        selectedAnimalGroupTypeId = state.selectedAnimalGroupTypeId.takeIf { selected ->
+            firstGroup != null && shearingAnimalGroupOptions(state, session?.species.orEmpty()).any { it.id == selected }
+        } ?: firstGroup?.id.orEmpty(),
+        shearingWorkDate = LocalDate.now().toString(),
+        shearingQuantity = "",
+        shearingNote = "",
+    )
+}
+
+private fun selectShearingEntryForEdit(state: FieldUiState, entryId: String): FieldUiState {
+    val entry = selectedShearingSession(state)?.entries?.firstOrNull { it.id == entryId }
+        ?: return state.copy(statusMessage = "Choose a shearing count row to edit.")
+    return state.copy(
+        currentScreen = AppScreen.ShearingEntry,
+        editingShearingEntryId = entry.id,
+        selectedShearerId = entry.shearerId,
+        selectedAnimalGroupTypeId = entry.animalGroupTypeId,
+        shearingWorkDate = entry.workDate,
+        shearingQuantity = entry.quantity.toString(),
+        shearingNote = entry.note.orEmpty(),
     )
 }
 

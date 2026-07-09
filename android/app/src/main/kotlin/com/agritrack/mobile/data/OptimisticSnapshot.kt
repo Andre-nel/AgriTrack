@@ -26,6 +26,7 @@ internal fun FarmSnapshot.withOptimisticCommands(commands: JSONArray): FarmSnaps
             "paddock_event.create" -> changed = applyPaddockEventCreate(json, command, payload) || changed
             "water_asset_event.create" -> changed = applyWaterAssetEventCreate(json, command, payload) || changed
             "fence_event.create" -> changed = applyFenceEventCreate(json, command, payload) || changed
+            "incident.create" -> changed = applyIncidentCreate(json, command, payload) || changed
             "stock_count.record" -> {
                 if (applyStockCount(json, command, payload)) {
                     changed = true
@@ -57,6 +58,7 @@ internal fun FarmSnapshot.withOptimisticCommands(commands: JSONArray): FarmSnaps
             "shearing_session.create" -> changed = applyShearingSessionCreate(json, command, payload) || changed
             "shearing_session.update" -> changed = applyShearingSessionUpdate(json, payload) || changed
             "shearing_entry.record" -> changed = applyShearingEntryRecord(json, command, payload) || changed
+            "shearing_entry.delete" -> changed = applyShearingEntryDelete(json, payload) || changed
             "shearing_bale_code.upsert" -> changed = applyShearingBaleCodeUpsert(json, command, payload) || changed
             "shearing_bale.record" -> changed = applyShearingBaleRecord(json, command, payload) || changed
             "shearing_bale.delete" -> changed = applyShearingBaleDelete(json, payload) || changed
@@ -227,6 +229,48 @@ private fun applyFenceEventCreate(json: JSONObject, command: JSONObject, payload
             .put("pending_sync", true),
     )
     conditionAfter?.let { updateFenceCondition(json, fenceSectionId, it) }
+    return true
+}
+
+private fun applyIncidentCreate(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
+    val occurredOn = payload.optString("occurred_on")
+    val category = payload.optString("category").trim()
+    val note = payload.optString("note", payload.optString("description")).trim()
+    if (occurredOn.isBlank() || category.isBlank() || note.isBlank()) {
+        return false
+    }
+    val incidentId = pendingId(command, "incident")
+    val tags = copyArray(payload.optJSONArray("tags"))
+    prependObject(
+        json,
+        "incidents",
+        JSONObject()
+            .put("id", incidentId)
+            .put("farm_id", command.optString("farm_id"))
+            .put("occurred_on", occurredOn)
+            .put("category", category)
+            .put("note", note)
+            .put("tags", copyArray(tags))
+            .put("reported_by", payload.optString("reported_by", "Mobile user"))
+            .put("pending_sync", true),
+    )
+    prependObject(
+        json,
+        "calendar_items",
+        JSONObject()
+            .put("kind", "incident")
+            .put("date", occurredOn)
+            .put("source_id", incidentId)
+            .put("incident_id", incidentId)
+            .put("title", category)
+            .put("description", note)
+            .put("badge_text", "Incident")
+            .put("stage", "incident")
+            .put("stage_label", "Incident")
+            .put("tags", copyArray(tags))
+            .put("entity_links", JSONArray())
+            .put("pending_sync", true),
+    )
     return true
 }
 
@@ -903,7 +947,13 @@ private fun applyShearingEntryRecord(json: JSONObject, command: JSONObject, payl
     val quantity = payload.optInt("quantity", -1)
     if (quantity < 0) return false
     val entries = ensureArray(session, "entries")
-    val existingIndex = findShearingEntryIndex(entries, workDate, shearerId, groupId)
+    val entryId = payload.optString("id", payload.optString("entry_id"))
+    val entryIdIndex = findShearingEntryIndexById(entries, entryId)
+    val keyedIndex = findShearingEntryIndex(entries, workDate, shearerId, groupId)
+    if (entryIdIndex >= 0 && keyedIndex >= 0 && keyedIndex != entryIdIndex) {
+        return false
+    }
+    val existingIndex = if (entryIdIndex >= 0) entryIdIndex else keyedIndex
     if (quantity == 0) {
         if (existingIndex >= 0) {
             val retained = JSONArray()
@@ -927,7 +977,7 @@ private fun applyShearingEntryRecord(json: JSONObject, command: JSONObject, payl
             .put("sex", "mixed")
             .put("age_class", "adult")
     val entry = JSONObject()
-        .put("id", payload.optString("id").ifBlank { pendingId(command, "shearing-entry") })
+        .put("id", entryId.ifBlank { pendingId(command, "shearing-entry") })
         .put("session_id", session.optString("id"))
         .put("work_date", workDate)
         .put("shearer_id", shearerId)
@@ -943,6 +993,28 @@ private fun applyShearingEntryRecord(json: JSONObject, command: JSONObject, payl
     } else {
         entries.put(entry)
     }
+    rebuildShearingSessionTotals(session, json)
+    session.put("pending_sync", true)
+    return true
+}
+
+private fun applyShearingEntryDelete(json: JSONObject, payload: JSONObject): Boolean {
+    val session = findObjectById(json.optJSONArray("shearing_sessions"), payload.optString("session_id")) ?: return false
+    val entryId = payload.optString("entry_id", payload.optString("id"))
+    if (entryId.isBlank()) return false
+    val entries = ensureArray(session, "entries")
+    val retained = JSONArray()
+    var removed = false
+    for (index in 0 until entries.length()) {
+        val entry = entries.optJSONObject(index) ?: continue
+        if (entry.optString("id") == entryId) {
+            removed = true
+        } else {
+            retained.put(entry)
+        }
+    }
+    if (!removed) return false
+    session.put("entries", retained)
     rebuildShearingSessionTotals(session, json)
     session.put("pending_sync", true)
     return true
@@ -1028,6 +1100,17 @@ private fun applyShearingBaleDelete(json: JSONObject, payload: JSONObject): Bool
     rebuildShearingBaleMoney(session, json)
     session.put("pending_sync", true)
     return true
+}
+
+private fun findShearingEntryIndexById(entries: JSONArray, entryId: String): Int {
+    if (entryId.isBlank()) return -1
+    for (index in 0 until entries.length()) {
+        val entry = entries.optJSONObject(index) ?: continue
+        if (entry.optString("id") == entryId) {
+            return index
+        }
+    }
+    return -1
 }
 
 private fun findShearingEntryIndex(entries: JSONArray, workDate: String, shearerId: String, groupId: String): Int {

@@ -9,6 +9,7 @@ from app.models import (
     Farm,
     Mob,
     SimulatorExpense,
+    SimulatorFarm,
     SimulatorRevenueAssumption,
     SimulatorScenario,
     SimulatorStockDetail,
@@ -189,6 +190,98 @@ def test_simulator_expense_recurrence_and_zero_interest_loan_schedule(app):
         assert SimulatorService.expense_annual_amount(yearly) == Decimal("500.00")
         assert SimulatorService.loan_payment_amount(loan) == Decimal("1000.00")
         assert SimulatorService.expense_annual_amount(loan) == Decimal("12000.00")
+
+
+def test_simulator_equity_forecast_sums_farm_values_profit_and_liabilities(app):
+    with app.app_context():
+        north = _farm("Equity North")
+        south = _farm("Equity South")
+        scenario = SimulatorScenario(name="Equity Case", projection_year=2026)
+        db.session.add(scenario)
+        db.session.flush()
+        north_target = SimulatorFarm(
+            scenario_id=scenario.id,
+            farm_id=north.id,
+            name=north.name,
+            initial_farm_value=Decimal("1000.00"),
+            farm_value_inflation_rate=Decimal("10.0000"),
+        )
+        south_target = SimulatorFarm(
+            scenario_id=scenario.id,
+            farm_id=south.id,
+            name=south.name,
+            initial_farm_value=Decimal("500.00"),
+            farm_value_inflation_rate=Decimal("0.0000"),
+        )
+        db.session.add_all([north_target, south_target])
+        db.session.flush()
+        db.session.add_all(
+            [
+                SimulatorRevenueAssumption(
+                    scenario_id=scenario.id,
+                    species="Cattle",
+                    breed="Bonsmara",
+                    yearly_revenue_per_adult_female=Decimal("100.00"),
+                ),
+                SimulatorStockDetail(
+                    scenario_id=scenario.id,
+                    simulator_farm_id=north_target.id,
+                    farm_id=north.id,
+                    species="Cattle",
+                    breed="Bonsmara",
+                    adult_female_count=10,
+                ),
+                SimulatorExpense(
+                    scenario_id=scenario.id,
+                    category_code="loan",
+                    label="Small loan",
+                    expense_type="loan",
+                    loan_principal=Decimal("120.00"),
+                    annual_interest_rate=Decimal("0.0000"),
+                    remaining_term_years=Decimal("2.00"),
+                    payment_interval_months=12,
+                    first_payment_month=1,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        projection = SimulatorService.build_projection(scenario)
+        rows = projection["overall_equity_forecast"]["rows"]
+
+        assert rows[0]["total_assets"] == Decimal("1500.00")
+        assert rows[0]["cumulative_profit_loss"] == Decimal("940.00")
+        assert rows[0]["liabilities_outstanding"] == Decimal("60.00")
+        assert rows[0]["cumulative_equity"] == Decimal("2380.00")
+
+        assert rows[1]["total_assets"] == Decimal("1600.00")
+        assert rows[1]["cumulative_profit_loss"] == Decimal("1880.00")
+        assert rows[1]["liabilities_outstanding"] == Decimal("0.00")
+        assert rows[1]["cumulative_equity"] == Decimal("3480.00")
+
+        assert rows[2]["total_assets"] == Decimal("1710.00")
+        assert rows[2]["cumulative_profit_loss"] == Decimal("2880.00")
+        assert rows[2]["cumulative_equity"] == Decimal("4590.00")
+        assert projection["overall_equity_forecast"]["chart_payload"]["datasets"][0]["key"] == "cumulative_profit_loss"
+        assert projection["overall_equity_forecast"]["chart_payload"]["datasets"][1]["key"] == "cumulative_equity"
+
+
+def test_simulator_interest_bearing_loan_remaining_principal(app):
+    with app.app_context():
+        loan = SimulatorExpense(
+            category_code="loan",
+            label="Interest loan",
+            expense_type="loan",
+            loan_principal=Decimal("1200.00"),
+            annual_interest_rate=Decimal("12.0000"),
+            remaining_term_years=Decimal("2.00"),
+            payment_interval_months=12,
+            first_payment_month=1,
+        )
+
+        assert SimulatorService.loan_payment_amount(loan) == Decimal("710.04")
+        assert SimulatorService.loan_remaining_principal_after_year(loan, 0) == Decimal("633.96")
+        assert SimulatorService.loan_remaining_principal_after_year(loan, 1) == Decimal("0.00")
 
 
 def test_simulator_stock_crud_helpers_seed_and_clear_live_stock(app):

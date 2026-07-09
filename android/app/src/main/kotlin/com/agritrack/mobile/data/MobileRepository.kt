@@ -144,6 +144,16 @@ class MobileRepository(
         )
     }
 
+    fun queueIncident(
+        farmId: String,
+        occurredOn: String,
+        category: String,
+        note: String,
+        tags: List<String>,
+    ) {
+        fieldStore.enqueue(MobileCommand.incidentCreate(farmId, occurredOn, category, note, tags))
+    }
+
     fun queueStockCount(
         farmId: String,
         mobId: String,
@@ -328,12 +338,13 @@ class MobileRepository(
         animalGroupType: AnimalGroupTypeSummary,
         quantity: Int,
         note: String,
+        entryId: String? = null,
     ): String {
-        val entryId = UUID.randomUUID().toString()
+        val commandEntryId = entryId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
         fieldStore.enqueue(
             MobileCommand.shearingEntryRecord(
                 farmId = farmId,
-                entryId = entryId,
+                entryId = commandEntryId,
                 sessionId = sessionId,
                 workDate = workDate,
                 shearerId = shearerId,
@@ -342,7 +353,11 @@ class MobileRepository(
                 note = note,
             )
         )
-        return entryId
+        return commandEntryId
+    }
+
+    fun queueShearingEntryDelete(farmId: String, sessionId: String, entryId: String) {
+        fieldStore.enqueue(MobileCommand.shearingEntryDelete(farmId, sessionId, entryId))
     }
 
     fun queueShearingBaleCode(

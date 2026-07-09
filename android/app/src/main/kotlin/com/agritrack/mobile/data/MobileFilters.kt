@@ -92,7 +92,6 @@ fun filterCalendarItems(items: List<CalendarItemSummary>, filters: CalendarFilte
     val startDate = filters.startDate.toNullableDate()
     val endDate = filters.endDate.toNullableDate()
     val taskOnlyFilterActive = filters.assignee.isNotBlank() ||
-        filters.tag.isNotBlank() ||
         filters.paddockId.isNotBlank() ||
         filters.waterAssetId.isNotBlank() ||
         filters.mobId.isNotBlank()

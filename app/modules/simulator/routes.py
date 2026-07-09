@@ -92,6 +92,7 @@ def detail(scenario_id: str):
         projection=projection,
         expense_rows=expense_rows,
         farm_options=farm_options,
+        farm_value_rows=SimulatorService.scenario_farm_value_rows(scenario),
         species_options=SimulatorService.species_options(),
         expense_categories=SimulatorService.expense_category_options(),
         recurrence_options=SimulatorService.recurrence_options(),

@@ -181,6 +181,7 @@ Important response fields:
       "paddock_event.create",
       "water_asset_event.create",
       "fence_event.create",
+      "incident.create",
       "stock_count.record",
       "mob.move",
       "mob.transfer",
@@ -188,6 +189,7 @@ Important response fields:
       "shearing_session.create",
       "shearing_session.update",
       "shearing_entry.record",
+      "shearing_entry.delete",
       "shearing_bale_code.upsert",
       "shearing_bale.record",
       "shearing_bale.delete",
@@ -235,6 +237,7 @@ Response groups:
   "mob_events": [],
   "paddock_events": [],
   "water_asset_events": [],
+  "incidents": [],
   "water_asset_state_history": [],
   "water_assets": [],
   "water_connections": [],
@@ -253,8 +256,8 @@ Response groups:
 ```
 
 The snapshot is the Android read model for one selected farm. It represents
-current working state: open tasks, upcoming calendar items, current grazing
-allocation, current water state, recent rainfall, and decision hints. It also
+current working state: open tasks, upcoming calendar items, incident notes,
+current grazing allocation, current water state, recent rainfall, and decision hints. It also
 includes recent structured water asset state history. The migration that adds
 history creates one `baseline` row per existing water asset using the state at
 upgrade time; the server does not synthesize older state rows.
@@ -402,13 +405,15 @@ Supported command types:
 - `paddock_event.create`: `paddock_id`, `description`, optional `tags`, optional `event_at`.
 - `water_asset_event.create`: `water_asset_id`, `description`, optional `tags`, optional `event_at`.
 - `fence_event.create`: `fence_section_id`, `description`, optional `event_type`, optional `tags`, optional `condition_after`, optional `materials`, optional `event_at`.
+- `incident.create`: `occurred_on`, `category`, `note`, optional `tags`, optional `reported_by`.
 - `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group.
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
 - `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.
 - `shearer.create`: client-generated `id`, `name`, optional `active`.
 - `shearing_session.create`: client-generated `id`, `name`, `species` (`Sheep` or `Goat`), `start_date`, optional `end_date`, `lootjie_rate`, optional `notes`.
 - `shearing_session.update`: `session_id`, and at least one editable field: `name`, `species`, `start_date`, `end_date`, `lootjie_rate`, `notes`, or `status`.
-- `shearing_entry.record`: `session_id`, `work_date`, `shearer_id`, `quantity`, optional `note`, plus either `animal_group_type_id` or an `animal_group_type` object with `species`, `breed`, `sex`, and `age_class`. Quantity `0` removes the matching daily row.
+- `shearing_entry.record`: `session_id`, `work_date`, `shearer_id`, `quantity`, optional client-generated or existing `id`, optional `note`, plus either `animal_group_type_id` or an `animal_group_type` object with `species`, `breed`, `sex`, and `age_class`. Reusing an existing `id` updates that row, including date, shearer, animal type, count, and note. Quantity `0` removes the matching daily row.
+- `shearing_entry.delete`: `session_id` and `entry_id`.
 - `shearing_bale_code.upsert`: client-generated `id`, `species` (`Sheep` or `Goat`), `code`, optional `active`, optional `line_type`, `age_group`, `fineness_grade`, `length_code`, `fineness_micron`, `clean_yield_percent`, `style_character`, `consistency`, `color`, `vegetable_matter`, `fault`, `description`, and `notes`.
 - `shearing_bale.record`: client-generated `id`, `session_id`, positive `weight_kg`, optional `bale_code_id`, optional ad-hoc `code_text`, optional `bale_number`, optional `price_per_kg`, optional `total_price`, and optional `notes`. If only one price field is supplied, the server calculates the other; both fields may be blank until sale prices are known.
 - `shearing_bale.delete`: `session_id` and `bale_id`.

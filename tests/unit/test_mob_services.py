@@ -1,6 +1,9 @@
+from datetime import datetime, timezone
+
 from app.extensions import db
 from app.models import AnimalGroupBalance, AnimalGroupType, Farm, Mob, MobEvent, StockLedgerEntry
 from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_balance_line_from_form
+from app.services.movement_service import MovementService
 
 
 def _create_mob_with_balance(head_count: int = 5):
@@ -105,3 +108,52 @@ def test_update_mob_balance_line_from_form_updates_balance_and_records_event(app
         assert StockLedgerEntry.query.count() == 1
         assert event is not None
         assert "body condition improved" in event.description
+
+
+def test_transfer_stock_between_mobs_records_log_notes_for_both_mobs(app):
+    with app.app_context():
+        farm = Farm(name="Transfer Log Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        source = Mob(farm_id=farm.id, name="Source Mob", status="active")
+        destination = Mob(farm_id=farm.id, name="Destination Mob", status="active")
+        group_type = AnimalGroupType(
+            species="Sheep",
+            breed="Merino",
+            sex="ewe",
+            age_class="adult",
+        )
+        db.session.add_all([source, destination, group_type])
+        db.session.flush()
+        db.session.add(
+            AnimalGroupBalance(
+                mob_id=source.id,
+                animal_group_type_id=group_type.id,
+                head_count=5,
+            )
+        )
+        db.session.commit()
+
+        transfer_at = datetime(2026, 5, 18, 9, 30, tzinfo=timezone.utc)
+        MovementService.transfer_stock_between_mobs(
+            source_mob=source,
+            destination_mob=destination,
+            transfers=[{"animal_group_type_id": str(group_type.id), "quantity": 2}],
+            note="Moved weaners after count",
+            when=transfer_at,
+        )
+        db.session.commit()
+
+        source_event = MobEvent.query.filter_by(mob_id=source.id).one()
+        destination_event = MobEvent.query.filter_by(mob_id=destination.id).one()
+
+        assert source_event.event_at == transfer_at.replace(tzinfo=None)
+        assert destination_event.event_at == transfer_at.replace(tzinfo=None)
+        assert source_event.tags_csv == "stock,transfer out,stock adjustment"
+        assert destination_event.tags_csv == "stock,transfer in,stock adjustment"
+        assert "Stock transfer out to Destination Mob" in source_event.description
+        assert "Stock transfer in from Source Mob" in destination_event.description
+        assert "2 head Sheep | Merino | ewe | adult" in source_event.description
+        assert "2 head Sheep | Merino | ewe | adult" in destination_event.description
+        assert "Moved weaners after count" in source_event.description
+        assert "Moved weaners after count" in destination_event.description

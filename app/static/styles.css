@@ -293,6 +293,18 @@ textarea {
   color: #6f4610;
 }
 
+.btn-incident {
+  border-color: #8b5569;
+  background: #faedf1;
+  color: #74394f;
+}
+
+.btn-incident:hover,
+.btn-incident:focus-visible {
+  background: #f5dce5;
+  color: #5d2d3f;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -2194,6 +2206,12 @@ tr.is-selected-fence {
   color: #7b5a16;
 }
 
+.calendar-item-incident,
+.calendar-entry.calendar-item-incident {
+  background: #faedf1;
+  color: #74394f;
+}
+
 .calendar-entry {
   border-radius: 10px;
   padding: 0.5rem 0.55rem;
@@ -2507,6 +2525,23 @@ tr.is-selected-fence {
 
 .calendar-day-detail-list {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.incident-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.incident-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: #fcfdfb;
+}
+
+.incident-card a {
+  color: var(--text);
+  text-decoration: none;
 }
 
 @media (max-width: 760px) {
@@ -2860,6 +2895,30 @@ tr.is-selected-fence {
   gap: 0.45rem 0.8rem;
 }
 
+.simulator-farm-value-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.simulator-farm-value-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.3fr) repeat(2, minmax(150px, 1fr));
+  align-items: end;
+  gap: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed #d9e3de;
+}
+
+.simulator-farm-value-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.simulator-farm-value-row strong,
+.simulator-farm-value-row span {
+  display: block;
+}
+
 .simulator-fold-card {
   margin-bottom: 1rem;
 }
@@ -2957,12 +3016,27 @@ tr.is-selected-fence {
   white-space: nowrap;
 }
 
+.simulator-chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1rem;
+  margin: 1rem 0 0.75rem;
+}
+
+.simulator-equity-chart-wrap {
+  min-height: 340px;
+}
+
 .simulator-forecast-table-wrap {
   margin-top: 1rem;
 }
 
 .simulator-forecast-table {
   min-width: 700px;
+}
+
+.simulator-equity-table {
+  min-width: 820px;
 }
 
 .simulator-list-table-wrap {
@@ -3031,6 +3105,10 @@ tr.is-selected-fence {
 
   .grid-two,
   .grid-three {
+    grid-template-columns: 1fr;
+  }
+
+  .simulator-farm-value-row {
     grid-template-columns: 1fr;
   }
 

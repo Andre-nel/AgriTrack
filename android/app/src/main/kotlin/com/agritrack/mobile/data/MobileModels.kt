@@ -304,6 +304,16 @@ data class FenceEventSummary(
     val attachments: List<NoteAttachmentSummary>,
 )
 
+data class IncidentSummary(
+    val id: String,
+    val farmId: String,
+    val occurredOn: String,
+    val category: String,
+    val note: String,
+    val tags: List<String>,
+    val reportedBy: String,
+)
+
 data class WaterAssetStateHistorySummary(
     val id: String,
     val waterAssetId: String,
@@ -370,6 +380,7 @@ data class CalendarItemSummary(
     val sourceId: String?,
     val taskId: String?,
     val activityId: String?,
+    val incidentId: String?,
     val title: String,
     val description: String?,
     val badgeText: String?,
@@ -559,6 +570,7 @@ data class FarmSnapshot(
     val waterAssetEventCount: Int,
     val fenceSectionCount: Int,
     val fenceEventCount: Int,
+    val incidentCount: Int,
     val waterAssetStateHistoryCount: Int,
     val shearerCount: Int,
     val shearingBaleCodeCount: Int,
@@ -578,6 +590,7 @@ data class FarmSnapshot(
     val waterAssetEvents: List<WaterAssetEventSummary>,
     val fenceSections: List<FenceSectionSummary>,
     val fenceEvents: List<FenceEventSummary>,
+    val incidents: List<IncidentSummary>,
     val waterAssetStateHistory: List<WaterAssetStateHistorySummary>,
     val shearers: List<ShearerSummary>,
     val shearingBaleCodes: List<ShearingBaleCodeSummary>,
@@ -604,6 +617,7 @@ data class FarmSnapshot(
             val waterAssetEvents = parseWaterAssetEvents(json.optJSONArray("water_asset_events") ?: JSONArray())
             val fenceSections = parseFenceSections(json.optJSONArray("fence_sections") ?: JSONArray())
             val fenceEvents = parseFenceEvents(json.optJSONArray("fence_events") ?: JSONArray())
+            val incidents = parseIncidents(json.optJSONArray("incidents") ?: JSONArray())
             val waterAssetStateHistory = parseWaterAssetStateHistory(json.optJSONArray("water_asset_state_history") ?: JSONArray())
             val shearers = parseShearers(json.optJSONArray("shearers") ?: JSONArray())
             val shearingBaleCodes = parseShearingBaleCodes(json.optJSONArray("shearing_bale_codes") ?: JSONArray())
@@ -628,6 +642,7 @@ data class FarmSnapshot(
                 waterAssetEventCount = waterAssetEvents.size,
                 fenceSectionCount = fenceSections.size,
                 fenceEventCount = fenceEvents.size,
+                incidentCount = incidents.size,
                 waterAssetStateHistoryCount = waterAssetStateHistory.size,
                 shearerCount = shearers.size,
                 shearingBaleCodeCount = shearingBaleCodes.size,
@@ -647,6 +662,7 @@ data class FarmSnapshot(
                 waterAssetEvents = waterAssetEvents,
                 fenceSections = fenceSections,
                 fenceEvents = fenceEvents,
+                incidents = incidents,
                 waterAssetStateHistory = waterAssetStateHistory,
                 shearers = shearers,
                 shearingBaleCodes = shearingBaleCodes,
@@ -966,6 +982,23 @@ data class FarmSnapshot(
                         materials = parseFenceEventMaterials(event.optJSONArray("materials") ?: JSONArray()),
                         attachmentCount = event.optInt("attachment_count", event.optJSONArray("attachments")?.length() ?: 0),
                         attachments = parseNoteAttachments(event.optJSONArray("attachments") ?: JSONArray()),
+                    )
+                )
+            }
+        }
+
+        private fun parseIncidents(json: JSONArray): List<IncidentSummary> = buildList {
+            for (index in 0 until json.length()) {
+                val incident = json.getJSONObject(index)
+                add(
+                    IncidentSummary(
+                        id = incident.optString("id"),
+                        farmId = incident.optString("farm_id"),
+                        occurredOn = incident.optString("occurred_on"),
+                        category = incident.optString("category", "Incident"),
+                        note = incident.optString("note"),
+                        tags = incident.optJSONArray("tags").strings(),
+                        reportedBy = incident.optString("reported_by", "Mobile user"),
                     )
                 )
             }
@@ -1291,6 +1324,7 @@ data class FarmSnapshot(
                         sourceId = item.optNullableString("source_id"),
                         taskId = item.optNullableString("task_id"),
                         activityId = item.optNullableString("activity_id"),
+                        incidentId = item.optNullableString("incident_id"),
                         title = item.optString("title", "Calendar item"),
                         description = item.optNullableString("description"),
                         badgeText = item.optNullableString("badge_text"),

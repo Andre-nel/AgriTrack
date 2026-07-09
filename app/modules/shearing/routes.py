@@ -323,11 +323,12 @@ def delete_bale(session_id: str, bale_id: str):
 
 @bp.post("/sessions/<session_id>/entries/<entry_id>/delete")
 def delete_entry(session_id: str, entry_id: str):
-    entry = ShearingEntry.query.join(ShearingSession).filter(
-        ShearingEntry.id == entry_id,
-        ShearingSession.id == session_id,
-    ).first_or_404()
-    db.session.delete(entry)
-    db.session.commit()
-    flash("Shearing count deleted", "success")
+    session = _get_session_or_404(session_id)
+    try:
+        ShearingService.delete_entry(session=session, entry_id=entry_id)
+        db.session.commit()
+        flash("Shearing count deleted", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
     return redirect(url_for("shearing.detail", session_id=session_id))

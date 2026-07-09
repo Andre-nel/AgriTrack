@@ -8,7 +8,8 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db
-from app.models import CalendarActivity, CalendarActivityException, Task, TaskSpace
+from app.models import CalendarActivity, CalendarActivityException, Incident, Task, TaskSpace
+from app.services.incident_service import IncidentService
 from app.services.task_service import TASK_PRIORITY_LABELS, TASK_STATUS_LABELS, TaskService
 
 CALENDAR_REPEAT_UNITS = ("days", "weeks", "months", "years")
@@ -614,6 +615,7 @@ class CalendarService:
                     "source_id": str(task.id),
                     "task_id": str(task.id),
                     "activity_id": None,
+                    "incident_id": None,
                     "title": task.heading,
                     "description": task.description,
                     "subtitle": f"{task.display_key} | {farm_name}",
@@ -664,6 +666,58 @@ class CalendarService:
         return items
 
     @classmethod
+    def _incident_items(
+        cls,
+        *,
+        range_start: date,
+        range_end: date,
+        farm_id: str | None = None,
+    ) -> list[dict]:
+        incident_query = Incident.query.options(selectinload(Incident.farm)).filter(
+            Incident.occurred_on >= range_start,
+            Incident.occurred_on <= range_end,
+        )
+        if farm_id:
+            incident_query = incident_query.filter(Incident.farm_id == farm_id)
+
+        items = []
+        for incident in incident_query.order_by(
+            Incident.occurred_on.asc(),
+            Incident.category.asc(),
+            Incident.created_at.asc(),
+        ).all():
+            farm_name = incident.farm.name if incident.farm else "Unassigned"
+            tags = IncidentService.tags_from_csv(incident.tags_csv)
+            tag_text = ", ".join(tags) if tags else "No tags"
+            items.append(
+                {
+                    "kind": "incident",
+                    "date": incident.occurred_on,
+                    "source_id": str(incident.id),
+                    "task_id": None,
+                    "activity_id": None,
+                    "incident_id": str(incident.id),
+                    "title": incident.category,
+                    "description": incident.note,
+                    "subtitle": f"{farm_name} | {tag_text}",
+                    "farm_name": farm_name,
+                    "detail_url": url_for("incidents.detail", incident_id=incident.id),
+                    "create_task_url": None,
+                    "duration_text": None,
+                    "badge_text": "Incident",
+                    "stage": "incident",
+                    "stage_label": "Incident",
+                    "assignee_name": None,
+                    "tags": tags,
+                    "priority": None,
+                    "priority_label": None,
+                    "entity_links": [],
+                    "css_class": "calendar-item-incident",
+                }
+            )
+        return items
+
+    @classmethod
     def build_calendar_data(
         cls,
         *,
@@ -708,6 +762,7 @@ class CalendarService:
                             "source_id": str(activity.id),
                             "task_id": None,
                             "activity_id": str(activity.id),
+                            "incident_id": None,
                             "title": activity.title,
                             "description": activity.description,
                             "subtitle": f"{duration_text} | {cls.recurrence_summary(activity)}",
@@ -759,6 +814,10 @@ class CalendarService:
         for item in task_items:
             items_by_date[item["date"]].append(item)
 
+        incident_items = cls._incident_items(range_start=range_start, range_end=range_end, farm_id=farm_id)
+        for item in incident_items:
+            items_by_date[item["date"]].append(item)
+
         for day_items in items_by_date.values():
             day_items.sort(key=lambda item: (item["kind"], item["title"].lower(), item["farm_name"].lower()))
         for day_occupancy in occupancy_by_date.values():
@@ -777,6 +836,7 @@ class CalendarService:
                 "activity_count": activity_occurrence_count,
                 "recurring_series_count": len(recurring_series_ids),
                 "task_count": len(task_items),
-                "total_count": activity_occurrence_count + len(task_items),
+                "incident_count": len(incident_items),
+                "total_count": activity_occurrence_count + len(task_items) + len(incident_items),
             },
         }

@@ -41,6 +41,7 @@
   <summary class="simulator-card-summary"><span>Scenario Details</span></summary>
   <div class="simulator-fold-body">
   <form method="post" action="{{ url_for('simulator.edit_scenario', scenario_id=scenario.id) }}" class="grid-form">
+    <input type="hidden" name="farm_values_submitted" value="1" />
     <div class="grid-two">
       <label>Name
         <input name="name" value="{{ scenario.name }}" required />
@@ -57,6 +58,27 @@
         <input name="expense_inflation_rate" inputmode="decimal" value="{{ scenario.expense_inflation_rate or 0 }}" />
       </label>
     </div>
+    <fieldset class="simulator-fieldset simulator-farm-value-fieldset">
+      <legend>Farm Values</legend>
+      <div class="simulator-farm-value-list">
+        {% for farm in farm_value_rows %}
+        <div class="simulator-farm-value-row">
+          <div>
+            <strong>{{ farm.name }}</strong>
+            {% if farm.is_future %}<span class="muted">Future farm</span>{% endif %}
+          </div>
+          <label>Initial Farm Value
+            <input name="initial_farm_value__{{ farm.id }}" inputmode="decimal" value="{{ farm.initial_farm_value }}" />
+          </label>
+          <label>Farm Value Inflation %
+            <input name="farm_value_inflation_rate__{{ farm.id }}" inputmode="decimal" value="{{ farm.farm_value_inflation_rate }}" />
+          </label>
+        </div>
+        {% else %}
+        <p class="muted">No scenario farms yet.</p>
+        {% endfor %}
+      </div>
+    </fieldset>
     <label>Notes
       <textarea name="notes" rows="3">{{ scenario.notes or "" }}</textarea>
     </label>
@@ -142,6 +164,56 @@
           <td>{{ format_currency(row["expenses"]) }}</td>
           <td>{{ format_currency(row["net"]) }}</td>
           <td><span class="badge {{ row['health']['class'] }}">{{ row["health"]["label"] }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  </div>
+</details>
+
+<details class="card simulator-fold-card" open>
+  <summary class="simulator-card-summary"><span>Overall Equity Forecast</span></summary>
+  <div class="simulator-fold-body">
+  <div class="row-actions simulator-section-header">
+    <div>
+      <p class="muted">
+        {{ projection["overall_equity_forecast"]["horizon_years"] }} years, using per-farm values and farm value inflation.
+      </p>
+    </div>
+  </div>
+  <div class="simulator-chart-controls" aria-label="Equity forecast lines">
+    <label class="check-row">
+      <input type="checkbox" data-equity-series-toggle value="cumulative_profit_loss" checked />
+      Cumulative Profit/Loss
+    </label>
+    <label class="check-row">
+      <input type="checkbox" data-equity-series-toggle value="cumulative_equity" checked />
+      Cumulative Equity
+    </label>
+  </div>
+  <div class="analytics-chart-wrap simulator-equity-chart-wrap">
+    <canvas id="simulatorEquityForecastChart" role="img" aria-label="Overall equity forecast line graph"></canvas>
+  </div>
+  <div class="cash-flow-table-wrap simulator-forecast-table-wrap">
+    <table class="cash-entry-table simulator-table simulator-equity-table">
+      <thead>
+        <tr>
+          <th>Year</th>
+          <th>Total Assets</th>
+          <th>Cumulative Profit/Loss</th>
+          <th>Liabilities Outstanding</th>
+          <th>Cumulative Equity</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in projection["overall_equity_forecast"]["rows"] %}
+        <tr>
+          <td>{{ row["year"] }}</td>
+          <td>{{ format_currency(row["total_assets"]) }}</td>
+          <td>{{ format_currency(row["cumulative_profit_loss"]) }}</td>
+          <td>{{ format_currency(row["liabilities_outstanding"]) }}</td>
+          <td>{{ format_currency(row["cumulative_equity"]) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -532,6 +604,11 @@
 {% endblock %}
 
 {% block scripts %}
+{% if projection["overall_equity_forecast"]["rows"] %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>
+<script id="simulatorEquityForecastData" type="application/json">{{ projection["overall_equity_forecast"]["chart_payload"] | tojson }}</script>
+<script src="{{ url_for('static', filename='simulator_equity_forecast.js') }}"></script>
+{% endif %}
 <script>
   (function () {
     function closeDialog(dialog) {

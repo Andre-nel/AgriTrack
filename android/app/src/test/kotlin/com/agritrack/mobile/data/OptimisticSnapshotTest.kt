@@ -29,6 +29,7 @@ class OptimisticSnapshotTest {
             .put(MobileCommand.fenceUpdate("farm-1", "fence-1", "bad", "Loose bottom wire", electricWire = true).toJson())
             .put(MobileCommand.fenceNote("farm-1", "fence-1", "Packed stones under the fence", listOf("fence"), conditionAfter = "fair").toJson())
             .put(MobileCommand.rainfall("farm-1", "2026-05-31", 8.5, "Storm").toJson())
+            .put(MobileCommand.incidentCreate("farm-1", "2026-05-31", "Stock missing", "Two ewes missing", listOf("stock", "security")).toJson())
 
         val optimistic = base.withOptimisticCommands(commands)
 
@@ -49,6 +50,9 @@ class OptimisticSnapshotTest {
         assertEquals("fair", optimistic.fenceSections.first().condition)
         assertEquals(true, optimistic.fenceSections.first().electricWire)
         assertEquals("Packed stones under the fence", optimistic.fenceEvents.first().description)
+        assertEquals("Stock missing", optimistic.incidents.first().category)
+        assertEquals(listOf("stock", "security"), optimistic.incidents.first().tags)
+        assertEquals("incident", optimistic.calendarItems.first { it.incidentId == optimistic.incidents.first().id }.kind)
         assertEquals("fair", optimistic.mapFeatures.first { it.fenceSectionId == "fence-1" }.fenceCondition)
     }
 
@@ -284,6 +288,48 @@ class OptimisticSnapshotTest {
         assertEquals(0, removed.shearingSessions.first().entries.size)
         assertEquals(0, removed.shearingSessions.first().baleMoneyTotals.totalBales)
         assertEquals(0, removed.shearingSessions.first().bales.size)
+
+        val createSecondShearer = MobileCommand.shearerCreate("farm-1", "shearer-2", "Ben")
+        val correctAdultRam = MobileCommand.shearingEntryRecord(
+            farmId = "farm-1",
+            entryId = "entry-1",
+            sessionId = "session-1",
+            workDate = "2026-10-02",
+            shearerId = "shearer-2",
+            animalGroupType = AnimalGroupTypeSummary("group-2", "Sheep", "Dorper", "ewe", "adult"),
+            quantity = 7,
+            note = "Corrected",
+        )
+        val corrected = base.withOptimisticCommands(
+            JSONArray()
+                .put(createShearer.toJson())
+                .put(createSecondShearer.toJson())
+                .put(createSession.toJson())
+                .put(recordAdultRam.toJson())
+                .put(correctAdultRam.toJson())
+        )
+
+        val correctedSession = corrected.shearingSessions.first()
+        assertEquals(1, correctedSession.entries.size)
+        assertEquals("entry-1", correctedSession.entries.first().id)
+        assertEquals("2026-10-02", correctedSession.entries.first().workDate)
+        assertEquals("Ben", correctedSession.entries.first().shearerName)
+        assertEquals("Sheep Dorper ewe adult", correctedSession.entries.first().animalGroupType.label)
+        assertEquals(7, correctedSession.totalQuantity)
+        assertEquals(70.0, correctedSession.totalAmount, 0.0)
+
+        val deletedById = base.withOptimisticCommands(
+            JSONArray()
+                .put(createShearer.toJson())
+                .put(createSecondShearer.toJson())
+                .put(createSession.toJson())
+                .put(recordAdultRam.toJson())
+                .put(correctAdultRam.toJson())
+                .put(MobileCommand.shearingEntryDelete("farm-1", "session-1", "entry-1").toJson())
+        )
+
+        assertEquals(0, deletedById.shearingSessions.first().totalQuantity)
+        assertEquals(0, deletedById.shearingSessions.first().entries.size)
     }
 
     private fun fieldSnapshot(): FarmSnapshot =
@@ -404,6 +450,7 @@ class OptimisticSnapshotTest {
                     ),
                 )
                 .put("fence_events", JSONArray())
+                .put("incidents", JSONArray())
                 .put(
                     "tasks",
                     JSONArray().put(

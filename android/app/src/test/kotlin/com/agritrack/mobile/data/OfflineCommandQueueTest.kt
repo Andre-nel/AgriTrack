@@ -232,6 +232,27 @@ class OfflineCommandQueueTest {
     }
 
     @Test
+    fun incidentCommandShapesSupportedSyncPayload() {
+        val command = MobileCommand.incidentCreate(
+            farmId = "farm-1",
+            occurredOn = "2026-06-01",
+            category = "Stock missing",
+            note = "Two ewes missing from North Camp",
+            tags = listOf("stock", "security"),
+        )
+
+        val json = command.toJson()
+        val payload = json.getJSONObject("payload")
+
+        assertEquals("incident.create", json.getString("type"))
+        assertEquals("farm-1", json.getString("farm_id"))
+        assertEquals("2026-06-01", payload.getString("occurred_on"))
+        assertEquals("Stock missing", payload.getString("category"))
+        assertEquals("Two ewes missing from North Camp", payload.getString("note"))
+        assertEquals("security", payload.getJSONArray("tags").getString(1))
+    }
+
+    @Test
     fun stockCountCommandShapesSupportedSyncPayload() {
         val command = MobileCommand.stockCount(
             farmId = "farm-1",

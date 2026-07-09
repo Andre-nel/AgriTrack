@@ -150,6 +150,26 @@ class SimulatorService:
             for farm in cls.active_farms()
         ]
 
+    @classmethod
+    def scenario_farm_value_rows(cls, scenario: SimulatorScenario) -> list[dict]:
+        targets = sorted(
+            scenario.farm_targets,
+            key=lambda target: (target.display_name.lower(), str(target.id)),
+        )
+        return [
+            {
+                "id": str(target.id),
+                "name": target.display_name,
+                "is_future": target.farm_id is None,
+                "initial_farm_value": Decimal(str(target.initial_farm_value or 0)).quantize(
+                    MONEY_QUANT,
+                    rounding=ROUND_HALF_UP,
+                ),
+                "farm_value_inflation_rate": Decimal(str(target.farm_value_inflation_rate or 0)),
+            }
+            for target in targets
+        ]
+
     @staticmethod
     def _text(value: str | None, field_name: str, max_length: int, *, required: bool = True) -> str | None:
         normalized = " ".join((value or "").strip().split())
@@ -168,6 +188,23 @@ class SimulatorService:
     @staticmethod
     def parse_money(value: str | None, *, field_name: str) -> Decimal:
         return FinanceService.parse_money(value, field_name=field_name)
+
+    @staticmethod
+    def parse_non_negative_money(value: str | None, *, field_name: str) -> Decimal:
+        normalized = (value or "").strip().replace("R", "").replace(" ", "")
+        if not normalized:
+            return ZERO_DECIMAL
+        if "," in normalized and "." not in normalized:
+            normalized = normalized.replace(",", ".")
+        else:
+            normalized = normalized.replace(",", "")
+        try:
+            amount = Decimal(normalized)
+        except InvalidOperation as exc:
+            raise ValueError(f"{field_name} must be a valid amount") from exc
+        if amount < 0:
+            raise ValueError(f"{field_name} must be 0 or greater")
+        return amount.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
     @staticmethod
     def parse_decimal(value: str | None, *, field_name: str, allow_zero: bool = False) -> Decimal:
@@ -278,6 +315,8 @@ class SimulatorService:
                 scenario_id=scenario.id,
                 farm_id=str(farm.id),
                 name=farm.name,
+                initial_farm_value=ZERO_DECIMAL,
+                farm_value_inflation_rate=ZERO_DECIMAL,
             )
             db.session.add(target)
             targets.append(target)
@@ -298,6 +337,8 @@ class SimulatorService:
                 scenario_id=scenario.id,
                 farm_id=None,
                 name=future_name,
+                initial_farm_value=ZERO_DECIMAL,
+                farm_value_inflation_rate=ZERO_DECIMAL,
             )
             db.session.add(target)
             targets.append(target)
@@ -325,7 +366,22 @@ class SimulatorService:
             source.get("expense_inflation_rate"),
             field_name="Expense inflation rate",
         )
+        cls.update_scenario_farm_values(scenario, source)
         return scenario
+
+    @classmethod
+    def update_scenario_farm_values(cls, scenario: SimulatorScenario, source) -> None:
+        if not hasattr(source, "get") or not (source.get("farm_values_submitted") or "").strip():
+            return
+        for target in scenario.farm_targets:
+            target.initial_farm_value = cls.parse_non_negative_money(
+                source.get(f"initial_farm_value__{target.id}"),
+                field_name=f"{target.display_name} initial farm value",
+            )
+            target.farm_value_inflation_rate = cls.parse_percent(
+                source.get(f"farm_value_inflation_rate__{target.id}"),
+                field_name=f"{target.display_name} farm value inflation rate",
+            )
 
     @classmethod
     def upsert_revenue_assumption(cls, scenario: SimulatorScenario, source) -> SimulatorRevenueAssumption:
@@ -401,6 +457,8 @@ class SimulatorService:
             scenario_id=scenario.id,
             farm_id=str(farm.id),
             name=farm.name,
+            initial_farm_value=ZERO_DECIMAL,
+            farm_value_inflation_rate=ZERO_DECIMAL,
         )
         db.session.add(target)
         db.session.flush()
@@ -623,6 +681,11 @@ class SimulatorService:
                     "farm_id": str(target.farm_id) if target.farm_id else None,
                     "name": target.display_name,
                     "is_future": target.farm_id is None,
+                    "initial_farm_value": Decimal(str(target.initial_farm_value or 0)).quantize(
+                        MONEY_QUANT,
+                        rounding=ROUND_HALF_UP,
+                    ),
+                    "farm_value_inflation_rate": Decimal(str(target.farm_value_inflation_rate or 0)),
                 }
                 for target in targets
             ]
@@ -632,6 +695,8 @@ class SimulatorService:
                 "farm_id": str(farm.id),
                 "name": farm.name,
                 "is_future": False,
+                "initial_farm_value": ZERO_DECIMAL,
+                "farm_value_inflation_rate": ZERO_DECIMAL,
             }
             for farm in cls.active_farms()
         ]
@@ -739,6 +804,49 @@ class SimulatorService:
             month += interval_months
             scheduled += 1
         return (payment * Decimal(paid_in_year)).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+
+    @classmethod
+    def loan_remaining_principal_after_year(cls, expense: SimulatorExpense, year_offset: int) -> Decimal:
+        if expense.expense_type != "loan":
+            return ZERO_DECIMAL
+        remaining = Decimal(str(expense.loan_principal or 0)).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+        if remaining <= 0:
+            return ZERO_DECIMAL
+
+        payment = cls.loan_payment_amount(expense)
+        interval_months = int(expense.payment_interval_months or 1)
+        periods = cls._period_count(cls._loan_term_months(expense), interval_months)
+        annual_rate = Decimal(str(expense.annual_interest_rate or 0)) / Decimal("100")
+        period_rate = annual_rate * Decimal(interval_months) / Decimal("12")
+        month = int(expense.first_payment_month or 1)
+
+        for period_index in range(periods):
+            payment_year = (month - 1) // 12
+            if payment_year > year_offset:
+                break
+
+            interest = (remaining * period_rate).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+            principal_payment = (payment - interest).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+            if principal_payment < 0:
+                principal_payment = ZERO_DECIMAL
+            if principal_payment >= remaining or period_index == periods - 1:
+                remaining = ZERO_DECIMAL
+            else:
+                remaining = (remaining - principal_payment).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+            month += interval_months
+
+        return remaining if remaining > 0 else ZERO_DECIMAL
+
+    @classmethod
+    def loan_liabilities_outstanding_for_year(cls, scenario: SimulatorScenario, year_offset: int) -> Decimal:
+        return sum(
+            (
+                cls.loan_remaining_principal_after_year(expense, year_offset)
+                for expense in scenario.expenses
+                if expense.expense_type == "loan"
+            ),
+            ZERO_DECIMAL,
+        ).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
     @classmethod
     def expense_annual_amount(cls, expense: SimulatorExpense) -> Decimal:
@@ -895,13 +1003,18 @@ class SimulatorService:
             "annual_net": overall_net,
             "health": cls._health_summary(overall_net),
         }
+        overall_forecast = cls.build_overall_forecast(scenario)
 
         return {
             "overall": overall,
             "farms": farm_results,
             "statements": [overall, *farm_results],
             "stock_detail_count": sum(len(farm["stock_rows"]) for farm in farm_results),
-            "overall_forecast": cls.build_overall_forecast(scenario),
+            "overall_forecast": overall_forecast,
+            "overall_equity_forecast": cls.build_overall_equity_forecast(
+                scenario,
+                overall_forecast=overall_forecast,
+            ),
         }
 
     @classmethod
@@ -967,6 +1080,71 @@ class SimulatorService:
             "income_inflation_rate": scenario.income_inflation_rate,
             "expense_inflation_rate": scenario.expense_inflation_rate,
             "rows": rows,
+        }
+
+    @classmethod
+    def build_overall_equity_forecast(
+        cls,
+        scenario: SimulatorScenario,
+        *,
+        overall_forecast: dict | None = None,
+    ) -> dict:
+        forecast = overall_forecast if overall_forecast is not None else cls.build_overall_forecast(scenario)
+        farm_targets = cls._projection_farm_targets(scenario)
+        rows = []
+        cumulative_profit_loss = ZERO_DECIMAL
+
+        for forecast_row in forecast["rows"]:
+            year_offset = forecast_row["year_offset"]
+            total_assets = sum(
+                (
+                    cls.inflated_amount(
+                        target["initial_farm_value"],
+                        target["farm_value_inflation_rate"],
+                        year_offset,
+                    )
+                    for target in farm_targets
+                ),
+                ZERO_DECIMAL,
+            ).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+            cumulative_profit_loss = (cumulative_profit_loss + forecast_row["net"]).quantize(
+                MONEY_QUANT,
+                rounding=ROUND_HALF_UP,
+            )
+            liabilities_outstanding = cls.loan_liabilities_outstanding_for_year(scenario, year_offset)
+            cumulative_equity = (total_assets + cumulative_profit_loss - liabilities_outstanding).quantize(
+                MONEY_QUANT,
+                rounding=ROUND_HALF_UP,
+            )
+            rows.append(
+                {
+                    "year": forecast_row["year"],
+                    "year_offset": year_offset,
+                    "total_assets": total_assets,
+                    "cumulative_profit_loss": cumulative_profit_loss,
+                    "liabilities_outstanding": liabilities_outstanding,
+                    "cumulative_equity": cumulative_equity,
+                }
+            )
+
+        return {
+            "horizon_years": len(rows),
+            "rows": rows,
+            "chart_payload": {
+                "labels": [row["year"] for row in rows],
+                "datasets": [
+                    {
+                        "key": "cumulative_profit_loss",
+                        "label": "Cumulative Profit/Loss",
+                        "values": [float(row["cumulative_profit_loss"]) for row in rows],
+                    },
+                    {
+                        "key": "cumulative_equity",
+                        "label": "Cumulative Equity",
+                        "values": [float(row["cumulative_equity"]) for row in rows],
+                    },
+                ],
+            },
         }
 
     @staticmethod

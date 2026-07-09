@@ -16,6 +16,7 @@ MODULES: tuple[ModuleSpec, ...] = (
     ModuleSpec("legacy_web", "app.modules.legacy_web", "Compatibility web routes awaiting domain extraction"),
     ModuleSpec("tasks", "app.modules.tasks", "Task workspace web routes"),
     ModuleSpec("calendar", "app.modules.calendar", "Calendar web routes"),
+    ModuleSpec("incidents", "app.modules.incidents", "Incident note web routes"),
     ModuleSpec("finance", "app.modules.finance", "Finance and cash-flow web routes"),
     ModuleSpec("simulator", "app.modules.simulator", "Farm profit simulator web routes"),
     ModuleSpec("shearing", "app.modules.shearing", "Shearing session web routes"),

@@ -6,6 +6,7 @@ from app.models import (
     CalendarActivity,
     CashTransaction,
     Farm,
+    Incident,
     JournalEntry,
     Mob,
     Paddock,
@@ -57,6 +58,13 @@ def test_delete_farm_removes_farm_records_and_map_file(client, app):
         mob = Mob(farm_id=farm.id, name="Main Mob", status="active")
         rainfall = RainfallRecord(farm_id=farm.id, recorded_on=date(2026, 1, 5), mm=12)
         journal_entry = JournalEntry(farm_id=farm.id, description="Farm note")
+        incident = Incident(
+            farm_id=farm.id,
+            occurred_on=date(2026, 1, 6),
+            category="Stock missing",
+            note="Two ewes missing from North Camp",
+            reported_by="Field Team",
+        )
         calendar_activity = CalendarActivity(
             farm_id=farm.id,
             title="Inspect fences",
@@ -80,6 +88,7 @@ def test_delete_farm_removes_farm_records_and_map_file(client, app):
                 mob,
                 rainfall,
                 journal_entry,
+                incident,
                 calendar_activity,
                 task_space,
                 cash_transaction,
@@ -156,6 +165,7 @@ def test_delete_farm_removes_farm_records_and_map_file(client, app):
         assert db.session.get(Mob, mob_id) is None
         assert RainfallRecord.query.filter_by(farm_id=farm_id).count() == 0
         assert JournalEntry.query.filter_by(farm_id=farm_id).count() == 0
+        assert Incident.query.filter_by(farm_id=farm_id).count() == 0
         assert CalendarActivity.query.filter_by(farm_id=farm_id).count() == 0
         assert TaskSpace.query.filter_by(farm_id=farm_id).count() == 0
         assert Task.query.count() == 0

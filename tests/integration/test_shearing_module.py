@@ -114,12 +114,27 @@ def test_shearing_service_validates_species_dates_and_zero_delete(app):
             quantity=5,
         )
         assert entry is not None
+        ShearingService.close_session(session)
+        edited_entry = ShearingService.record_entry(
+            session=session,
+            entry_id=str(entry.id),
+            work_date="2026-07-03",
+            shearer_id=shearer.id,
+            animal_group_type=goat,
+            quantity=6,
+            note="Corrected after close",
+        )
+        assert edited_entry is not None
+        assert edited_entry.quantity == 6
+        assert edited_entry.note == "Corrected after close"
+        ShearingService.reopen_session(session)
         ShearingService.record_entry(
             session=session,
             work_date="2026-07-02",
             shearer_id=shearer.id,
             animal_group_type=goat,
             quantity=0,
+            entry_id=str(entry.id),
         )
         assert ShearingEntry.query.count() == 0
 
@@ -817,6 +832,78 @@ def test_mobile_shearing_snapshot_and_sync_commands(client, app):
     assert session["bales"][0]["total_price"] == 1600.0
     assert session["bale_money_totals"]["total_kg"] == 80.0
     assert session["bale_summary_by_code"][0]["code"] == "FH"
+
+    corrections = [
+        {
+            "client_command_id": "shearer-2",
+            "type": "shearer.create",
+            "farm_id": farm_id,
+            "payload": {"id": "66666666-6666-6666-6666-666666666666", "name": "Correct Shearer"},
+        },
+        {
+            "client_command_id": "entry-correction-1",
+            "type": "shearing_entry.record",
+            "farm_id": farm_id,
+            "payload": {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "session_id": "22222222-2222-2222-2222-222222222222",
+                "work_date": "2026-10-02",
+                "shearer_id": "66666666-6666-6666-6666-666666666666",
+                "animal_group_type": {
+                    "species": "Sheep",
+                    "breed": "Dorper",
+                    "sex": "ewe",
+                    "age_class": "adult",
+                },
+                "quantity": 7,
+                "note": "Corrected row",
+            },
+        },
+    ]
+    correction_response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={"commands": corrections},
+        headers=_auth(token),
+    )
+    assert correction_response.status_code == 200
+    assert [row["status"] for row in correction_response.get_json()["results"]] == [
+        "applied",
+        "applied",
+    ]
+
+    corrected_snapshot = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+    corrected_session = corrected_snapshot.get_json()["shearing_sessions"][0]
+    corrected_entry = corrected_session["entries"][0]
+    assert corrected_session["totals"] == {"quantity": 7, "amount": 70.0}
+    assert corrected_entry["work_date"] == "2026-10-02"
+    assert corrected_entry["shearer_name"] == "Correct Shearer"
+    assert corrected_entry["animal_group_type"]["breed"] == "Dorper"
+    assert corrected_entry["quantity"] == 7
+    assert corrected_entry["note"] == "Corrected row"
+
+    delete_response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={
+            "commands": [
+                {
+                    "client_command_id": "entry-delete-1",
+                    "type": "shearing_entry.delete",
+                    "farm_id": farm_id,
+                    "payload": {
+                        "session_id": "22222222-2222-2222-2222-222222222222",
+                        "entry_id": "33333333-3333-3333-3333-333333333333",
+                    },
+                }
+            ]
+        },
+        headers=_auth(token),
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.get_json()["results"][0]["status"] == "applied"
+    deleted_snapshot = client.get(f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token))
+    deleted_session = deleted_snapshot.get_json()["shearing_sessions"][0]
+    assert deleted_session["totals"] == {"quantity": 0, "amount": 0.0}
+    assert deleted_session["entries"] == []
 
 
 def test_mobile_shearing_rejects_invalid_species(client, app):

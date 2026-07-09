@@ -1,0 +1,35 @@
+{% macro render_incident_form(form_values, farms, action_url, submit_label="Record Incident", next_url="") -%}
+<form method="post" action="{{ action_url }}" class="grid-form" data-incident-form>
+  {% if next_url %}
+  <input type="hidden" name="next" value="{{ next_url }}" data-incident-next-input />
+  {% endif %}
+  <label>Farm
+    <select name="farm_id" required>
+      <option value="">Choose farm</option>
+      {% for farm in farms %}
+      <option value="{{ farm.id }}" {% if form_values.farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="grid-two">
+    <label>Occurred On
+      <input type="date" name="occurred_on" value="{{ form_values.occurred_on }}" required data-incident-date-input />
+    </label>
+    <label>Category
+      <input name="category" value="{{ form_values.category }}" placeholder="Stock missing, intoxicated at work..." required />
+    </label>
+  </div>
+  <label>Note
+    <textarea name="note" rows="6" placeholder="What happened, who was involved, and any immediate follow-up." required>{{ form_values.note }}</textarea>
+  </label>
+  <div class="grid-two">
+    <label>Tags
+      <input name="tags" value="{{ form_values.tags }}" placeholder="stock, safety, staff" />
+    </label>
+    <label>Reported By
+      <input name="reported_by" value="{{ form_values.reported_by }}" required />
+    </label>
+  </div>
+  <button type="submit" class="btn btn-incident">{{ submit_label }}</button>
+</form>
+{%- endmacro %}

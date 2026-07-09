@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ incident.category }} | Incidents | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-page-actions">
+  <a class="btn btn-secondary" href="{{ back_url }}">Back To Incidents</a>
+  <a class="btn btn-secondary" href="{{ url_for('calendar.index', view='month', year=incident.occurred_on.year, month=incident.occurred_on.month, farm_id=incident.farm_id, selected_date=incident.occurred_on.isoformat()) }}">Open Calendar Day</a>
+</div>
+
+<section class="card task-page-header">
+  <div>
+    <p class="space-key">Incident</p>
+    <h1>{{ incident.category }}</h1>
+    <div class="task-chip-row">
+      {% for tag in tags %}
+      <span class="tag-pill">{{ tag }}</span>
+      {% else %}
+      <span class="tag-pill">untagged</span>
+      {% endfor %}
+    </div>
+    <p class="text-body">{{ incident.note }}</p>
+  </div>
+  <dl class="task-detail-grid">
+    <div><dt>Farm</dt><dd>{{ incident.farm.name if incident.farm else "-" }}</dd></div>
+    <div><dt>Occurred On</dt><dd>{{ incident.occurred_on.isoformat() }}</dd></div>
+    <div><dt>Reported By</dt><dd>{{ incident.reported_by }}</dd></div>
+    <div><dt>Created</dt><dd>{{ incident.created_at.strftime("%Y-%m-%d %H:%M") if incident.created_at else "-" }}</dd></div>
+  </dl>
+</section>
+
+<section class="split">
+  <article class="card">
+    <h2>Edit Incident</h2>
+    <form method="post" action="{{ url_for('incidents.edit_incident', incident_id=incident.id) }}" class="grid-form">
+      <label>Farm
+        <select name="farm_id" required>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if farm.id == incident.farm_id %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="grid-two">
+        <label>Occurred On
+          <input type="date" name="occurred_on" value="{{ incident.occurred_on.isoformat() }}" required />
+        </label>
+        <label>Category
+          <input name="category" value="{{ incident.category }}" required />
+        </label>
+      </div>
+      <label>Note
+        <textarea name="note" rows="7" required>{{ incident.note }}</textarea>
+      </label>
+      <div class="grid-two">
+        <label>Tags
+          <input name="tags" value="{{ incident.tags_csv }}" />
+        </label>
+        <label>Reported By
+          <input name="reported_by" value="{{ incident.reported_by }}" required />
+        </label>
+      </div>
+      <button type="submit" class="btn btn-incident">Save Incident</button>
+    </form>
+  </article>
+
+  <article class="card calendar-danger-card">
+    <h2>Delete Incident</h2>
+    <p class="muted">Deleting this note removes it from incident search and calendar history.</p>
+    <form method="post" action="{{ url_for('incidents.delete_incident', incident_id=incident.id) }}">
+      <button type="submit" class="btn btn-danger">Delete Incident</button>
+    </form>
+  </article>
+</section>
+{% endblock %}
+

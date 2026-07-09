@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "calendar/_activity_form.html" import render_activity_form %}
+{% from "incidents/_form.html" import render_incident_form %}
 {% block title %}Calendar | AgriTrack{% endblock %}
 {% block content %}
 <section class="hero">
@@ -26,6 +27,7 @@
   <article class="card stat"><h2>Activities</h2><p>{{ stats.activity_count }}</p></article>
   <article class="card stat"><h2>Recurring Series</h2><p>{{ stats.recurring_series_count }}</p></article>
   <article class="card stat"><h2>Dated Tasks</h2><p>{{ stats.task_count }}</p></article>
+  <article class="card stat"><h2>Incidents</h2><p>{{ stats.incident_count }}</p></article>
   <article class="card stat"><h2>Total Items</h2><p>{{ stats.total_count }}</p></article>
 </div>
 
@@ -108,6 +110,15 @@
       >
         Create Activity
       </button>
+      <button
+        type="button"
+        class="btn btn-incident calendar-create-link"
+        data-open-incident-modal
+        data-incident-date="{{ selected_day.date.isoformat() }}"
+        data-next-url="{{ selected_day.create_incident_next_url }}"
+      >
+        Record Incident
+      </button>
       <a class="btn btn-secondary calendar-create-link" href="{{ selected_day.create_task_url }}">Create Task</a>
       <a class="btn btn-secondary" href="{{ clear_selected_day_url }}">Close Day</a>
     </div>
@@ -152,7 +163,7 @@
   {% else %}
   <div class="calendar-day-detail-section">
     <h3>Starting Or Due On This Day</h3>
-    <p class="task-empty-state">No tasks or activities start or are due on this day.</p>
+    <p class="task-empty-state">No tasks, incidents, or activities start or are due on this day.</p>
   </div>
   {% endif %}
 </section>
@@ -235,6 +246,15 @@
           >
             Create Activity
           </button>
+          <button
+            type="button"
+            class="btn btn-incident calendar-create-link"
+            data-open-incident-modal
+            data-incident-date="{{ day.date.isoformat() }}"
+            data-next-url="{{ day.create_incident_next_url }}"
+          >
+            Incident
+          </button>
           <a class="btn btn-secondary calendar-create-link" href="{{ day.create_task_url }}">Create Task</a>
         </div>
         {% endif %}
@@ -296,6 +316,23 @@
     selected_month,
     selected_date,
     form_id="calendar-activity-modal-form"
+  ) }}
+</dialog>
+<dialog id="calendar-incident-modal" class="calendar-activity-modal">
+  <div class="calendar-modal-header">
+    <div>
+      <p class="space-key">Incident</p>
+      <h2>Record Incident</h2>
+      <p class="muted">Date: <span data-modal-incident-date>{{ create_incident_defaults.occurred_on }}</span></p>
+    </div>
+    <button type="button" class="btn btn-secondary" data-close-incident-modal>Close</button>
+  </div>
+  {{ render_incident_form(
+    create_incident_defaults,
+    farms,
+    url_for('incidents.create_incident'),
+    submit_label="Record Incident",
+    next_url=create_incident_next_url
   ) }}
 </dialog>
 {% endblock %}
@@ -386,6 +423,78 @@
           dialog.close();
         } else {
           dialog.removeAttribute("open");
+        }
+      }
+    });
+
+    const incidentDialog = document.getElementById("calendar-incident-modal");
+    if (!incidentDialog) {
+      return;
+    }
+
+    const incidentDateInput = incidentDialog.querySelector("[data-incident-date-input]");
+    const incidentNextInput = incidentDialog.querySelector("[data-incident-next-input]");
+    const incidentDateLabel = incidentDialog.querySelector("[data-modal-incident-date]");
+
+    const setIncidentModalDate = (value, nextUrl) => {
+      if (!incidentDateInput || !value) {
+        return;
+      }
+      incidentDateInput.value = value;
+      if (incidentDateLabel) {
+        incidentDateLabel.textContent = value;
+      }
+      if (incidentNextInput && nextUrl) {
+        incidentNextInput.value = nextUrl;
+      }
+    };
+
+    if (incidentDateInput) {
+      incidentDateInput.addEventListener("change", () => {
+        if (incidentDateLabel) {
+          incidentDateLabel.textContent = incidentDateInput.value;
+        }
+      });
+      incidentDateInput.addEventListener("input", () => {
+        if (incidentDateLabel) {
+          incidentDateLabel.textContent = incidentDateInput.value;
+        }
+      });
+    }
+
+    document.querySelectorAll("[data-open-incident-modal]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setIncidentModalDate(button.dataset.incidentDate, button.dataset.nextUrl);
+        if (typeof incidentDialog.showModal === "function") {
+          incidentDialog.showModal();
+        } else {
+          incidentDialog.setAttribute("open", "open");
+        }
+      });
+    });
+
+    incidentDialog.querySelectorAll("[data-close-incident-modal]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (typeof incidentDialog.close === "function") {
+          incidentDialog.close();
+        } else {
+          incidentDialog.removeAttribute("open");
+        }
+      });
+    });
+
+    incidentDialog.addEventListener("click", (event) => {
+      const rect = incidentDialog.getBoundingClientRect();
+      const inside =
+        rect.top <= event.clientY &&
+        event.clientY <= rect.top + rect.height &&
+        rect.left <= event.clientX &&
+        event.clientX <= rect.left + rect.width;
+      if (!inside) {
+        if (typeof incidentDialog.close === "function") {
+          incidentDialog.close();
+        } else {
+          incidentDialog.removeAttribute("open");
         }
       }
     });

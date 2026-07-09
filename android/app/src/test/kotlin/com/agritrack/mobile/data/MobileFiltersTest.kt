@@ -78,6 +78,19 @@ class MobileFiltersTest {
         assertEquals(listOf("Check water"), filtered.map { it.title })
     }
 
+    @Test
+    fun calendarTagFilterIncludesIncidents() {
+        val snapshot = filterSnapshot()
+
+        val filtered = filterCalendarItems(
+            snapshot.calendarItems,
+            CalendarFilterState(tag = "stock"),
+        )
+
+        assertEquals(listOf("incident"), filtered.map { it.kind })
+        assertEquals(listOf("Stock missing"), filtered.map { it.title })
+    }
+
     private fun filterSnapshot(): FarmSnapshot =
         FarmSnapshot.fromJson(
             JSONObject()
@@ -182,6 +195,16 @@ class MobileFiltersTest {
                                 .put("activity_id", "activity-1")
                                 .put("title", "Weekly water run")
                                 .put("stage", "activity"),
+                        )
+                        .put(
+                            JSONObject()
+                                .put("kind", "incident")
+                                .put("date", "2026-05-23")
+                                .put("source_id", "incident-1")
+                                .put("incident_id", "incident-1")
+                                .put("title", "Stock missing")
+                                .put("stage", "incident")
+                                .put("tags", JSONArray().put("stock").put("security")),
                         ),
                 )
                 .put(

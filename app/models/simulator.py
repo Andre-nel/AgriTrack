@@ -59,6 +59,8 @@ class SimulatorFarm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     )
     farm_id = db.Column(db.String(36), db.ForeignKey("farms.id"), nullable=True, index=True)
     name = db.Column(db.String(120), nullable=False)
+    initial_farm_value = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    farm_value_inflation_rate = db.Column(db.Numeric(7, 4), nullable=False, default=0)
 
     scenario = db.relationship("SimulatorScenario", back_populates="farm_targets")
     farm = db.relationship("Farm")
@@ -79,6 +81,14 @@ class SimulatorFarm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
             "scenario_id",
             "name",
             name="uq_simulator_farm_scenario_name",
+        ),
+        db.CheckConstraint(
+            "initial_farm_value >= 0",
+            name="ck_simulator_farm_initial_value_non_negative",
+        ),
+        db.CheckConstraint(
+            "farm_value_inflation_rate >= 0",
+            name="ck_simulator_farm_value_inflation_non_negative",
         ),
     )
 
