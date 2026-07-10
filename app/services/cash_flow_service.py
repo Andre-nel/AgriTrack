@@ -155,6 +155,7 @@ STATEMENT_DEFINITIONS = {
             },
             {"kind": "category", "label": "Other Costs", "category_code": "other_costs", "species_scope": "Goat"},
             {"kind": "section", "label": "Income"},
+            {"kind": "category", "label": "Goat Sales", "category_code": "goat_sales", "species_scope": "Goat"},
             {"kind": "category", "label": "Kid Sales", "category_code": "kid_sales", "species_scope": "Goat"},
             {"kind": "category", "label": "Doe Sales", "category_code": "doe_sales", "species_scope": "Goat"},
             {"kind": "category", "label": "Fiber Income", "category_code": "fiber_income", "species_scope": "Goat"},

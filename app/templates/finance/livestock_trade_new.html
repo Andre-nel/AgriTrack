@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "finance/_livestock_trade_form.html" import livestock_trade_form with context %}
+{% block title %}Record Livestock Trade | Cash Flow | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero cash-flow-hero">
+  <h1>Record Livestock Trade</h1>
+  <p>Capture lamb and calf trades by individual weights, or goat trades by head count. VAT is added to the cash-flow amount.</p>
+  <div class="hero-actions">
+    <a class="btn btn-secondary" href="{{ url_for('finance.cash_flow', year=return_year, tab=return_tab) }}">Back To Cash Flow</a>
+    <a class="btn btn-secondary" href="{{ url_for('finance.livestock_trades') }}">Trade Statistics</a>
+  </div>
+</section>
+
+<section class="card">
+  {{ livestock_trade_form(
+    url_for('finance.create_livestock_trade'),
+    "Save Livestock Trade",
+    default_trade_date=default_trade_date,
+    return_year=return_year,
+    return_tab=return_tab,
+    return_destination="new"
+  ) }}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='livestock_trades.js') }}"></script>
+{% endblock %}

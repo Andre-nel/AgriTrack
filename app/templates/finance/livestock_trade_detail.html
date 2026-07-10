@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "finance/_livestock_trade_form.html" import livestock_trade_form with context %}
+{% block title %}{{ trade.trade_type_label }} {{ trade.animal_mode_label }} | Cash Flow | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero cash-flow-hero">
+  <h1>{{ trade.trade_type_label }} {{ trade.animal_mode_label }}</h1>
+  <p>{{ trade.trade_date }} | {{ trade.counterparty_role }}: {{ trade.counterparty }} | {{ trade.farm_names|join(", ") }}</p>
+  <div class="hero-actions">
+    <a class="btn btn-secondary" href="{{ url_for('finance.cash_flow', year=trade.trade_date[:4], tab=trade.animal_group_type.species|lower) }}">Back To Cash Flow</a>
+    <a class="btn btn-secondary" href="{{ url_for('finance.livestock_trades') }}">Trade Statistics</a>
+  </div>
+</section>
+
+<section class="cards farm-grid cash-summary-grid">
+  <article class="card stat">
+    <h2>Animals</h2>
+    <p>{{ trade.stats.count }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Total Excl VAT</h2>
+    <p>{{ format_currency(trade.stats.total_money) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Average Price/Animal Excl VAT</h2>
+    <p>{{ format_currency(trade.stats.average_price_per_animal) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Total Weight</h2>
+    <p>{{ format_number(trade.stats.total_weight, 3) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Average Weight</h2>
+    <p>{{ format_number(trade.stats.average_weight, 3) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>VAT</h2>
+    <p>{{ input_decimal(trade.vat_percent, 2) }}%</p>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Trade Details</h2>
+  <div class="analytics-table-scroll">
+    <table>
+      <tbody>
+        <tr><th>Date</th><td>{{ trade.trade_date }}</td></tr>
+        <tr><th>{{ trade.counterparty_role }}</th><td>{{ trade.counterparty }}</td></tr>
+        <tr><th>Reference</th><td>{{ trade.reference or "-" }}</td></tr>
+        <tr><th>Farms</th><td>{{ trade.farm_names|join(", ") }}</td></tr>
+        <tr><th>Animal Type</th><td>{{ trade.animal_group_type.label }}</td></tr>
+        <tr><th>Category</th><td>{{ trade.category_code|replace("_", " ")|title }}</td></tr>
+        {% if trade.pricing_model == "weight" %}
+        <tr><th>Price Per Kg Excl VAT</th><td>{{ format_rate(trade.price_per_kg) }}</td></tr>
+        {% else %}
+        <tr><th>Price Per Goat Excl VAT</th><td>{{ format_currency(trade.price_per_head) }}</td></tr>
+        <tr><th>Hair Lengths</th><td>{{ trade.hair_lengths }}</td></tr>
+        {% endif %}
+        <tr><th>Total Excl VAT</th><td>{{ format_currency(trade.stats.total_money) }}</td></tr>
+        <tr><th>VAT Amount</th><td>{{ format_currency(trade.stats.vat_amount) }}</td></tr>
+        <tr><th>Total Incl VAT</th><td>{{ format_currency(trade.stats.gross_total) }}</td></tr>
+        <tr><th>Notes</th><td>{{ trade.notes or "-" }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if trade.pricing_model == "weight" %}
+<section class="card">
+  <h2>Individual Weights</h2>
+  <div class="livestock-weight-list">
+    {% for weight in trade.weights %}
+    <span class="badge ok">{{ input_decimal(weight, 3) }} kg</span>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<details class="card">
+  <summary><strong>Edit Livestock Trade</strong></summary>
+  {{ livestock_trade_form(
+    url_for('finance.edit_livestock_trade', trade_id=trade.id),
+    "Update Livestock Trade",
+    trade=trade,
+    default_trade_date=trade.trade_date
+  ) }}
+</details>
+
+<section class="card">
+  <form method="post" action="{{ url_for('finance.delete_livestock_trade', trade_id=trade.id) }}">
+    <button type="submit" class="btn btn-danger">Delete Livestock Trade</button>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='livestock_trades.js') }}"></script>
+{% endblock %}

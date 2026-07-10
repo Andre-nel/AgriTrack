@@ -2,7 +2,13 @@ from app.models.animal_group import AnimalGroupBalance, AnimalGroupType
 from app.models.calendar import CalendarActivity, CalendarActivityException
 from app.models.farm import Farm
 from app.models.fence import FenceEvent, FenceEventMaterial, FenceSection
-from app.models.finance import CashTransaction, CashTransactionLine
+from app.models.finance import (
+    CashTransaction,
+    CashTransactionLine,
+    LivestockTrade,
+    LivestockTradeFarm,
+    LivestockTradeWeight,
+)
 from app.models.gate import PaddockGate
 from app.models.grazing import (
     GrazingAllocation,
@@ -64,6 +70,9 @@ __all__ = [
     "GrazingSession",
     "Incident",
     "JournalEntry",
+    "LivestockTrade",
+    "LivestockTradeFarm",
+    "LivestockTradeWeight",
     "MobileAuthToken",
     "MobileSyncCommand",
     "Mob",

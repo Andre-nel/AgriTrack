@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Livestock Trades | Cash Flow | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero cash-flow-hero">
+  <h1>Livestock Trade Statistics</h1>
+  <p>Review sale and purchase trends by trade, using VAT-exclusive prices and totals.</p>
+  <div class="hero-actions">
+    <a class="btn" href="{{ url_for('finance.new_livestock_trade') }}">Record Livestock Trade</a>
+    <a class="btn btn-secondary" href="{{ url_for('finance.cash_flow') }}">Back To Cash Flow</a>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Filters</h2>
+  <form method="get" action="{{ url_for('finance.livestock_trades') }}" class="grid-form">
+    <div class="grid-three">
+      <label>Start Date
+        <input type="date" name="start_date" value="{{ start_date }}" />
+      </label>
+      <label>End Date
+        <input type="date" name="end_date" value="{{ end_date }}" />
+      </label>
+      <label>Trade Type
+        <select name="trade_type">
+          <option value="">All</option>
+          <option value="sale" {% if selected_trade_type == "sale" %}selected{% endif %}>Sales</option>
+          <option value="purchase" {% if selected_trade_type == "purchase" %}selected{% endif %}>Purchases</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label>Species
+        <select name="species">
+          <option value="">All species</option>
+          {% for value in species_options %}
+          <option value="{{ value }}" {% if selected_species == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Farm
+        <select name="farm_id">
+          <option value="">All farms</option>
+          {% for farm in farms %}
+          <option value="{{ farm.id }}" {% if selected_farm_id == farm.id|string %}selected{% endif %}>{{ farm.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply</button>
+      <a class="btn btn-secondary" href="{{ url_for('finance.livestock_trades') }}">Clear</a>
+    </div>
+  </form>
+</section>
+
+<section class="cards farm-grid">
+  <article class="card stat">
+    <h2>Trades</h2>
+    <p>{{ report.summary.trade_count }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Animals</h2>
+    <p>{{ report.summary.animal_count }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Total Weight</h2>
+    <p>{{ format_number(report.summary.total_weight, 3) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Average Weight</h2>
+    <p>{{ format_number(report.summary.average_weight, 3) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Average Price/Animal Excl VAT</h2>
+    <p>{{ format_currency(report.summary.average_price_per_animal) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Average Price/kg Excl VAT</h2>
+    <p>{{ format_rate(report.summary.average_price_per_kg) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Sale Income Excl VAT</h2>
+    <p>{{ format_currency(report.summary.total_sales_income) }}</p>
+  </article>
+  <article class="card stat">
+    <h2>Purchase Spend Excl VAT</h2>
+    <p>{{ format_currency(report.summary.total_purchase_spend) }}</p>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Per-Trade Graphs</h2>
+  <p class="muted">Window: {{ start_date }} to {{ end_date }}</p>
+  {% if chart_payload.panels %}
+  <div class="grazing-chart-grid">
+    {% for panel in chart_payload.panels %}
+    <article class="grazing-chart-card">
+      <h3>{{ panel.title }}</h3>
+      <div class="analytics-chart-wrap">
+        <canvas id="livestockTradeChart{{ loop.index0 }}" data-panel-index="{{ loop.index0 }}" role="img" aria-label="{{ panel.title }} line graph"></canvas>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>No livestock trades match the selected filters.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Trade Rows</h2>
+  <div class="analytics-table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Counterparty</th>
+          <th>Farms</th>
+          <th>Animal Type</th>
+          <th>Count</th>
+          <th>Average Weight</th>
+          <th>Price Excl VAT</th>
+          <th>Total Excl VAT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in report.rows %}
+        <tr>
+          <td><a href="{{ url_for('finance.livestock_trade_detail', trade_id=row.id) }}">{{ row.trade_date }}</a></td>
+          <td>{{ row.trade_type_label }}</td>
+          <td>{{ row.counterparty }}</td>
+          <td>{{ row.farm_names|join(", ") }}</td>
+          <td>{{ row.animal_group_type.label }}</td>
+          <td>{{ row.stats.count }}</td>
+          <td>{{ format_number(row.stats.average_weight, 3) }}</td>
+          <td>
+            {% if row.pricing_model == "weight" %}
+            {{ format_rate(row.stats.unit_price) }}/kg
+            {% else %}
+            {{ format_currency(row.stats.unit_price) }}/head
+            {% endif %}
+          </td>
+          <td>{{ format_currency(row.stats.total_money) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9">No livestock trades match the selected filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if chart_payload.panels %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>
+{% endif %}
+<script id="livestockTradeChartData" type="application/json">{{ chart_payload | tojson }}</script>
+<script src="{{ url_for('static', filename='livestock_trades.js') }}"></script>
+{% endblock %}

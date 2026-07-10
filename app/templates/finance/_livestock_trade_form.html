@@ -1,0 +1,128 @@
+{% macro livestock_trade_form(action_url, submit_label, trade=None, default_trade_date="", return_year=None, return_tab=None, return_destination=None) %}
+{% set selected_mode = trade["animal_mode"] if trade else "lamb" %}
+{% set selected_trade_type = trade["trade_type"] if trade else "sale" %}
+{% set selected_farm_ids = trade["farm_ids"] if trade else [] %}
+{% set selected_group_id = trade["animal_group_type_id"] if trade else "" %}
+{% set selected_sex = trade["animal_group_type"]["sex"] if trade else "mixed" %}
+{% set selected_age_class = trade["animal_group_type"]["age_class"] if trade else "lamb" %}
+{% set weights = trade["weights"] if trade else [] %}
+<form method="post" action="{{ action_url }}" class="grid-form livestock-trade-form" data-livestock-trade-form>
+  {% if return_year is not none %}<input type="hidden" name="return_year" value="{{ return_year }}" />{% endif %}
+  {% if return_tab is not none %}<input type="hidden" name="return_tab" value="{{ return_tab }}" />{% endif %}
+  {% if return_destination is not none %}<input type="hidden" name="return_destination" value="{{ return_destination }}" />{% endif %}
+
+  <div class="grid-three">
+    <label>Trade Type
+      <select name="trade_type">
+        <option value="sale" {% if selected_trade_type == "sale" %}selected{% endif %}>Sale</option>
+        <option value="purchase" {% if selected_trade_type == "purchase" %}selected{% endif %}>Purchase</option>
+      </select>
+    </label>
+    <label>Animals
+      <select name="trade_animal_mode" data-livestock-mode>
+        <option value="lamb" data-species="Sheep" {% if selected_mode == "lamb" %}selected{% endif %}>Lambs</option>
+        <option value="calf" data-species="Cattle" {% if selected_mode == "calf" %}selected{% endif %}>Calves</option>
+        <option value="goat" data-species="Goat" {% if selected_mode == "goat" %}selected{% endif %}>Goats</option>
+      </select>
+    </label>
+    <label>Date
+      <input type="date" name="trade_date" value="{{ trade['trade_date'] if trade else default_trade_date }}" required />
+    </label>
+  </div>
+
+  <div class="grid-three">
+    <label>Buyer / Seller
+      <input name="counterparty" value="{{ trade['counterparty'] if trade else '' }}" placeholder="Counterparty" required />
+    </label>
+    <label>Reference
+      <input name="reference" value="{{ trade['reference'] if trade and trade['reference'] else '' }}" placeholder="Invoice / EFT ref" />
+    </label>
+    <label>VAT %
+      <input name="vat_rate" inputmode="decimal" value="{{ input_decimal(trade['vat_percent'], 2) if trade else '15.00' }}" />
+    </label>
+  </div>
+
+  <label>Farms
+    <select name="farm_ids" multiple size="5" class="analytics-multi-select" required>
+      {% for farm in farms %}
+      <option value="{{ farm.id }}" {% if farm.id|string in selected_farm_ids %}selected{% endif %}>{{ farm.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <fieldset class="livestock-trade-fieldset">
+    <legend>Animal Type</legend>
+    <div class="grid-two">
+      <label>Existing Animal Type
+        <select name="animal_group_type_id" data-animal-type-select>
+          <option value="">Create from fields below</option>
+          {% for group in animal_group_types %}
+          <option value="{{ group.id }}" data-species="{{ group.species }}" {% if selected_group_id == group.id|string %}selected{% endif %}>
+            {{ group.species }} {{ group.breed }} {{ group.sex }} {{ group.age_class }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Breed
+        <input name="breed" value="{{ trade['animal_group_type']['breed'] if trade else '' }}" placeholder="Dorper / Bonsmara / Boer" />
+      </label>
+      <label>Sex
+        <select name="sex">
+          {% for value in sex_options %}
+          <option value="{{ value }}" {% if selected_sex == value %}selected{% endif %}>{{ value|title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Age Class
+        <select name="age_class">
+          {% for value in age_class_options %}
+          <option value="{{ value }}" {% if selected_age_class == value %}selected{% endif %}>{{ value|title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset class="livestock-trade-fieldset" data-pricing-panel="weight">
+    <legend>Weight Pricing</legend>
+    <div class="grid-two">
+      <label>Price Per Kg
+        <input name="price_per_kg" inputmode="decimal" value="{{ input_decimal(trade['price_per_kg'], 4) if trade and trade['price_per_kg'] is not none else '' }}" placeholder="R/kg before VAT" />
+      </label>
+      <label>Quick Weights
+        <input name="weights_csv" placeholder="32.5, 34.0, 31.8" />
+      </label>
+    </div>
+    <div class="livestock-weight-grid">
+      {% for index in range(12) %}
+      <label>Weight {{ index + 1 }}
+        <input name="weight_kg" inputmode="decimal" value="{{ input_decimal(weights[index], 3) if index < weights|length else '' }}" placeholder="kg" />
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <fieldset class="livestock-trade-fieldset" data-pricing-panel="head">
+    <legend>Goat Pricing</legend>
+    <div class="grid-three">
+      <label>Price Per Goat
+        <input name="price_per_head" inputmode="decimal" value="{{ input_decimal(trade['price_per_head'], 2) if trade and trade['price_per_head'] is not none else '' }}" placeholder="Before VAT" />
+      </label>
+      <label>Number Of Goats
+        <input name="goat_count" inputmode="numeric" value="{{ trade['goat_count'] if trade and trade['goat_count'] else '' }}" placeholder="0" />
+      </label>
+      <label>Hair Lengths
+        <input name="hair_lengths" value="{{ trade['hair_lengths'] if trade and trade['hair_lengths'] else '' }}" placeholder="Short, medium, long" />
+      </label>
+    </div>
+  </fieldset>
+
+  <label>Notes
+    <textarea name="notes" rows="3" placeholder="Optional trade note">{{ trade["notes"] if trade and trade["notes"] else "" }}</textarea>
+  </label>
+
+  <div class="row-actions">
+    <button type="submit" class="btn">{{ submit_label }}</button>
+  </div>
+</form>
+{% endmacro %}

@@ -2842,6 +2842,36 @@ tr.is-selected-fence {
   border-top: 1px dashed #d9e3de;
 }
 
+.livestock-trade-form {
+  margin-top: 0.6rem;
+}
+
+.livestock-trade-fieldset {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.livestock-trade-fieldset legend {
+  padding: 0 0.35rem;
+  font-weight: 700;
+}
+
+.livestock-weight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.55rem;
+}
+
+.livestock-weight-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .simulator-hero {
   background:
     linear-gradient(135deg, rgba(47, 122, 92, 0.11), rgba(187, 127, 43, 0.08)),

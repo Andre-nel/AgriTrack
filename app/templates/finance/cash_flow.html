@@ -95,6 +95,56 @@
 </section>
 
 <section class="card">
+  <div class="row-actions cash-table-header">
+    <div>
+      <h2>Livestock Trades</h2>
+      <p class="muted">Record lamb and calf trades by weight, goat trades by head count, then review the sale and purchase trends.</p>
+    </div>
+    <a class="btn" href="{{ url_for('finance.new_livestock_trade', return_year=selected_year, return_tab=selected_tab) }}">Record Livestock Trade</a>
+    <a class="btn btn-secondary" href="{{ url_for('finance.livestock_trades') }}">View Trade Statistics</a>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row-actions cash-table-header">
+    <div>
+      <h2>Recent Livestock Trades For {{ selected_year }}</h2>
+      <p class="muted">Structured sales and purchases that feed the cash-flow statement.</p>
+    </div>
+  </div>
+  <div class="analytics-table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Animals</th>
+          <th>Farms</th>
+          <th>Count</th>
+          <th>Average Weight</th>
+          <th>Total Excl VAT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in recent_livestock_trades %}
+        <tr>
+          <td><a href="{{ url_for('finance.livestock_trade_detail', trade_id=row['id']) }}">{{ row["trade_date"] }}</a></td>
+          <td>{{ row["trade_type_label"] }}</td>
+          <td>{{ row["animal_group_type"]["label"] }}</td>
+          <td>{{ row["farm_names"]|join(", ") }}</td>
+          <td>{{ row["stats"]["count"] }}</td>
+          <td>{{ format_number(row["stats"]["average_weight"], 3) }}</td>
+          <td>{{ format_currency(row["stats"]["total_money"]) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="muted">No livestock trades recorded for {{ selected_year }} yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
   <h2>Add Cash Transaction</h2>
   <p class="muted">Use one line per species and category amount. Leave species blank for business-wide overheads and unused rows blank.</p>
   <form method="post" action="{{ url_for('finance.create_transaction') }}" class="grid-form">
@@ -203,6 +253,13 @@
         </tbody>
       </table>
 
+      {% if transaction["managed_trade_id"] %}
+      <p class="muted">
+        Generated from a livestock trade.
+        <a href="{{ url_for('finance.livestock_trade_detail', trade_id=transaction['managed_trade_id']) }}">Open trade detail</a>
+        to edit or delete it.
+      </p>
+      {% else %}
       <form method="post" action="{{ url_for('finance.edit_transaction', transaction_id=transaction['id']) }}" class="grid-form cash-edit-form">
         <input type="hidden" name="return_year" value="{{ selected_year }}" />
         <input type="hidden" name="return_tab" value="{{ selected_tab }}" />
@@ -275,6 +332,7 @@
         <input type="hidden" name="return_tab" value="{{ selected_tab }}" />
         <button type="submit" class="btn btn-danger">Delete Transaction</button>
       </form>
+      {% endif %}
     </div>
   </details>
   {% else %}

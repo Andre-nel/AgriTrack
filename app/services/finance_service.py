@@ -39,6 +39,7 @@ CATEGORY_DEFINITIONS = (
     ),
     CashCategoryDefinition("heifer_sales", "Heifer Sales", "inflow", ("Cattle",), "Species Inflows"),
     CashCategoryDefinition("kid_sales", "Kid Sales", "inflow", ("Goat",), "Species Inflows"),
+    CashCategoryDefinition("goat_sales", "Goat Sales", "inflow", ("Goat",), "Species Inflows"),
     CashCategoryDefinition("doe_sales", "Doe Sales", "inflow", ("Goat",), "Species Inflows"),
     CashCategoryDefinition("fiber_income", "Fiber Income", "inflow", ("Goat",), "Species Inflows"),
     CashCategoryDefinition(
