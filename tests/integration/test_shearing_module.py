@@ -1,3 +1,5 @@
+import json
+import re
 from datetime import date, timedelta
 
 from app.extensions import db
@@ -593,13 +595,171 @@ def test_shearing_web_routes_create_session_shearer_and_entry(client, app):
 
     page = client.get(f"/shearing/sessions/{session_id}")
     assert page.status_code == 200
-    assert b"Shearer Payouts" in page.data
-    assert b"Bales / Money" in page.data
     text = page.get_data(as_text=True)
+    assert b"Shearer Payouts" in page.data
+    assert b"Money By Code" in page.data
+    assert b"Animal Type Breakdown" in page.data
+    assert b"Open Shearing" in page.data
+    assert b"Open Bales" in page.data
     assert "<summary><strong>Edit Session</strong></summary>" in text
-    assert "<summary><strong>Add Shearer</strong></summary>" in text
-    assert "<summary><strong>Record Daily Count</strong></summary>" in text
-    assert "<summary><strong>Bales / Money</strong></summary>" in text
+
+    shearing_page = client.get(f"/shearing/sessions/{session_id}/shearing")
+    assert shearing_page.status_code == 200
+    shearing_text = shearing_page.get_data(as_text=True)
+    assert "<summary><strong>Add Shearer</strong></summary>" in shearing_text
+    assert "<summary><strong>Record Daily Count</strong></summary>" in shearing_text
+    assert "Daily Breakdown" in shearing_text
+    assert "Entry Rows" in shearing_text
+    assert "Open Shearing Analytics" in shearing_text
+
+    bales_page = client.get(f"/shearing/sessions/{session_id}/bales")
+    assert bales_page.status_code == 200
+    bales_text = bales_page.get_data(as_text=True)
+    assert "<summary><strong>Bales / Money</strong></summary>" in bales_text
+    assert "Bale Rows" in bales_text
+    assert "Analytics and Statistics" in bales_text
+    assert "Bales By Code" in bales_text
+
+
+def test_shearing_batch_entry_route_is_atomic_and_feeds_session_subpages(client, app):
+    with app.app_context():
+        farm = Farm(name="Batch Shearing Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        first_shearer = ShearingService.create_shearer(farm_id=farm.id, name="Batch Klaas")
+        second_shearer = ShearingService.create_shearer(farm_id=farm.id, name="Batch Ben")
+        session = ShearingService.create_session(
+            farm_id=farm.id,
+            name="Batch wool",
+            species="Sheep",
+            start_date="2026-07-01",
+            end_date="2026-07-05",
+            lootjie_rate="10.00",
+        )
+        merino_ewe = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add(merino_ewe)
+        db.session.commit()
+        session_id = str(session.id)
+        first_shearer_id = str(first_shearer.id)
+        second_shearer_id = str(second_shearer.id)
+        merino_ewe_id = str(merino_ewe.id)
+
+    response = client.post(
+        f"/shearing/sessions/{session_id}/entries/batch",
+        data={
+            "work_date": "2026-07-02",
+            "row_count": "2",
+            "rows-0-shearer_id": first_shearer_id,
+            "rows-0-animal_group_type_id": merino_ewe_id,
+            "rows-0-quantity": "4",
+            "rows-0-note": "Morning count",
+            "rows-1-shearer_id": second_shearer_id,
+            "rows-1-use_new_type": "1",
+            "rows-1-breed": "Dormer",
+            "rows-1-sex": "ram",
+            "rows-1-age_class": "adult",
+            "rows-1-quantity": "3",
+            "rows-1-note": "Ram team",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        session = ShearingSession.query.filter_by(id=session_id).one()
+        payload = ShearingService.serialize_session(session)
+        assert payload["totals"] == {"quantity": 7, "amount": 100.0}
+        assert len(session.entries) == 2
+        assert AnimalGroupType.query.filter_by(
+            species="Sheep",
+            breed="Dormer",
+            sex="ram",
+            age_class="adult",
+        ).one()
+
+    invalid = client.post(
+        f"/shearing/sessions/{session_id}/entries/batch",
+        data={
+            "work_date": "2026-07-02",
+            "row_count": "2",
+            "rows-0-shearer_id": first_shearer_id,
+            "rows-0-animal_group_type_id": merino_ewe_id,
+            "rows-0-quantity": "9",
+            "rows-1-animal_group_type_id": merino_ewe_id,
+            "rows-1-quantity": "2",
+        },
+        follow_redirects=True,
+    )
+    assert invalid.status_code == 200
+    assert b"Shearer is invalid" in invalid.data
+
+    with app.app_context():
+        session = ShearingSession.query.filter_by(id=session_id).one()
+        quantities = sorted(entry.quantity for entry in session.entries)
+        assert quantities == [3, 4]
+
+    duplicate = client.post(
+        f"/shearing/sessions/{session_id}/entries/batch",
+        data={
+            "work_date": "2026-07-04",
+            "row_count": "2",
+            "rows-0-shearer_id": first_shearer_id,
+            "rows-0-animal_group_type_id": merino_ewe_id,
+            "rows-0-quantity": "1",
+            "rows-1-shearer_id": first_shearer_id,
+            "rows-1-animal_group_type_id": merino_ewe_id,
+            "rows-1-quantity": "2",
+        },
+        follow_redirects=True,
+    )
+    assert duplicate.status_code == 200
+    assert b"duplicate the same shearer and animal type" in duplicate.data
+
+    shearing_page = client.get(f"/shearing/sessions/{session_id}/shearing")
+    shearing_text = shearing_page.get_data(as_text=True)
+    assert "Merino ewe adult: 4" in shearing_text
+    assert "Dormer ram adult: 3" in shearing_text
+
+    analytics_page = client.get(f"/shearing/sessions/{session_id}/shearing/analytics")
+    analytics_text = analytics_page.get_data(as_text=True)
+    match = re.search(
+        r'<script id="sessionShearingAnalyticsData"[^>]*>(.*?)</script>',
+        analytics_text,
+        re.S,
+    )
+    assert match is not None
+    chart_payload = json.loads(match.group(1))
+    assert chart_payload["group_by"] == ["date", "shearer"]
+    assert chart_payload["series_by"] == "animal_type"
+    assert chart_payload["labels"] == [
+        "2026-07-02 | Batch Ben",
+        "2026-07-02 | Batch Klaas",
+    ]
+    assert "2026-07-03" not in analytics_text
+    assert {dataset["label"] for dataset in chart_payload["panels"][0]["datasets"]} == {
+        "Dormer ram adult",
+        "Merino ewe adult",
+    }
+    assert 'value="animal_type"' in analytics_text
+
+    animal_group_page = client.get(
+        f"/shearing/sessions/{session_id}/shearing/analytics",
+        query_string={"group_by": "animal_type"},
+    )
+    animal_group_text = animal_group_page.get_data(as_text=True)
+    match = re.search(
+        r'<script id="sessionShearingAnalyticsData"[^>]*>(.*?)</script>',
+        animal_group_text,
+        re.S,
+    )
+    assert match is not None
+    grouped_payload = json.loads(match.group(1))
+    assert grouped_payload["group_by"] == ["animal_type"]
+    assert grouped_payload["series_by"] is None
+    assert grouped_payload["labels"] == ["Dormer ram adult", "Merino ewe adult"]
+    assert grouped_payload["panels"][0]["datasets"] == [
+        {"label": "Animals shorn", "values": [3, 4]}
+    ]
 
 
 def test_shearing_analytics_web_route_renders_empty_and_landing_link(client):

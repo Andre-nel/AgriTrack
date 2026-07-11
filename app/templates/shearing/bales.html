@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "shearing/_components.html" import session_hero, session_status_actions, bale_form, bale_statistics_cards, money_by_code, bale_rows, chart_panels with context %}
+{% block title %}Bales | {{ session.name }} | AgriTrack{% endblock %}
+{% block content %}
+{{ session_hero("Bale weights, code money, and wool or mohair revenue for " ~ session.name ~ ".") }}
+
+<section class="card">
+  <div class="row-actions">
+    <a class="btn btn-secondary" href="{{ url_for('shearing.shearing_page', session_id=session.id) }}">Open Shearing</a>
+    <a class="btn btn-secondary" href="{{ url_for('shearing.shearing_analytics', session_id=session.id) }}">Open Shearing Analytics</a>
+  </div>
+</section>
+
+{{ session_status_actions("bales") }}
+{{ bale_form() }}
+{{ bale_statistics_cards() }}
+{{ money_by_code() }}
+{{ bale_rows() }}
+{{ chart_panels(chart_payload, "sessionBaleCharts", "No bales are available for this session yet.") }}
+{% endblock %}
+
+{% block scripts %}
+{% if chart_payload.panels %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>
+{% endif %}
+<script id="sessionBaleChartData" type="application/json" data-shearing-chart-payload data-chart-target="sessionBaleCharts">{{ chart_payload | tojson }}</script>
+<script src="{{ url_for('static', filename='shearing_session.js') }}"></script>
+{% endblock %}

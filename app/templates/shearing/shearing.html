@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "shearing/_components.html" import session_hero, session_status_actions, add_shearer_card, record_daily_count_card, shearer_payouts, animal_type_breakdown, daily_breakdown_table, entry_rows with context %}
+{% block title %}Shearing | {{ session.name }} | AgriTrack{% endblock %}
+{% block content %}
+{{ session_hero("Daily counts and shearer payout records for " ~ session.name ~ ".") }}
+
+<section class="card">
+  <div class="row-actions">
+    <a class="btn" href="{{ url_for('shearing.shearing_analytics', session_id=session.id) }}">Open Shearing Analytics</a>
+    <a class="btn btn-secondary" href="{{ url_for('shearing.bales_page', session_id=session.id) }}">Open Bales</a>
+  </div>
+</section>
+
+{{ session_status_actions("shearing") }}
+{{ add_shearer_card() }}
+{{ record_daily_count_card() }}
+{{ shearer_payouts() }}
+{{ animal_type_breakdown() }}
+{{ daily_breakdown_table() }}
+{{ entry_rows() }}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='shearing_session.js') }}"></script>
+{% endblock %}

@@ -823,6 +823,150 @@ class ShearingService:
         }
 
     @classmethod
+    def daily_breakdown(cls, session: ShearingSession) -> list[dict]:
+        by_date: dict[str, dict] = {}
+        for entry in cls.sorted_entries(session.entries):
+            amount = cls.entry_amount(session, entry)
+            date_key = entry.work_date.isoformat()
+            date_row = by_date.setdefault(
+                date_key,
+                {
+                    "work_date": date_key,
+                    "quantity": 0,
+                    "amount": Decimal("0.00"),
+                    "animal_counts": {},
+                },
+            )
+            date_row["quantity"] += int(entry.quantity)
+            date_row["amount"] += amount
+
+            animal_key = str(entry.animal_group_type_id)
+            animal_row = date_row["animal_counts"].setdefault(
+                animal_key,
+                {
+                    "animal_group_type_id": animal_key,
+                    "animal_group_type": cls.serialize_group_type(entry.animal_group_type),
+                    "label": cls.animal_group_label(entry.animal_group_type),
+                    "quantity": 0,
+                },
+            )
+            animal_row["quantity"] += int(entry.quantity)
+
+        rows = []
+        for row in sorted(by_date.values(), key=lambda item: item["work_date"]):
+            animal_counts = sorted(
+                row["animal_counts"].values(),
+                key=lambda item: item["label"].lower(),
+            )
+            rows.append(
+                {
+                    "work_date": row["work_date"],
+                    "quantity": row["quantity"],
+                    "amount": float(row["amount"]),
+                    "animal_counts": animal_counts,
+                }
+            )
+        return rows
+
+    @classmethod
+    def shearing_analytics_chart_payload(
+        cls,
+        session: ShearingSession,
+        *,
+        group_by: list[str] | tuple[str, ...] | None = None,
+    ) -> dict:
+        dimension_order = ("date", "shearer", "animal_type")
+        dimension_labels = {
+            "date": "Date",
+            "shearer": "Shearer",
+            "animal_type": "Animal Type",
+        }
+        selected_dimensions = [
+            dimension
+            for dimension in dimension_order
+            if dimension in set(group_by or ("date", "shearer"))
+        ]
+        if not selected_dimensions:
+            selected_dimensions = ["date", "shearer"]
+        series_dimensions = [dimension for dimension in dimension_order if dimension not in selected_dimensions]
+        series_dimension = series_dimensions[0] if len(series_dimensions) == 1 else None
+
+        entries = cls.sorted_entries(session.entries)
+        if not entries:
+            return {
+                "labels": [],
+                "group_by": selected_dimensions,
+                "panels": [],
+            }
+
+        def dimension_value(entry: ShearingEntry, dimension: str) -> tuple[str, str, str]:
+            if dimension == "date":
+                value = entry.work_date.isoformat()
+                return value, value, value
+            if dimension == "shearer":
+                return str(entry.shearer_id), entry.shearer.name, entry.shearer.name.casefold()
+            label = cls.animal_group_label(entry.animal_group_type)
+            return str(entry.animal_group_type_id), label, label.casefold()
+
+        label_text: dict[tuple[str, ...], str] = {}
+        label_sort: dict[tuple[str, ...], tuple[str, ...]] = {}
+        series_text: dict[str, str] = {}
+        series_sort: dict[str, str] = {}
+        values: dict[tuple[str, ...], dict[str, int]] = {}
+
+        for entry in entries:
+            label_parts = [dimension_value(entry, dimension) for dimension in selected_dimensions]
+            label_key = tuple(part[0] for part in label_parts)
+            if label_key not in label_text:
+                label_text[label_key] = " | ".join(part[1] for part in label_parts)
+                label_sort[label_key] = tuple(part[2] for part in label_parts)
+
+            if series_dimension is None:
+                series_key = "total"
+                series_text[series_key] = "Animals shorn"
+                series_sort[series_key] = "animals shorn"
+            else:
+                series_key, series_label, sort_label = dimension_value(entry, series_dimension)
+                series_text[series_key] = series_label
+                series_sort[series_key] = sort_label
+
+            values.setdefault(label_key, {})
+            values[label_key][series_key] = values[label_key].get(series_key, 0) + int(entry.quantity)
+
+        label_keys = sorted(label_text, key=lambda key: label_sort[key])
+        series_keys = sorted(series_text, key=lambda key: series_sort[key])
+        labels = [label_text[key] for key in label_keys]
+        datasets = [
+            {
+                "label": series_text[series_key],
+                "values": [values.get(label_key, {}).get(series_key, 0) for label_key in label_keys],
+            }
+            for series_key in series_keys
+        ]
+        group_title = " And ".join(dimension_labels[dimension] for dimension in selected_dimensions)
+        if selected_dimensions == ["date", "shearer"] and series_dimension == "animal_type":
+            title = "Daily Animal Counts By Shearer"
+        elif series_dimension is not None:
+            title = f"Animal Counts By {group_title}, Split By {dimension_labels[series_dimension]}"
+        else:
+            title = f"Animal Counts By {group_title}"
+        return {
+            "labels": labels,
+            "group_by": selected_dimensions,
+            "series_by": series_dimension,
+            "panels": [
+                {
+                    "id": "daily-shearer-animal-counts",
+                    "title": title,
+                    "chart_type": "bar",
+                    "value_format": "count",
+                    "y_axis_label": "Animals shorn",
+                    "datasets": datasets,
+                }
+            ],
+        }
+
+    @classmethod
     def bale_money_breakdown(cls, session: ShearingSession) -> dict:
         by_code: dict[str, dict] = {}
         total_bales = 0
@@ -877,6 +1021,97 @@ class ShearingService:
         }
 
     @classmethod
+    def bale_statistics(cls, session: ShearingSession) -> dict:
+        breakdown = cls.bale_money_breakdown(session)
+        totals = breakdown["totals"]
+        total_bales = totals["total_bales"]
+        total_kg = Decimal(str(totals["total_kg"]))
+        average_kg_per_bale = None
+        if total_bales:
+            average_kg_per_bale = float(
+                (total_kg / Decimal(total_bales)).quantize(cls.WEIGHT_QUANT, rounding=ROUND_HALF_UP)
+            )
+        return {
+            **totals,
+            "average_kg_per_bale": average_kg_per_bale,
+        }
+
+    @classmethod
+    def bale_chart_payload(cls, session: ShearingSession) -> dict:
+        rows = cls.bale_money_breakdown(session)["by_code"]
+        if not rows:
+            return {"labels": [], "panels": []}
+
+        labels = [row["code"] for row in rows]
+
+        def average_kg(row: dict) -> float | None:
+            if not row["bale_count"]:
+                return None
+            return float(
+                (Decimal(str(row["kg"])) / Decimal(row["bale_count"])).quantize(
+                    cls.WEIGHT_QUANT,
+                    rounding=ROUND_HALF_UP,
+                )
+            )
+
+        panels = [
+            {
+                "id": "bale-count",
+                "title": "Bales By Code",
+                "chart_type": "bar",
+                "value_format": "count",
+                "y_axis_label": "Bales",
+                "datasets": [{"label": "Bales", "values": [row["bale_count"] for row in rows]}],
+            },
+            {
+                "id": "bale-kg",
+                "title": "Total Kg By Code",
+                "chart_type": "bar",
+                "value_format": "kg",
+                "y_axis_label": "Kg",
+                "datasets": [{"label": "Kg", "values": [row["kg"] for row in rows]}],
+            },
+            {
+                "id": "bale-revenue",
+                "title": "Revenue By Code",
+                "chart_type": "bar",
+                "value_format": "money",
+                "y_axis_label": "Revenue",
+                "datasets": [{"label": "Revenue", "values": [row["total_price"] for row in rows]}],
+            },
+            {
+                "id": "bale-average-kg",
+                "title": "Average Kg Per Bale",
+                "chart_type": "bar",
+                "value_format": "kg",
+                "y_axis_label": "Avg kg/bale",
+                "datasets": [{"label": "Avg kg/bale", "values": [average_kg(row) for row in rows]}],
+            },
+            {
+                "id": "bale-average-price",
+                "title": "Average Price Per Kg",
+                "chart_type": "bar",
+                "value_format": "price",
+                "y_axis_label": "Average P/kg",
+                "datasets": [
+                    {
+                        "label": "Average P/kg",
+                        "values": [row["average_price_per_kg"] for row in rows],
+                    }
+                ],
+            },
+            {
+                "id": "bale-unpriced",
+                "title": "Unpriced Bales By Code",
+                "chart_type": "bar",
+                "value_format": "count",
+                "y_axis_label": "Unpriced bales",
+                "datasets": [{"label": "Unpriced", "values": [row["unpriced_bales"] for row in rows]}],
+            },
+        ]
+        return {"labels": labels, "panels": panels}
+
+    @classmethod
     def entry_amount(cls, session: ShearingSession, entry: ShearingEntry) -> Decimal:
         if entry.line_amount_override is not None:
             return Decimal(entry.line_amount_override).quantize(cls.MONEY_QUANT, rounding=ROUND_HALF_UP)
@@ -909,6 +1144,10 @@ class ShearingService:
         if group_type.sex == "ram" and group_type.age_class in {"adult", "old"}:
             return Decimal(session.adult_old_ram_multiplier or 2)
         return Decimal("1.00")
+
+    @classmethod
+    def animal_group_label(cls, group_type: AnimalGroupType) -> str:
+        return f"{group_type.breed} {group_type.sex} {group_type.age_class}"
 
     @staticmethod
     def sorted_entries(entries: Iterable[ShearingEntry]) -> list[ShearingEntry]:

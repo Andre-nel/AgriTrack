@@ -395,6 +395,47 @@ th, td {
   width: 5.8rem;
 }
 
+.shearing-section-links {
+  margin-top: 1rem;
+}
+
+.shearing-batch-table {
+  min-width: 66rem;
+}
+
+.shearing-batch-table .shearing-entry-col-animal {
+  width: 18rem;
+}
+
+.shearing-batch-table .shearing-entry-col-actions {
+  width: 7rem;
+}
+
+.shearing-new-type-fields {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--line);
+}
+
+.shearing-inline-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.shearing-inline-breakdown span {
+  display: inline-flex;
+  padding: 0.18rem 0.42rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
 .balance-row {
   cursor: pointer;
 }
