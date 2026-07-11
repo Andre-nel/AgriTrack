@@ -126,21 +126,30 @@
     }
   }
 
-  function gateLocationUrl(gateId) {
+  function gateLocationUrl(gateId, directUrl) {
+    if (directUrl) {
+      return directUrl;
+    }
     if (!gateLocationUrlTemplate || !gateId) {
       return "";
     }
     return gateLocationUrlTemplate.replace("__gate_id__", encodeURIComponent(gateId));
   }
 
-  function gateDetailUrl(gateId) {
+  function gateDetailUrl(gateId, directUrl) {
+    if (directUrl) {
+      return directUrl;
+    }
     if (!gateDetailUrlTemplate || !gateId) {
       return "";
     }
     return gateDetailUrlTemplate.replace("__gate_id__", encodeURIComponent(gateId));
   }
 
-  function gateStateUrl(gateId) {
+  function gateStateUrl(gateId, directUrl) {
+    if (directUrl) {
+      return directUrl;
+    }
     if (!gateStateUrlTemplate || !gateId) {
       return "";
     }
@@ -185,8 +194,8 @@
     );
   }
 
-  function fetchGateDetail(gateId) {
-    const url = gateDetailUrl(gateId);
+  function fetchGateDetail(gateId, directUrl) {
+    const url = gateDetailUrl(gateId, directUrl);
     if (!url) {
       return Promise.reject(new Error("Gate details are not available."));
     }
@@ -200,8 +209,8 @@
     );
   }
 
-  function postGateState(gateId, status, closureChoices) {
-    const url = gateStateUrl(gateId);
+  function postGateState(gateId, status, closureChoices, directUrl) {
+    const url = gateStateUrl(gateId, directUrl);
     if (!url) {
       return Promise.reject(new Error("Gate state updates are not available."));
     }
@@ -225,8 +234,8 @@
     );
   }
 
-  function postGateLocation(gateId, latlng) {
-    const url = gateLocationUrl(gateId);
+  function postGateLocation(gateId, latlng, directUrl) {
+    const url = gateLocationUrl(gateId, directUrl);
     if (!url) {
       return Promise.reject(new Error("Gate location updates are not available."));
     }
@@ -488,14 +497,15 @@
   function gateMarker(feature, latlng) {
     const props = (feature && feature.properties) || {};
     const gateId = props.gate_id || props.id;
+    const locationUrl = props.gate_location_url || "";
     const marker = L.marker(latlng, {
       pane: "gatePane",
-      draggable: Boolean(gateId && gateLocationUrlTemplate),
+      draggable: Boolean(gateId && gateLocationUrl(gateId, locationUrl)),
       autoPan: true,
       icon: gateIcon(props),
     });
     marker._agriGateProps = props;
-    if (gateId && gateLocationUrlTemplate) {
+    if (gateId && gateLocationUrl(gateId, locationUrl)) {
       let previousLatLng = latlng;
       marker.on("dragstart", function () {
         previousLatLng = marker.getLatLng();
@@ -505,7 +515,7 @@
       marker.on("dragend", function () {
         const nextLatLng = marker.getLatLng();
         setStatus("Saving gate location...");
-        postGateLocation(gateId, nextLatLng)
+        postGateLocation(gateId, nextLatLng, props.gate_location_url || "")
           .then((payload) => {
             const gate = (payload && payload.gate) || {};
             props.latitude = gate.latitude;
@@ -842,6 +852,10 @@
               escapeHtml(gateId),
               '" data-target-status="',
               nextStatus,
+              '" data-gate-detail-url="',
+              escapeHtml(props.gate_detail_url || ""),
+              '" data-gate-state-url="',
+              escapeHtml(props.gate_state_url || ""),
               '">',
               '<div class="map-gate-state-choice" data-gate-state-choice></div>',
               '<div class="map-gate-state-error" data-gate-state-error role="alert"></div>',
@@ -969,13 +983,20 @@
     const mobText = mobRows.length
       ? mobRows
           .map(
-            (row) =>
-              escapeHtml(row.mob_name) +
-              " (" +
-              formatNumber(row.allocation_pct, 1) +
-              "%, " +
-              formatNumber(row.allocated_lsu, 2) +
-              " LSU)"
+            (row) => {
+              const mobName = escapeHtml(row.mob_name || "Unnamed mob");
+              const mobLabel = row.mob_url
+                ? '<a href="' + escapeHtml(row.mob_url) + '">' + mobName + "</a>"
+                : mobName;
+              return (
+                mobLabel +
+                " (" +
+                formatNumber(row.allocation_pct, 1) +
+                "%, " +
+                formatNumber(row.allocated_lsu, 2) +
+                " LSU)"
+              );
+            }
           )
           .join("<br>")
       : "No active mobs";
@@ -1274,6 +1295,8 @@
       showGateStateError(form, "");
       const gateId = form.dataset.gateId;
       const targetStatus = form.dataset.targetStatus;
+      const gateDetailDirectUrl = form.dataset.gateDetailUrl || "";
+      const gateStateDirectUrl = form.dataset.gateStateUrl || "";
       const submitButton = form.querySelector('button[type="submit"]');
       if (submitButton) {
         submitButton.disabled = true;
@@ -1285,7 +1308,7 @@
       };
       const postState = () => {
         setStatus(targetStatus === "open" ? "Opening gate..." : "Closing gate...");
-        postGateState(gateId, targetStatus, gateClosureChoicesFromForm(form))
+        postGateState(gateId, targetStatus, gateClosureChoicesFromForm(form), gateStateDirectUrl)
           .then((payload) => {
             const movedCount = Number(payload.moved_mob_count || 0);
             updateGateMarkerAfterState((payload && payload.gate) || {});
@@ -1307,7 +1330,7 @@
 
       if (targetStatus === "closed" && form.dataset.choicesLoaded !== "1") {
         setStatus("Checking gate close requirements...");
-        fetchGateDetail(gateId)
+        fetchGateDetail(gateId, gateDetailDirectUrl)
           .then((payload) => {
             const requirements = (payload && payload.close_requirements) || {};
             if (requirements.requires_choices) {

@@ -111,6 +111,7 @@ def _active_grazing_snapshot_by_paddock(farm_id: str) -> dict[str, dict]:
             {
                 "mob_id": str(mob.id),
                 "mob_name": mob.name,
+                "mob_url": url_for("web.mob_detail", mob_id=mob.id),
                 "allocation_pct": _round_float(fraction * 100.0, 2),
                 "allocated_lsu": _round_float(allocated_lsu, 3),
             }
@@ -284,7 +285,27 @@ def _build_farm_map_feature_collection(
         if warnings and feature_collection:
             warnings.append("Showing water network features without farm KML polygons.")
 
-    feature_collection.extend(GateService.active_map_features_for_farm(str(farm.id)))
+    gate_features = GateService.active_map_features_for_farm(str(farm.id))
+    for feature in gate_features:
+        properties = feature.get("properties", {})
+        gate_id = properties.get("gate_id") or properties.get("id")
+        if gate_id:
+            properties["gate_detail_url"] = url_for(
+                "web.farm_gate_detail",
+                farm_id=farm.id,
+                gate_id=gate_id,
+            )
+            properties["gate_state_url"] = url_for(
+                "web.update_farm_gate_state_form",
+                farm_id=farm.id,
+                gate_id=gate_id,
+            )
+            properties["gate_location_url"] = url_for(
+                "web.update_farm_gate_location",
+                farm_id=farm.id,
+                gate_id=gate_id,
+            )
+    feature_collection.extend(gate_features)
     fence_features = FenceService.active_map_features_for_farm(str(farm.id))
     for feature in fence_features:
         properties = feature.get("properties", {})

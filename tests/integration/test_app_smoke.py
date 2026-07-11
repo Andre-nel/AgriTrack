@@ -350,7 +350,11 @@ def test_import_farm_creates_closed_auto_gate_and_preserves_status_on_reimport(c
         if feature["properties"].get("feature_type") == "fence_section"
     ]
     assert len(gate_features) == 1
-    assert gate_features[0]["properties"]["status"] == "open"
+    gate_properties = gate_features[0]["properties"]
+    assert gate_properties["status"] == "open"
+    assert gate_properties["gate_detail_url"] == f"/farms/{farm_id}/gates/{gate_id}"
+    assert gate_properties["gate_state_url"] == f"/farms/{farm_id}/gates/{gate_id}/state"
+    assert gate_properties["gate_location_url"] == f"/farms/{farm_id}/gates/{gate_id}/location"
     assert len(fence_features) == 3
     assert any(feature["properties"]["condition"] == "bad" for feature in fence_features)
 
@@ -395,6 +399,61 @@ def test_web_gate_state_route_updates_active_grazing_allocations(client, app):
             for row in session.allocations
         }
         assert allocations == {north_id: 0.25, south_id: 0.75}
+
+
+def test_web_gate_state_route_closes_open_gate_without_linked_stock(client, app):
+    with app.app_context():
+        farm, (north, south) = _farm_with_two_paddocks_for_gate_route()
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(north.id),
+            paddock_b_id=str(south.id),
+        )
+        gate.status = "open"
+        db.session.commit()
+        farm_id = str(farm.id)
+        gate_id = str(gate.id)
+
+    response = client.get(f"/farms/{farm_id}/gates/{gate_id}", headers={"Accept": "application/json"})
+    assert response.status_code == 200
+    assert response.get_json()["close_requirements"]["requires_choices"] is False
+
+    response = client.post(f"/farms/{farm_id}/gates/{gate_id}/state", json={"status": "closed"})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["gate"]["status"] == "closed"
+    assert payload["moved_mob_count"] == 0
+
+    with app.app_context():
+        assert db.session.get(PaddockGate, gate_id).status == "closed"
+
+
+def test_farm_map_data_gate_features_include_action_urls(client, app):
+    with app.app_context():
+        farm, (north, south) = _farm_with_two_paddocks_for_gate_route()
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(north.id),
+            paddock_b_id=str(south.id),
+            latitude="-32.00000000",
+            longitude="25.00000000",
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        gate_id = str(gate.id)
+
+    response = client.get(f"/farms/{farm_id}/map-data")
+    assert response.status_code == 200
+    payload = response.get_json()
+    gate_features = [
+        feature for feature in payload["features"]
+        if feature["properties"].get("feature_type") == "gate"
+    ]
+    assert len(gate_features) == 1
+    properties = gate_features[0]["properties"]
+    assert properties["gate_detail_url"] == f"/farms/{farm_id}/gates/{gate_id}"
+    assert properties["gate_state_url"] == f"/farms/{farm_id}/gates/{gate_id}/state"
+    assert properties["gate_location_url"] == f"/farms/{farm_id}/gates/{gate_id}/location"
 
 
 def test_web_gate_state_route_accepts_map_json_open_and_close(client, app):
@@ -1519,6 +1578,7 @@ def test_paddock_page_and_map_data_show_grazed_days_and_area_per_current_lsu(cli
         mob = Mob(farm_id=farm.id, name="Map Mob", status="active")
         db.session.add(mob)
         db.session.flush()
+        mob_id = str(mob.id)
 
         group = AnimalGroupType(species="Cattle", breed="Angus", sex="cow", age_class="adult")
         db.session.add(group)
@@ -1574,6 +1634,9 @@ def test_paddock_page_and_map_data_show_grazed_days_and_area_per_current_lsu(cli
     assert properties["area_ha"] == 12.0
     assert properties["paddock_ha_per_current_lsu"] == 2.0
     assert properties["current_lsu"] == 6.0
+    assert properties["mobs"][0]["mob_id"] == mob_id
+    assert properties["mobs"][0]["mob_name"] == "Map Mob"
+    assert properties["mobs"][0]["mob_url"] == f"/mobs/{mob_id}"
 
 
 def test_paddock_detail_can_rename_name_and_update_farm_kml(client, app, tmp_path):
