@@ -373,7 +373,7 @@ def register_legacy_routes(bp) -> None:
             adjacent_gate_rows=[
                 {
                     **GateService.serialize_gate(gate),
-                    "close_requirements": GateService.close_requirements(gate),
+                    "close_requirements": GateService.close_requirements(gate, farm_id=str(paddock.farm_id)),
                 }
                 for gate in GateService.adjacent_gates_for_paddock(str(paddock.id))
             ],

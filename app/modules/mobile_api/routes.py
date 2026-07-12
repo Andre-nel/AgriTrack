@@ -26,7 +26,6 @@ from app.models import (
     NoteAttachment,
     Paddock,
     PaddockEvent,
-    PaddockGate,
     RainfallRecord,
     Shearer,
     ShearingBaleCode,
@@ -1091,11 +1090,7 @@ def farm_snapshot(farm_id):
         .order_by(WaterConnection.flow_type.asc(), WaterConnection.created_at.asc())
         .all()
     )
-    gates = (
-        PaddockGate.query.filter_by(farm_id=farm.id, active=True)
-        .order_by(PaddockGate.status.asc(), PaddockGate.created_at.asc())
-        .all()
-    )
+    gates = GateService.gates_for_farm(str(farm.id))
     shearers = Shearer.query.order_by(Shearer.active.desc(), Shearer.name.asc()).all()
     shearing_bale_codes = ShearingService.bale_codes_for_species()
     shearing_sessions = ShearingService.sessions_for_farm(str(farm.id))
@@ -2181,7 +2176,7 @@ def _handle_paddock_update(farm: Farm, payload: dict) -> dict:
 
 def _handle_gate_update(farm: Farm, payload: dict) -> dict:
     gate_id = str(payload.get("gate_id") or "").strip()
-    gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm.id, active=True).first()
+    gate = GateService.gate_for_farm(str(farm.id), gate_id, active_only=True)
     if gate is None:
         raise MobileApiError("not_found", "Gate not found for this farm", 404)
 
@@ -2194,6 +2189,7 @@ def _handle_gate_update(farm: Farm, payload: dict) -> dict:
         payload.get("status"),
         event_time=_parse_iso_datetime(payload.get("event_time"), "event_time"),
         closure_choices=closure_choices,
+        farm_id=str(farm.id),
     )
     db.session.flush()
     return {

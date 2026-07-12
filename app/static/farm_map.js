@@ -16,6 +16,9 @@
     .toLowerCase();
   const showStockFloats = mapElement.dataset.showStockFloats !== "0";
   const gateCreateUrl = mapElement.dataset.gateCreateUrl || "";
+  const gateRequiresFarmSelection = mapElement.dataset.gateRequiresFarmSelection === "1";
+  const configuredGateFarmOptions = parseGateFarmOptions(mapElement.dataset.gateFarmOptions || "[]");
+  const configuredGatePaddockOptions = parseGatePaddockOptions(mapElement.dataset.gatePaddockOptions || "[]");
   const gateDetailUrlTemplate = mapElement.dataset.gateDetailUrlTemplate || "";
   const gateStateUrlTemplate = mapElement.dataset.gateStateUrlTemplate || "";
   const gateLocationUrlTemplate = mapElement.dataset.gateLocationUrlTemplate || "";
@@ -838,8 +841,9 @@
     if (props.feature_type !== "paddock") {
       if (props.feature_type === "gate") {
         const paddockNames = Array.isArray(props.paddock_names) ? props.paddock_names : [];
-        const connectedText = paddockNames.length
-          ? paddockNames.map((item) => escapeHtml(item)).join(" / ")
+        const paddockLabels = Array.isArray(props.paddock_labels) ? props.paddock_labels : paddockNames;
+        const connectedText = paddockLabels.length
+          ? paddockLabels.map((item) => escapeHtml(item)).join(" / ")
           : escapeHtml(props.name || "Gate");
         const gateId = props.gate_id || props.id || "";
         const status = normalizeKey(props.status) === "open" ? "open" : "closed";
@@ -1155,21 +1159,86 @@
       rows.push({
         id: paddockId,
         name: props.name || "Unnamed Camp",
+        farmId: props.farm_id || "",
+        farmName: props.farm_name || "",
+        label: props.name || "Unnamed Camp",
       });
     });
     return rows.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  function parseGatePaddockOptions(raw) {
+    let rows = [];
+    try {
+      rows = JSON.parse(raw || "[]");
+    } catch (error) {
+      rows = [];
+    }
+    if (!Array.isArray(rows)) {
+      return [];
+    }
+    return rows
+      .map((row) => ({
+        id: String((row && row.id) || "").trim(),
+        name: String((row && row.name) || "").trim(),
+        farmId: String((row && row.farm_id) || "").trim(),
+        farmName: String((row && row.farm_name) || "").trim(),
+        label: String((row && (row.label || row.name)) || "").trim(),
+      }))
+      .filter((row) => row.id && row.name);
+  }
+
+  function parseGateFarmOptions(raw) {
+    let rows = [];
+    try {
+      rows = JSON.parse(raw || "[]");
+    } catch (error) {
+      rows = [];
+    }
+    if (!Array.isArray(rows)) {
+      return [];
+    }
+    return rows
+      .map((row) => ({
+        id: String((row && row.id) || "").trim(),
+        name: String((row && row.name) || "").trim(),
+      }))
+      .filter((row) => row.id && row.name);
+  }
+
+  function mergePaddockOptions(featureOptions, configuredOptions) {
+    const merged = new Map();
+    configuredOptions.forEach((row) => {
+      if (!merged.has(row.id)) {
+        merged.set(row.id, row);
+      }
+    });
+    featureOptions.forEach((row) => {
+      if (!merged.has(row.id)) {
+        merged.set(row.id, row);
+      }
+    });
+    return Array.from(merged.values());
   }
 
   function updateAddGateButton() {
     if (!addGateButton) {
       return;
     }
-    const canCreate = Boolean(gateCreateUrl && paddockOptions.length >= 2);
+    const canCreate = Boolean(
+      gateCreateUrl &&
+        paddockOptions.length >= 2 &&
+        (!gateRequiresFarmSelection || configuredGateFarmOptions.length > 0)
+    );
     addGateButton.disabled = !canCreate;
     addGateButton.textContent = gateAddMode ? "Cancel Gate" : "Add Gate";
     addGateButton.setAttribute("aria-pressed", gateAddMode ? "true" : "false");
     addGateButton.setAttribute("aria-label", gateAddMode ? "Cancel gate creation" : "Add a gate on the map");
-    addGateButton.title = canCreate ? "Add a gate on the map" : "At least two mapped paddocks are required";
+    addGateButton.title = canCreate
+      ? "Add a gate on the map"
+      : gateRequiresFarmSelection
+        ? "At least one active farm and two active camps are required"
+        : "At least two active camps are required";
   }
 
   function updateGateToggleButton() {
@@ -1213,7 +1282,12 @@
   }
 
   function setGateAddMode(enabled) {
-    const nextMode = Boolean(enabled && gateCreateUrl && paddockOptions.length >= 2);
+    const nextMode = Boolean(
+      enabled &&
+        gateCreateUrl &&
+        paddockOptions.length >= 2 &&
+        (!gateRequiresFarmSelection || configuredGateFarmOptions.length > 0)
+    );
     gateAddMode = nextMode;
     mapElement.classList.toggle("map-gate-add-mode", gateAddMode);
     if (gateAddMode) {
@@ -1228,7 +1302,16 @@
     return paddockOptions
       .map((paddock) => {
         const selected = paddock.id === selectedId ? " selected" : "";
-        return '<option value="' + escapeHtml(paddock.id) + '"' + selected + ">" + escapeHtml(paddock.name) + "</option>";
+        return '<option value="' + escapeHtml(paddock.id) + '"' + selected + ">" + escapeHtml(paddock.label || paddock.name) + "</option>";
+      })
+      .join("");
+  }
+
+  function farmSelectOptions(selectedId) {
+    return configuredGateFarmOptions
+      .map((farm) => {
+        const selected = farm.id === selectedId ? " selected" : "";
+        return '<option value="' + escapeHtml(farm.id) + '"' + selected + ">" + escapeHtml(farm.name) + "</option>";
       })
       .join("");
   }
@@ -1384,13 +1467,30 @@
   }
 
   function openGateCreatePopup(latlng, suggestedPaddockId) {
-    if (!gateCreateUrl || paddockOptions.length < 2) {
-      setStatus("At least two mapped paddocks are required before a gate can be added.");
+    if (
+      !gateCreateUrl ||
+      paddockOptions.length < 2 ||
+      (gateRequiresFarmSelection && configuredGateFarmOptions.length < 1)
+    ) {
+      setStatus(
+        gateRequiresFarmSelection
+          ? "At least one active farm and two active camps are required before a gate can be added."
+          : "At least two active camps are required before a gate can be added."
+      );
       return;
     }
     const firstId = suggestedPaddockId || paddockOptions[0].id;
+    const first = paddockOptions.find((paddock) => paddock.id === firstId) || paddockOptions[0];
     const second = paddockOptions.find((paddock) => paddock.id !== firstId) || paddockOptions[1];
     const secondId = second ? second.id : "";
+    const selectedFarmId =
+      (first && first.farmId) ||
+      (second && second.farmId) ||
+      (configuredGateFarmOptions[0] && configuredGateFarmOptions[0].id) ||
+      "";
+    const farmSelectHtml = gateRequiresFarmSelection
+      ? '<label>Farm<select name="farm_id" required>' + farmSelectOptions(selectedFarmId) + "</select></label>"
+      : "";
     const popup = L.popup({
       maxWidth: 320,
       closeOnClick: false,
@@ -1402,6 +1502,7 @@
           "<strong>Add Gate</strong>",
           '<input type="hidden" name="latitude" value="' + escapeHtml(latlng.lat.toFixed(8)) + '" />',
           '<input type="hidden" name="longitude" value="' + escapeHtml(latlng.lng.toFixed(8)) + '" />',
+          farmSelectHtml,
           '<label>Camp A<select name="paddock_a_id" required>',
           paddockSelectOptions(firstId),
           "</select></label>",
@@ -1436,6 +1537,11 @@
         showGateCreateError(form, "");
         const paddockAId = form.elements.paddock_a_id.value;
         const paddockBId = form.elements.paddock_b_id.value;
+        const farmId = form.elements.farm_id ? form.elements.farm_id.value : "";
+        if (gateRequiresFarmSelection && !farmId) {
+          showGateCreateError(form, "Choose the farm this gate belongs to.");
+          return;
+        }
         if (!paddockAId || !paddockBId || paddockAId === paddockBId) {
           showGateCreateError(form, "Choose two different camps.");
           return;
@@ -1448,6 +1554,7 @@
         postGateCreate({
           paddock_a_id: paddockAId,
           paddock_b_id: paddockBId,
+          farm_id: farmId || undefined,
           latitude: form.elements.latitude.value,
           longitude: form.elements.longitude.value,
         })
@@ -2338,7 +2445,7 @@
     })
     .then((payload) => {
       const allFeatures = Array.isArray(payload.features) ? payload.features : [];
-      paddockOptions = paddockOptionsFromFeatures(allFeatures);
+      paddockOptions = mergePaddockOptions(paddockOptionsFromFeatures(allFeatures), configuredGatePaddockOptions);
       updateAddGateButton();
       const gateFeatures = allFeatures.filter((feature) => {
         const props = (feature && feature.properties) || {};

@@ -22,14 +22,14 @@
       <label>Camp A
         <select name="paddock_a_id" required>
           {% for paddock in gate_paddock_options %}
-          <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+          <option value="{{ paddock.id }}">{{ paddock.label }}</option>
           {% endfor %}
         </select>
       </label>
       <label>Camp B
         <select name="paddock_b_id" required>
           {% for paddock in gate_paddock_options %}
-          <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+          <option value="{{ paddock.id }}">{{ paddock.label }}</option>
           {% endfor %}
         </select>
       </label>
@@ -65,7 +65,7 @@
     <tbody>
       {% for row in gate_rows %}
       <tr>
-        <td><a href="{{ url_for('web.edit_farm_gate', farm_id=farm.id, gate_id=row.id) }}">{{ row.paddock_names | join(" / ") }}</a></td>
+        <td><a href="{{ url_for('web.edit_farm_gate', farm_id=farm.id, gate_id=row.id) }}">{{ (row.paddock_labels or row.paddock_names) | join(" / ") }}</a></td>
         <td><span class="status-pill status-{{ row.status }}">{{ row.status|capitalize }}</span></td>
         <td>{{ row.source|capitalize }}</td>
         <td>

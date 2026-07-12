@@ -158,6 +158,65 @@ def test_manual_gate_creation_allows_multiple_gates_between_same_paddocks(app):
     assert {float(gate.longitude) for gate in gates} == {25.11111111, 25.22222222}
 
 
+def test_cross_farm_gate_is_visible_to_both_farms_without_cross_farm_redistribution(app):
+    source_farm = Farm(name="Gate Source Farm", timezone="SAST", active=True)
+    neighbor_farm = Farm(name="Gate Neighbor Farm", timezone="SAST", active=True)
+    db.session.add_all([source_farm, neighbor_farm])
+    db.session.flush()
+    source_camp = Paddock(
+        farm_id=source_farm.id,
+        name="Source Camp",
+        area_ha=10,
+        grazeable_area_ha=10,
+        status="active",
+    )
+    neighbor_camp = Paddock(
+        farm_id=neighbor_farm.id,
+        name="Neighbor Camp",
+        area_ha=30,
+        grazeable_area_ha=30,
+        status="active",
+    )
+    db.session.add_all([source_camp, neighbor_camp])
+    db.session.flush()
+    mob = _mob_in_allocations(source_farm, [(source_camp, Decimal("1.0"))])
+    gate = GateService.create_manual_gate(
+        farm_id=str(source_farm.id),
+        paddock_a_id=str(source_camp.id),
+        paddock_b_id=str(neighbor_camp.id),
+    )
+    db.session.commit()
+
+    assert [str(row.id) for row in GateService.gates_for_farm(str(source_farm.id))] == [str(gate.id)]
+    assert [str(row.id) for row in GateService.gates_for_farm(str(neighbor_farm.id))] == [str(gate.id)]
+    assert set(GateService.serialize_gate(gate)["paddock_labels"]) == {
+        "Gate Source Farm: Source Camp",
+        "Gate Neighbor Farm: Neighbor Camp",
+    }
+
+    result = GateService.set_gate_state(
+        gate,
+        "open",
+        event_time=datetime(2026, 6, 12, 8, 0, tzinfo=timezone.utc),
+        farm_id=str(source_farm.id),
+    )
+    db.session.commit()
+
+    assert result["moved_mob_count"] == 0
+    assert _allocation_map(mob) == {str(source_camp.id): Decimal("1.0")}
+
+    close_result = GateService.set_gate_state(
+        gate,
+        "closed",
+        event_time=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        farm_id=str(neighbor_farm.id),
+    )
+    db.session.commit()
+
+    assert close_result["moved_mob_count"] == 0
+    assert gate.status == "closed"
+
+
 def test_open_gate_network_adjusts_new_percentage_move_allocations(app):
     farm, (north, south) = _farm_with_paddocks(("North", 10, 10), ("South", 30, 30))
     gate = GateService.create_manual_gate(

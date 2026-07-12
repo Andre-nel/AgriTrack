@@ -367,6 +367,7 @@ def register_legacy_routes(bp) -> None:
         missing_kml_farms = []
         invalid_kml_farms = []
         kml_paths = []
+        seen_gate_ids = set()
 
         for farm in farms:
             expected_kml_path = Path(current_app.instance_path) / "maps" / f"{farm.name}.kml"
@@ -384,7 +385,15 @@ def register_legacy_routes(bp) -> None:
                 continue
 
             kml_paths.append(payload["kml_path"])
-            combined_features.extend(payload["features"])
+            for feature in payload["features"]:
+                properties = feature.get("properties", {})
+                if properties.get("feature_type") == "gate":
+                    gate_id = properties.get("gate_id") or properties.get("id")
+                    if gate_id:
+                        if gate_id in seen_gate_ids:
+                            continue
+                        seen_gate_ids.add(gate_id)
+                combined_features.append(feature)
             unmatched_placemarks.extend(
                 [f"{farm.name}: {name}" for name in payload["unmatched_placemarks"]]
             )

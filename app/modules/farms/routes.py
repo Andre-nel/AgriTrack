@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
 
-from flask import current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -65,8 +65,40 @@ def _gate_closure_choices_from_payload(payload) -> list[dict]:
 
 
 def _gate_paddock_options(farm_id: str) -> list[dict]:
-    paddocks = Paddock.query.filter_by(farm_id=farm_id, status="active").order_by(Paddock.name.asc()).all()
-    return [{"id": str(paddock.id), "name": paddock.name} for paddock in paddocks]
+    paddocks = (
+        Paddock.query.join(Farm)
+        .filter(Paddock.status == "active", Farm.active.is_(True))
+        .all()
+    )
+    rows = sorted(
+        paddocks,
+        key=lambda paddock: (
+            str(paddock.farm_id) != str(farm_id),
+            paddock.farm.name.lower() if paddock.farm else "",
+            paddock.name.lower(),
+        ),
+    )
+    return [
+        {
+            "id": str(paddock.id),
+            "name": paddock.name,
+            "farm_id": str(paddock.farm_id),
+            "farm_name": paddock.farm.name if paddock.farm else "",
+            "label": (
+                paddock.name
+                if str(paddock.farm_id) == str(farm_id)
+                else f"{paddock.farm.name}: {paddock.name}" if paddock.farm else paddock.name
+            ),
+        }
+        for paddock in rows
+    ]
+
+
+def _gate_or_404(farm_id: str, gate_id: str) -> PaddockGate:
+    gate = GateService.gate_for_farm(farm_id, gate_id)
+    if gate is None:
+        abort(404)
+    return gate
 
 
 def register_legacy_routes(bp) -> None:
@@ -284,6 +316,7 @@ def register_legacy_routes(bp) -> None:
             mob_detail_labels=mob_detail_labels,
             water_summary=water_summary,
             gate_count=gate_count,
+            gate_paddock_options=_gate_paddock_options(str(farm.id)),
             fence_count=fence_count,
         )
 
@@ -342,10 +375,10 @@ def register_legacy_routes(bp) -> None:
     @bp.get("/farms/<farm_id>/gates/<gate_id>")
     def farm_gate_detail(farm_id, gate_id):
         farm = Farm.query.get_or_404(farm_id)
-        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        gate = _gate_or_404(farm_id, gate_id)
         gate_row = {
             **GateService.serialize_gate(gate),
-            "close_requirements": GateService.close_requirements(gate),
+            "close_requirements": GateService.close_requirements(gate, farm_id=farm_id),
         }
         wants_json = "application/json" in request.headers.get("Accept", "")
         if not wants_json:
@@ -366,14 +399,14 @@ def register_legacy_routes(bp) -> None:
     @bp.get("/farms/<farm_id>/gates/<gate_id>/edit")
     def edit_farm_gate(farm_id, gate_id):
         farm = Farm.query.get_or_404(farm_id)
-        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        gate = _gate_or_404(farm_id, gate_id)
         return render_template(
             "farm_gate_detail.html",
             farm=farm,
             gate=gate,
             gate_row={
                 **GateService.serialize_gate(gate),
-                "close_requirements": GateService.close_requirements(gate),
+                "close_requirements": GateService.close_requirements(gate, farm_id=farm_id),
             },
             gate_paddock_options=_gate_paddock_options(str(farm.id)),
         )
@@ -381,7 +414,7 @@ def register_legacy_routes(bp) -> None:
     @bp.post("/farms/<farm_id>/gates/<gate_id>")
     def update_farm_gate_form(farm_id, gate_id):
         Farm.query.get_or_404(farm_id)
-        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        gate = _gate_or_404(farm_id, gate_id)
         try:
             GateService.update_gate_details(
                 gate,
@@ -389,6 +422,7 @@ def register_legacy_routes(bp) -> None:
                 paddock_b_id=request.form.get("paddock_b_id"),
                 latitude=request.form.get("latitude"),
                 longitude=request.form.get("longitude"),
+                farm_id=farm_id,
             )
             db.session.commit()
             flash("Gate details updated.", "success")
@@ -400,7 +434,7 @@ def register_legacy_routes(bp) -> None:
     @bp.post("/farms/<farm_id>/gates/<gate_id>/delete")
     def delete_farm_gate_form(farm_id, gate_id):
         Farm.query.get_or_404(farm_id)
-        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        gate = _gate_or_404(farm_id, gate_id)
         try:
             GateService.delete_gate(gate)
             db.session.commit()
@@ -414,7 +448,7 @@ def register_legacy_routes(bp) -> None:
     @bp.post("/farms/<farm_id>/gates/<gate_id>/state")
     def update_farm_gate_state_form(farm_id, gate_id):
         Farm.query.get_or_404(farm_id)
-        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        gate = _gate_or_404(farm_id, gate_id)
         payload = request.get_json(silent=True) or {}
         wants_json = request.is_json or "application/json" in request.headers.get("Accept", "")
         status = payload.get("status") if isinstance(payload, dict) else None
@@ -430,6 +464,7 @@ def register_legacy_routes(bp) -> None:
                 status,
                 event_time=_parse_gate_event_time(event_time_raw),
                 closure_choices=closure_choices,
+                farm_id=farm_id,
             )
             db.session.commit()
             if wants_json:
@@ -437,7 +472,7 @@ def register_legacy_routes(bp) -> None:
                     {
                         "gate": GateService.serialize_gate(result["gate"]),
                         "moved_mob_count": result["moved_mob_count"],
-                        "close_requirements": GateService.close_requirements(result["gate"]),
+                        "close_requirements": GateService.close_requirements(result["gate"], farm_id=farm_id),
                     }
                 )
             flash(
@@ -454,7 +489,7 @@ def register_legacy_routes(bp) -> None:
     @bp.post("/farms/<farm_id>/gates/<gate_id>/location")
     def update_farm_gate_location(farm_id, gate_id):
         Farm.query.get_or_404(farm_id)
-        gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        gate = _gate_or_404(farm_id, gate_id)
         payload = request.get_json(silent=True) or request.form
         try:
             GateService.update_gate_location(

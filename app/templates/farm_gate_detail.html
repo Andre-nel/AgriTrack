@@ -18,14 +18,14 @@
       <label>Camp A
         <select name="paddock_a_id" required>
           {% for paddock in gate_paddock_options %}
-          <option value="{{ paddock.id }}" {% if paddock.id == gate_row.paddock_a_id %}selected{% endif %}>{{ paddock.name }}</option>
+          <option value="{{ paddock.id }}" {% if paddock.id == gate_row.paddock_a_id %}selected{% endif %}>{{ paddock.label }}</option>
           {% endfor %}
         </select>
       </label>
       <label>Camp B
         <select name="paddock_b_id" required>
           {% for paddock in gate_paddock_options %}
-          <option value="{{ paddock.id }}" {% if paddock.id == gate_row.paddock_b_id %}selected{% endif %}>{{ paddock.name }}</option>
+          <option value="{{ paddock.id }}" {% if paddock.id == gate_row.paddock_b_id %}selected{% endif %}>{{ paddock.label }}</option>
           {% endfor %}
         </select>
       </label>
@@ -78,7 +78,7 @@
   <h2>Gate Details</h2>
   <table>
     <tbody>
-      <tr><th>Connected Camps</th><td>{{ gate_row.paddock_names | join(" / ") }}</td></tr>
+      <tr><th>Connected Camps</th><td>{{ (gate_row.paddock_labels or gate_row.paddock_names) | join(" / ") }}</td></tr>
       <tr><th>Status</th><td><span class="status-pill status-{{ gate_row.status }}">{{ gate_row.status|capitalize }}</span></td></tr>
       <tr><th>Source</th><td>{{ gate_row.source|capitalize }}</td></tr>
       <tr>

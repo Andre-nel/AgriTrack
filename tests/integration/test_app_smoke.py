@@ -229,6 +229,8 @@ def test_web_dashboard_loads(client):
     assert response.status_code == 200
     assert b"Dashboard" in response.data
     assert b'data-base-layer="satellite"' in response.data
+    assert b'data-gate-create-url="/dashboard/gates"' in response.data
+    assert b'data-gate-requires-farm-selection="1"' in response.data
 
 
 def test_analytics_pages_load(client):
@@ -608,6 +610,127 @@ def test_web_gate_create_route_accepts_map_json_and_returns_feature(client, app)
     assert {tuple(feature["geometry"]["coordinates"]) for feature in gate_features} == {
         (25.33333333, -32.22222222),
         (25.55555555, -32.44444444),
+    }
+
+
+def test_web_gate_routes_allow_cross_farm_connected_camps(client, app):
+    with app.app_context():
+        source_farm = Farm(name="Cross Gate Source", timezone="SAST", active=True)
+        neighbor_farm = Farm(name="Cross Gate Neighbor", timezone="SAST", active=True)
+        db.session.add_all([source_farm, neighbor_farm])
+        db.session.flush()
+        source_camp = Paddock(
+            farm_id=source_farm.id,
+            name="Source Gate Camp",
+            area_ha=10,
+            grazeable_area_ha=10,
+            status="active",
+        )
+        neighbor_camp = Paddock(
+            farm_id=neighbor_farm.id,
+            name="Neighbor Gate Camp",
+            area_ha=12,
+            grazeable_area_ha=12,
+            status="active",
+        )
+        db.session.add_all([source_camp, neighbor_camp])
+        db.session.commit()
+        source_farm_id = str(source_farm.id)
+        neighbor_farm_id = str(neighbor_farm.id)
+        source_camp_id = str(source_camp.id)
+        neighbor_camp_id = str(neighbor_camp.id)
+
+    response = client.post(
+        f"/farms/{source_farm_id}/gates",
+        json={
+            "paddock_a_id": source_camp_id,
+            "paddock_b_id": neighbor_camp_id,
+            "latitude": -32.33333333,
+            "longitude": 25.44444444,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    gate_id = payload["gate"]["id"]
+    assert set(payload["gate"]["paddock_labels"]) == {
+        "Cross Gate Source: Source Gate Camp",
+        "Cross Gate Neighbor: Neighbor Gate Camp",
+    }
+
+    response = client.get(f"/farms/{neighbor_farm_id}/gates")
+    assert response.status_code == 200
+    assert b"Cross Gate Source: Source Gate Camp" in response.data
+    assert b"Neighbor Gate Camp" in response.data
+
+    response = client.get(f"/farms/{neighbor_farm_id}/gates/{gate_id}", headers={"Accept": "application/json"})
+    assert response.status_code == 200
+    assert response.get_json()["gate"]["id"] == gate_id
+
+    response = client.post(f"/farms/{neighbor_farm_id}/gates/{gate_id}/state", json={"status": "open"})
+    assert response.status_code == 200
+    assert response.get_json()["moved_mob_count"] == 0
+
+    with app.app_context():
+        assert db.session.get(PaddockGate, gate_id).status == "open"
+
+
+def test_dashboard_gate_create_route_requires_farm_selection(client, app):
+    with app.app_context():
+        source_farm = Farm(name="Dashboard Gate Source", timezone="SAST", active=True)
+        neighbor_farm = Farm(name="Dashboard Gate Neighbor", timezone="SAST", active=True)
+        db.session.add_all([source_farm, neighbor_farm])
+        db.session.flush()
+        source_camp = Paddock(
+            farm_id=source_farm.id,
+            name="Dashboard Source Camp",
+            area_ha=10,
+            grazeable_area_ha=10,
+            status="active",
+        )
+        neighbor_camp = Paddock(
+            farm_id=neighbor_farm.id,
+            name="Dashboard Neighbor Camp",
+            area_ha=12,
+            grazeable_area_ha=12,
+            status="active",
+        )
+        db.session.add_all([source_camp, neighbor_camp])
+        db.session.commit()
+        source_farm_id = str(source_farm.id)
+        source_camp_id = str(source_camp.id)
+        neighbor_camp_id = str(neighbor_camp.id)
+
+    dashboard = client.get("/")
+    assert dashboard.status_code == 200
+    assert b"Dashboard Gate Source: Dashboard Source Camp" in dashboard.data
+    assert b"Dashboard Gate Neighbor" in dashboard.data
+
+    missing_farm = client.post(
+        "/dashboard/gates",
+        json={"paddock_a_id": source_camp_id, "paddock_b_id": neighbor_camp_id},
+    )
+    assert missing_farm.status_code == 400
+
+    response = client.post(
+        "/dashboard/gates",
+        json={
+            "farm_id": source_farm_id,
+            "paddock_a_id": source_camp_id,
+            "paddock_b_id": neighbor_camp_id,
+            "latitude": -32.66666666,
+            "longitude": 25.77777777,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    gate = payload["gate"]
+    assert gate["farm_id"] == source_farm_id
+    assert gate["gate_detail_url"] == f"/farms/{source_farm_id}/gates/{gate['id']}"
+    assert gate["gate_state_url"] == f"/farms/{source_farm_id}/gates/{gate['id']}/state"
+    assert gate["gate_location_url"] == f"/farms/{source_farm_id}/gates/{gate['id']}/location"
+    assert set(gate["paddock_labels"]) == {
+        "Dashboard Gate Source: Dashboard Source Camp",
+        "Dashboard Gate Neighbor: Dashboard Neighbor Camp",
     }
 
 

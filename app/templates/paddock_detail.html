@@ -362,7 +362,7 @@
     <tbody>
       {% for row in adjacent_gate_rows %}
       <tr>
-        <td><a href="{{ url_for('web.edit_farm_gate', farm_id=paddock.farm_id, gate_id=row.id) }}">{{ row.paddock_names | join(" / ") }}</a></td>
+        <td><a href="{{ url_for('web.edit_farm_gate', farm_id=paddock.farm_id, gate_id=row.id) }}">{{ (row.paddock_labels or row.paddock_names) | join(" / ") }}</a></td>
         <td><span class="status-pill status-{{ row.status }}">{{ row.status|capitalize }}</span></td>
         <td>{{ row.source|capitalize }}</td>
         <td>

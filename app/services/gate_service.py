@@ -8,6 +8,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from sqlalchemy import or_
+from sqlalchemy.orm import aliased
 
 from app.extensions import db
 from app.models import Farm, GrazingSession, Mob, Paddock, PaddockGate
@@ -50,16 +51,86 @@ class GateService:
             raise ValueError("A gate must connect two different paddocks")
         return tuple(sorted((left, right)))
 
+    @staticmethod
+    def _gate_anchor_paddock_id(gate: PaddockGate, paddock_ids: set[str]) -> str:
+        paddock_a_id = str(gate.paddock_a_id)
+        paddock_b_id = str(gate.paddock_b_id)
+        if paddock_a_id in paddock_ids:
+            return paddock_a_id
+        if paddock_b_id in paddock_ids:
+            return paddock_b_id
+        return paddock_a_id
+
+    @classmethod
+    def _active_paddocks_for_ids(cls, paddock_ids: list[str]) -> dict[str, Paddock]:
+        ids = [str(paddock_id) for paddock_id in dict.fromkeys(paddock_ids) if str(paddock_id)]
+        if not ids:
+            return {}
+        return {
+            str(paddock.id): paddock
+            for paddock in Paddock.query.join(Farm).filter(
+                Paddock.id.in_(ids),
+                Paddock.status == "active",
+                Farm.active.is_(True),
+            ).all()
+        }
+
+    @classmethod
+    def _validate_gate_paddocks(
+        cls,
+        *,
+        farm_id: str,
+        paddock_a_id: str,
+        paddock_b_id: str,
+    ) -> dict[str, Paddock]:
+        paddocks = cls._active_paddocks_for_ids([paddock_a_id, paddock_b_id])
+        if set(paddocks) != {paddock_a_id, paddock_b_id}:
+            raise ValueError("Selected paddocks must be active")
+        if not any(str(paddock.farm_id) == str(farm_id) for paddock in paddocks.values()):
+            raise ValueError("At least one selected camp must belong to this farm")
+        return paddocks
+
     @classmethod
     def gates_for_farm(cls, farm_id: str, *, active_only: bool = True) -> list[PaddockGate]:
-        query = PaddockGate.query.filter_by(farm_id=farm_id)
+        paddock_a = aliased(Paddock)
+        paddock_b = aliased(Paddock)
+        query = (
+            PaddockGate.query.join(paddock_a, PaddockGate.paddock_a_id == paddock_a.id)
+            .join(paddock_b, PaddockGate.paddock_b_id == paddock_b.id)
+            .filter(
+                or_(
+                    PaddockGate.farm_id == farm_id,
+                    paddock_a.farm_id == farm_id,
+                    paddock_b.farm_id == farm_id,
+                )
+            )
+        )
         if active_only:
-            query = query.filter_by(active=True)
+            query = query.filter(PaddockGate.active.is_(True))
         return (
-            query.join(Paddock, PaddockGate.paddock_a_id == Paddock.id)
-            .order_by(Paddock.name.asc(), PaddockGate.created_at.asc())
+            query.order_by(paddock_a.name.asc(), paddock_b.name.asc(), PaddockGate.created_at.asc())
             .all()
         )
+
+    @classmethod
+    def gate_for_farm(cls, farm_id: str, gate_id: str, *, active_only: bool = False) -> PaddockGate | None:
+        paddock_a = aliased(Paddock)
+        paddock_b = aliased(Paddock)
+        query = (
+            PaddockGate.query.join(paddock_a, PaddockGate.paddock_a_id == paddock_a.id)
+            .join(paddock_b, PaddockGate.paddock_b_id == paddock_b.id)
+            .filter(
+                PaddockGate.id == gate_id,
+                or_(
+                    PaddockGate.farm_id == farm_id,
+                    paddock_a.farm_id == farm_id,
+                    paddock_b.farm_id == farm_id,
+                ),
+            )
+        )
+        if active_only:
+            query = query.filter(PaddockGate.active.is_(True))
+        return query.first()
 
     @classmethod
     def adjacent_gates_for_paddock(cls, paddock_id: str) -> list[PaddockGate]:
@@ -126,22 +197,21 @@ class GateService:
         paddock_b_id: str,
         latitude=None,
         longitude=None,
+        farm_id: str | None = None,
     ) -> PaddockGate:
         if not gate.active:
             raise ValueError("Gate is inactive")
+        context_farm_id = str(farm_id or gate.farm_id)
         next_a_id, next_b_id = cls._sorted_pair(paddock_a_id, paddock_b_id)
         if (next_a_id, next_b_id) != (str(gate.paddock_a_id), str(gate.paddock_b_id)):
             if gate.status == PaddockGate.STATUS_OPEN:
                 raise ValueError("Close the gate before changing its connected camps")
-            paddocks = {
-                str(paddock.id): paddock
-                for paddock in Paddock.query.filter(
-                    Paddock.farm_id == gate.farm_id,
-                    Paddock.id.in_([next_a_id, next_b_id]),
-                ).all()
-            }
-            if set(paddocks) != {next_a_id, next_b_id}:
-                raise ValueError("Selected paddocks are invalid for this farm")
+            cls._validate_gate_paddocks(
+                farm_id=context_farm_id,
+                paddock_a_id=next_a_id,
+                paddock_b_id=next_b_id,
+            )
+            gate.farm_id = context_farm_id
             gate.paddock_a_id = next_a_id
             gate.paddock_b_id = next_b_id
             gate.shared_boundary_length_m = None
@@ -178,15 +248,13 @@ class GateService:
         longitude=None,
     ) -> PaddockGate:
         paddock_a_id, paddock_b_id = cls._sorted_pair(paddock_a_id, paddock_b_id)
-        paddocks = {
-            str(paddock.id): paddock
-            for paddock in Paddock.query.filter(
-                Paddock.farm_id == farm_id,
-                Paddock.id.in_([paddock_a_id, paddock_b_id]),
-            ).all()
-        }
-        if set(paddocks) != {paddock_a_id, paddock_b_id}:
-            raise ValueError("Selected paddocks are invalid for this farm")
+        if Farm.query.filter_by(id=farm_id, active=True).first() is None:
+            raise ValueError("Farm is invalid")
+        cls._validate_gate_paddocks(
+            farm_id=farm_id,
+            paddock_a_id=paddock_a_id,
+            paddock_b_id=paddock_b_id,
+        )
 
         gate = PaddockGate(
             farm_id=farm_id,
@@ -461,7 +529,7 @@ class GateService:
         override_status: str | None = None,
     ) -> list[tuple[str, str]]:
         edges = []
-        for gate in PaddockGate.query.filter_by(farm_id=farm_id, active=True).all():
+        for gate in cls.gates_for_farm(farm_id):
             status = gate.status
             if override_gate is not None and str(gate.id) == str(override_gate.id):
                 status = override_status or status
@@ -524,16 +592,17 @@ class GateService:
         return options
 
     @classmethod
-    def close_requirements(cls, gate: PaddockGate) -> dict:
+    def close_requirements(cls, gate: PaddockGate, *, farm_id: str | None = None) -> dict:
         if gate.status != PaddockGate.STATUS_OPEN:
             return {"requires_choices": False, "mobs": [], "components": []}
 
-        farm_id = str(gate.farm_id)
+        farm_id = str(farm_id or gate.farm_id)
         paddocks_by_id = cls._active_paddocks_by_id(farm_id)
         all_ids = set(paddocks_by_id)
+        anchor_paddock_id = cls._gate_anchor_paddock_id(gate, all_ids)
         before_component = cls._component_containing(
             cls._components(all_ids, cls._open_edges(farm_id)),
-            str(gate.paddock_a_id),
+            anchor_paddock_id,
         )
         after_components = [
             component
@@ -779,9 +848,10 @@ class GateService:
         gate: PaddockGate,
         paddocks_by_id: dict[str, Paddock],
         event_time: datetime,
+        farm_id: str,
     ) -> int:
-        farm_id = str(gate.farm_id)
         all_ids = set(paddocks_by_id)
+        anchor_paddock_id = cls._gate_anchor_paddock_id(gate, all_ids)
         component = cls._component_containing(
             cls._components(
                 all_ids,
@@ -791,7 +861,7 @@ class GateService:
                     override_status=PaddockGate.STATUS_OPEN,
                 ),
             ),
-            str(gate.paddock_a_id),
+            anchor_paddock_id,
         )
         component_paddocks = [paddocks_by_id[paddock_id] for paddock_id in component]
         sessions = cls._active_sessions(farm_id)
@@ -826,12 +896,13 @@ class GateService:
         paddocks_by_id: dict[str, Paddock],
         closure_choices: list[dict] | None,
         event_time: datetime,
+        farm_id: str,
     ) -> int:
-        farm_id = str(gate.farm_id)
         all_ids = set(paddocks_by_id)
+        anchor_paddock_id = cls._gate_anchor_paddock_id(gate, all_ids)
         before_component = cls._component_containing(
             cls._components(all_ids, cls._open_edges(farm_id)),
-            str(gate.paddock_a_id),
+            anchor_paddock_id,
         )
         after_components = cls._components(
             before_component,
@@ -915,6 +986,7 @@ class GateService:
         *,
         event_time: datetime | None = None,
         closure_choices: list[dict] | None = None,
+        farm_id: str | None = None,
     ) -> dict:
         target_status = cls.validate_gate_status(status)
         event_time = cls._normalize_datetime(event_time)
@@ -923,19 +995,24 @@ class GateService:
         if gate.status == target_status:
             return {"gate": gate, "moved_mob_count": 0}
 
-        farm_id = str(gate.farm_id)
-        paddocks_by_id = cls._active_paddocks_by_id(farm_id)
-        if str(gate.paddock_a_id) not in paddocks_by_id or str(gate.paddock_b_id) not in paddocks_by_id:
+        context_farm_id = str(farm_id or gate.farm_id)
+        gate_paddocks = cls._active_paddocks_for_ids([str(gate.paddock_a_id), str(gate.paddock_b_id)])
+        if set(gate_paddocks) != {str(gate.paddock_a_id), str(gate.paddock_b_id)}:
             raise ValueError("Gate paddocks must be active")
 
+        paddocks_by_id = cls._active_paddocks_by_id(context_farm_id)
+        if str(gate.paddock_a_id) not in paddocks_by_id and str(gate.paddock_b_id) not in paddocks_by_id:
+            raise ValueError("Gate is not connected to this farm")
+
         if target_status == PaddockGate.STATUS_OPEN:
-            moved_count = cls._redistribute_for_open(gate, paddocks_by_id, event_time)
+            moved_count = cls._redistribute_for_open(gate, paddocks_by_id, event_time, context_farm_id)
         else:
             moved_count = cls._redistribute_for_close(
                 gate,
                 paddocks_by_id,
                 closure_choices,
                 event_time,
+                context_farm_id,
             )
 
         gate.status = target_status
@@ -946,16 +1023,34 @@ class GateService:
     def serialize_gate(cls, gate: PaddockGate) -> dict:
         paddock_a_name = gate.paddock_a.name if gate.paddock_a else None
         paddock_b_name = gate.paddock_b.name if gate.paddock_b else None
+        paddock_a_farm = gate.paddock_a.farm if gate.paddock_a else None
+        paddock_b_farm = gate.paddock_b.farm if gate.paddock_b else None
+        cross_farm = (
+            gate.paddock_a
+            and gate.paddock_b
+            and str(gate.paddock_a.farm_id) != str(gate.paddock_b.farm_id)
+        )
+        paddock_a_label = (
+            f"{paddock_a_farm.name}: {paddock_a_name}" if cross_farm and paddock_a_farm else paddock_a_name
+        )
+        paddock_b_label = (
+            f"{paddock_b_farm.name}: {paddock_b_name}" if cross_farm and paddock_b_farm else paddock_b_name
+        )
         return {
             "id": str(gate.id),
             "gate_id": str(gate.id),
             "farm_id": str(gate.farm_id),
             "paddock_a_id": str(gate.paddock_a_id),
             "paddock_a_name": paddock_a_name,
+            "paddock_a_farm_id": str(gate.paddock_a.farm_id) if gate.paddock_a else None,
+            "paddock_a_farm_name": paddock_a_farm.name if paddock_a_farm else None,
             "paddock_b_id": str(gate.paddock_b_id),
             "paddock_b_name": paddock_b_name,
+            "paddock_b_farm_id": str(gate.paddock_b.farm_id) if gate.paddock_b else None,
+            "paddock_b_farm_name": paddock_b_farm.name if paddock_b_farm else None,
             "paddock_names": [name for name in [paddock_a_name, paddock_b_name] if name],
-            "name": f"{paddock_a_name or 'Paddock'} / {paddock_b_name or 'Paddock'} Gate",
+            "paddock_labels": [label for label in [paddock_a_label, paddock_b_label] if label],
+            "name": f"{paddock_a_label or 'Paddock'} / {paddock_b_label or 'Paddock'} Gate",
             "status": gate.status,
             "active": bool(gate.active),
             "source": gate.source,
@@ -999,7 +1094,7 @@ class GateService:
             rows.append(
                 {
                     **cls.serialize_gate(gate),
-                    "close_requirements": cls.close_requirements(gate),
+                    "close_requirements": cls.close_requirements(gate, farm_id=farm_id),
                 }
             )
         return rows

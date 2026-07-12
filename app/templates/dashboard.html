@@ -29,6 +29,12 @@
     data-sheep-icon="{{ url_for('static', filename='sheep.png') }}"
     data-goat-icon="{{ url_for('static', filename='goat.png') }}"
     data-base-layer="satellite"
+    data-gate-create-url="{{ url_for('web.create_dashboard_gate_form') }}"
+    data-gate-requires-farm-selection="1"
+    data-gate-farm-options='{{ gate_farm_options | tojson }}'
+    data-gate-paddock-options='{{ gate_paddock_options | tojson }}'
+    data-gate-open-icon="{{ url_for('static', filename='ranch_gate_open.svg') }}"
+    data-gate-closed-icon="{{ url_for('static', filename='ranch_gate_closed.svg') }}"
   ></div>
   <div class="map-legend map-legend-scale" aria-hidden="true">
     <span class="scale-label">Low</span>
