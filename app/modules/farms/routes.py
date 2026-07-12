@@ -341,12 +341,25 @@ def register_legacy_routes(bp) -> None:
 
     @bp.get("/farms/<farm_id>/gates/<gate_id>")
     def farm_gate_detail(farm_id, gate_id):
-        Farm.query.get_or_404(farm_id)
+        farm = Farm.query.get_or_404(farm_id)
         gate = PaddockGate.query.filter_by(id=gate_id, farm_id=farm_id).first_or_404()
+        gate_row = {
+            **GateService.serialize_gate(gate),
+            "close_requirements": GateService.close_requirements(gate),
+        }
+        wants_json = "application/json" in request.headers.get("Accept", "")
+        if not wants_json:
+            return render_template(
+                "farm_gate_detail.html",
+                farm=farm,
+                gate=gate,
+                gate_row=gate_row,
+                gate_paddock_options=_gate_paddock_options(str(farm.id)),
+            )
         return jsonify(
             {
-                "gate": GateService.serialize_gate(gate),
-                "close_requirements": GateService.close_requirements(gate),
+                "gate": gate_row,
+                "close_requirements": gate_row["close_requirements"],
             }
         )
 

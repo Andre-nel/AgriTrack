@@ -142,13 +142,6 @@ class GateService:
             }
             if set(paddocks) != {next_a_id, next_b_id}:
                 raise ValueError("Selected paddocks are invalid for this farm")
-            duplicate = PaddockGate.query.filter_by(
-                farm_id=gate.farm_id,
-                paddock_a_id=next_a_id,
-                paddock_b_id=next_b_id,
-            ).first()
-            if duplicate is not None and str(duplicate.id) != str(gate.id):
-                raise ValueError("A gate already exists between those camps")
             gate.paddock_a_id = next_a_id
             gate.paddock_b_id = next_b_id
             gate.shared_boundary_length_m = None
@@ -195,31 +188,28 @@ class GateService:
         if set(paddocks) != {paddock_a_id, paddock_b_id}:
             raise ValueError("Selected paddocks are invalid for this farm")
 
-        gate = PaddockGate.query.filter_by(
+        gate = PaddockGate(
             farm_id=farm_id,
             paddock_a_id=paddock_a_id,
             paddock_b_id=paddock_b_id,
-        ).first()
-        if gate is None:
-            gate = PaddockGate(
-                farm_id=farm_id,
-                paddock_a_id=paddock_a_id,
-                paddock_b_id=paddock_b_id,
-                status=PaddockGate.STATUS_CLOSED,
-                active=True,
-                source=PaddockGate.SOURCE_MANUAL,
-                latitude=latitude,
-                longitude=longitude,
-                last_state_changed_at=cls._utcnow(),
-            )
-            db.session.add(gate)
-        else:
-            gate.active = True
-            gate.source = PaddockGate.SOURCE_MANUAL
-            if latitude not in (None, ""):
-                gate.latitude = latitude
-            if longitude not in (None, ""):
-                gate.longitude = longitude
+            status=PaddockGate.STATUS_CLOSED,
+            active=True,
+            source=PaddockGate.SOURCE_MANUAL,
+            latitude=cls._optional_coordinate_decimal(
+                latitude,
+                label="Latitude",
+                minimum=Decimal("-90"),
+                maximum=Decimal("90"),
+            ),
+            longitude=cls._optional_coordinate_decimal(
+                longitude,
+                label="Longitude",
+                minimum=Decimal("-180"),
+                maximum=Decimal("180"),
+            ),
+            last_state_changed_at=cls._utcnow(),
+        )
+        db.session.add(gate)
         return gate
 
     @staticmethod
@@ -387,10 +377,19 @@ class GateService:
     @classmethod
     def sync_auto_gates_from_candidates(cls, farm_id: str, rows: list[dict]) -> dict:
         detections = cls.detect_shared_boundaries(rows)
-        existing = {
-            (str(gate.paddock_a_id), str(gate.paddock_b_id)): gate
-            for gate in PaddockGate.query.filter_by(farm_id=farm_id).all()
-        }
+        existing_gates = (
+            PaddockGate.query.filter_by(farm_id=farm_id)
+            .order_by(PaddockGate.created_at.asc(), PaddockGate.id.asc())
+            .all()
+        )
+        existing = {}
+        for gate in existing_gates:
+            pair = (str(gate.paddock_a_id), str(gate.paddock_b_id))
+            current = existing.get(pair)
+            if current is None or (
+                current.source != PaddockGate.SOURCE_AUTO and gate.source == PaddockGate.SOURCE_AUTO
+            ):
+                existing[pair] = gate
         seen_pairs = set()
         created = 0
         updated = 0
@@ -425,7 +424,8 @@ class GateService:
                 gate.longitude = detection["longitude"]
             gate.shared_boundary_length_m = round(detection["shared_boundary_length_m"], 2)
 
-        for pair, gate in existing.items():
+        for gate in existing_gates:
+            pair = (str(gate.paddock_a_id), str(gate.paddock_b_id))
             if pair not in seen_pairs and gate.source == PaddockGate.SOURCE_AUTO and gate.active:
                 gate.active = False
                 retired += 1

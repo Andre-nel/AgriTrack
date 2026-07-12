@@ -846,6 +846,9 @@
         const statusText = status === "open" ? "Open" : "Closed";
         const nextStatus = status === "open" ? "closed" : "open";
         const actionText = status === "open" ? "Close Gate" : "Open Gate";
+        const detailLink = props.gate_detail_url
+          ? '<a class="btn btn-secondary" href="' + escapeHtml(props.gate_detail_url) + '">Open Details</a>'
+          : "";
         const actionHtml = gateId
           ? [
               '<form class="map-gate-state-form" data-gate-id="',
@@ -863,6 +866,7 @@
               '<button type="submit" class="btn">',
               actionText,
               "</button>",
+              detailLink,
               "</div>",
               "</form>",
             ].join("")

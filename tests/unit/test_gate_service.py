@@ -132,6 +132,32 @@ def test_open_gate_redistributes_active_mob_by_grazeable_area_and_records_time(a
     assert len(closed_sessions) == 1
 
 
+def test_manual_gate_creation_allows_multiple_gates_between_same_paddocks(app):
+    farm, (north, south) = _farm_with_paddocks(("North", 10, 10), ("South", 30, 30))
+
+    first_gate = GateService.create_manual_gate(
+        farm_id=str(farm.id),
+        paddock_a_id=str(north.id),
+        paddock_b_id=str(south.id),
+        latitude="-32.11111111",
+        longitude="25.11111111",
+    )
+    second_gate = GateService.create_manual_gate(
+        farm_id=str(farm.id),
+        paddock_a_id=str(north.id),
+        paddock_b_id=str(south.id),
+        latitude="-32.22222222",
+        longitude="25.22222222",
+    )
+    db.session.commit()
+
+    gates = GateService.gates_for_farm(str(farm.id))
+    assert len(gates) == 2
+    assert str(first_gate.id) != str(second_gate.id)
+    assert {float(gate.latitude) for gate in gates} == {-32.11111111, -32.22222222}
+    assert {float(gate.longitude) for gate in gates} == {25.11111111, 25.22222222}
+
+
 def test_open_gate_network_adjusts_new_percentage_move_allocations(app):
     farm, (north, south) = _farm_with_paddocks(("North", 10, 10), ("South", 30, 30))
     gate = GateService.create_manual_gate(

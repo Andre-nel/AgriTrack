@@ -43,5 +43,4 @@ class PaddockGate(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         db.CheckConstraint("paddock_a_id < paddock_b_id", name="ck_paddock_gate_sorted_ids"),
         db.CheckConstraint("status IN ('open', 'closed')", name="ck_paddock_gate_status"),
         db.CheckConstraint("source IN ('auto', 'manual')", name="ck_paddock_gate_source"),
-        db.UniqueConstraint("farm_id", "paddock_a_id", "paddock_b_id", name="uq_gate_paddock_pair"),
     )

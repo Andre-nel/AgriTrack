@@ -576,6 +576,22 @@ def test_web_gate_create_route_accepts_map_json_and_returns_feature(client, app)
     assert payload["gate"]["source"] == "manual"
     assert payload["gate"]["latitude"] == -32.22222222
     assert payload["gate"]["longitude"] == 25.33333333
+    first_gate_id = payload["gate"]["id"]
+
+    response = client.post(
+        f"/farms/{farm_id}/gates",
+        json={
+            "paddock_a_id": north_id,
+            "paddock_b_id": south_id,
+            "latitude": -32.44444444,
+            "longitude": 25.55555555,
+        },
+    )
+    assert response.status_code == 200
+    second_payload = response.get_json()
+    assert second_payload["gate"]["id"] != first_gate_id
+    assert second_payload["gate"]["paddock_a_id"] == payload["gate"]["paddock_a_id"]
+    assert second_payload["gate"]["paddock_b_id"] == payload["gate"]["paddock_b_id"]
 
     response = client.get(f"/farms/{farm_id}/map-data")
     assert response.status_code == 200
@@ -583,9 +599,15 @@ def test_web_gate_create_route_accepts_map_json_and_returns_feature(client, app)
         feature for feature in response.get_json()["features"]
         if feature["properties"].get("feature_type") == "gate"
     ]
-    assert len(gate_features) == 1
-    assert gate_features[0]["properties"]["gate_id"] == payload["gate"]["id"]
-    assert gate_features[0]["geometry"]["coordinates"] == [25.33333333, -32.22222222]
+    assert len(gate_features) == 2
+    assert {feature["properties"]["gate_id"] for feature in gate_features} == {
+        first_gate_id,
+        second_payload["gate"]["id"],
+    }
+    assert {tuple(feature["geometry"]["coordinates"]) for feature in gate_features} == {
+        (25.33333333, -32.22222222),
+        (25.55555555, -32.44444444),
+    }
 
 
 def test_farm_gates_page_supports_update_delete_and_json_detail(client, app):
@@ -611,6 +633,10 @@ def test_farm_gates_page_supports_update_delete_and_json_detail(client, app):
     response = client.get(f"/farms/{farm_id}/gates/{gate_id}", headers={"Accept": "application/json"})
     assert response.status_code == 200
     assert response.get_json()["gate"]["id"] == gate_id
+
+    response = client.get(f"/farms/{farm_id}/gates/{gate_id}")
+    assert response.status_code == 200
+    assert b"Edit Gate" in response.data
 
     response = client.get(f"/farms/{farm_id}/gates/{gate_id}/edit")
     assert response.status_code == 200
