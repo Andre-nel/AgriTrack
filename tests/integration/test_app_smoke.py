@@ -233,6 +233,11 @@ def test_web_dashboard_loads(client):
     assert b'data-gate-requires-farm-selection="1"' in response.data
 
 
+def test_farm_map_gate_create_uses_configured_paddocks_before_map_data_loads():
+    script = Path("app/static/farm_map.js").read_text(encoding="utf-8")
+    assert "let paddockOptions = configuredGatePaddockOptions.slice();" in script
+
+
 def test_analytics_pages_load(client):
     response = client.get("/analytics")
     assert response.status_code == 200

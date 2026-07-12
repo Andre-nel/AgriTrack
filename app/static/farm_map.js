@@ -1093,9 +1093,11 @@
   map.createPane("gatePane");
   map.getPane("gatePane").style.zIndex = "670";
 
+  const baseTileLayers = [];
+
   function addBaseLayers() {
     if (baseLayerMode === "satellite") {
-      L.tileLayer(
+      const imageryLayer = L.tileLayer(
         "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         {
           maxZoom: 20,
@@ -1104,7 +1106,7 @@
             "Powered by Esri | Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
         }
       ).addTo(map);
-      L.tileLayer(
+      const roadsLayer = L.tileLayer(
         "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
         {
           maxZoom: 20,
@@ -1112,7 +1114,7 @@
           attribution: "Roads: Esri",
         }
       ).addTo(map);
-      L.tileLayer(
+      const labelsLayer = L.tileLayer(
         "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         {
           maxZoom: 20,
@@ -1120,13 +1122,15 @@
           attribution: "Labels: Esri",
         }
       ).addTo(map);
+      baseTileLayers.push(imageryLayer, roadsLayer, labelsLayer);
       return;
     }
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    const streetLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 20,
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
+    baseTileLayers.push(streetLayer);
   }
 
   addBaseLayers();
@@ -1134,13 +1138,18 @@
   map.setView([-32.9102, 25.449], 13);
 
   let fullscreenButton = null;
+  let refreshButton = null;
   let labelToggleButton = null;
   let gateToggleButton = null;
   let addGateButton = null;
   let paddockLabelLayer = null;
+  let stockFloatLayer = null;
   let mapFeatureLayer = null;
+  let mapDataLayers = [];
   let gateLayer = null;
-  let paddockOptions = [];
+  let paddockOptions = configuredGatePaddockOptions.slice();
+  let mapDataLoaded = false;
+  let mapReloading = false;
   let labelsVisible = true;
   let gatesVisible = false;
   let gateAddMode = false;
@@ -2320,6 +2329,316 @@
     updateLabelToggleButton();
   }
 
+  function updateRefreshButton() {
+    if (!refreshButton) {
+      return;
+    }
+    const busyLabel = mapDataLoaded ? "Refreshing" : "Loading";
+    refreshButton.textContent = mapReloading ? busyLabel : "Refresh";
+    refreshButton.disabled = mapReloading;
+    refreshButton.setAttribute("aria-label", mapReloading ? busyLabel + " map" : "Refresh map");
+    refreshButton.setAttribute("aria-busy", mapReloading ? "true" : "false");
+    refreshButton.title = mapReloading ? busyLabel + " map" : "Refresh map";
+  }
+
+  function redrawBaseLayers() {
+    baseTileLayers.forEach((layer) => {
+      if (layer && typeof layer.redraw === "function") {
+        layer.redraw();
+      }
+    });
+  }
+
+  function captureMapView() {
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    if (
+      !center ||
+      !Number.isFinite(center.lat) ||
+      !Number.isFinite(center.lng) ||
+      !Number.isFinite(zoom)
+    ) {
+      return null;
+    }
+    return {
+      center: L.latLng(center.lat, center.lng),
+      zoom: zoom,
+    };
+  }
+
+  function clearMapDataLayers() {
+    map.closePopup();
+    if (gateAddMode) {
+      setGateAddMode(false);
+    }
+    if (fenceDrawing) {
+      stopFenceDrawing();
+    }
+    if (fenceEditing) {
+      stopFenceEditing();
+    }
+    if (fenceFocusMode) {
+      clearFenceSelection();
+    }
+    mapDataLayers.forEach((layer) => {
+      if (layer && map.hasLayer(layer)) {
+        map.removeLayer(layer);
+      }
+    });
+    mapDataLayers = [];
+    paddockLabelLayer = null;
+    stockFloatLayer = null;
+    mapFeatureLayer = null;
+    gateLayer = null;
+    gateMarkersById.clear();
+    fenceLayersById.clear();
+    paddockOptions = configuredGatePaddockOptions.slice();
+    updateAddGateButton();
+    updateGateToggleButton();
+    updateLabelToggleButton();
+  }
+
+  function featureCollection(rows) {
+    return {
+      type: "FeatureCollection",
+      features: rows,
+    };
+  }
+
+  function renderMapPayload(payload, options) {
+    const renderOptions = options || {};
+    const allFeatures = Array.isArray(payload.features) ? payload.features : [];
+    const gateFeatures = allFeatures.filter((feature) => {
+      const props = (feature && feature.properties) || {};
+      return props.feature_type === "gate";
+    });
+    const features = allFeatures.filter((feature) => {
+      const props = (feature && feature.properties) || {};
+      return props.feature_type !== "gate" && isFeatureVisible(feature);
+    });
+    const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+    const missingKmlFarms = Array.isArray(payload.missing_kml_farms)
+      ? payload.missing_kml_farms.length
+      : 0;
+    const invalidKmlFarms = Array.isArray(payload.invalid_kml_farms)
+      ? payload.invalid_kml_farms.length
+      : 0;
+    const visibleWaterFeatureCount = features.filter((feature) => {
+      const props = (feature && feature.properties) || {};
+      return props.feature_type === "water_asset" || props.feature_type === "water_connection";
+    }).length;
+    const allWaterFeatureCount = allFeatures.filter((feature) => {
+      const props = (feature && feature.properties) || {};
+      return props.feature_type === "water_asset" || props.feature_type === "water_connection";
+    }).length;
+
+    clearMapDataLayers();
+    paddockOptions = mergePaddockOptions(paddockOptionsFromFeatures(allFeatures), configuredGatePaddockOptions);
+    updateAddGateButton();
+
+    if (!features.length) {
+      if (warnings.length) {
+        setStatus(warnings.join(" "));
+      } else if (missingKmlFarms > 0 || invalidKmlFarms > 0) {
+        setStatus(
+          "No map polygons could be loaded. Missing farm KML files: " +
+            missingKmlFarms +
+            ". Invalid farm KML files: " +
+            invalidKmlFarms +
+            "."
+        );
+      } else {
+        setStatus("No polygons were found in the KML.");
+      }
+      return;
+    }
+
+    paddockLabelLayer = L.layerGroup().addTo(map);
+    mapDataLayers.push(paddockLabelLayer);
+    stockFloatLayer = showStockFloats ? L.layerGroup().addTo(map) : null;
+    if (stockFloatLayer) {
+      mapDataLayers.push(stockFloatLayer);
+    }
+
+    const pointToMapLayer = function (feature, latlng) {
+      const props = (feature && feature.properties) || {};
+      if (props.feature_type === "gate") {
+        return gateMarker(feature, latlng);
+      }
+      if (props.feature_type === "water_asset") {
+        return waterAssetMarker(feature, latlng);
+      }
+      return L.marker(latlng);
+    };
+    const bindFeatureInteractions = function (feature, geoLayer) {
+      const props = (feature && feature.properties) || {};
+      const passiveFenceContext =
+        fenceFocusMode && (props.feature_type === "paddock" || props.feature_type === "farm_boundary");
+      if (!passiveFenceContext) {
+        geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
+        bindWaterAlertTooltip(feature, geoLayer);
+      }
+      addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
+      if (!fenceFocusMode) {
+        addStockFloatMarker(feature, geoLayer, stockFloatLayer);
+      }
+      if (props.feature_type === "fence_section") {
+        const fenceId = fenceIdFromFeature(feature);
+        if (fenceId) {
+          fenceLayersById.set(fenceId, geoLayer);
+          geoLayer.on("click", function () {
+            if (fenceDrawing) {
+              return;
+            }
+            selectFenceById(fenceId);
+          });
+        }
+      }
+      if (!fenceFocusMode && props.feature_type === "paddock") {
+        geoLayer.on("click", function (event) {
+          if (!gateAddMode) {
+            return;
+          }
+          suppressNextMapCreateClick = true;
+          openGateCreatePopup(event.latlng, props.paddock_id);
+        });
+      }
+    };
+
+    let layer = null;
+    let boundsLayer = null;
+    if (fenceFocusMode) {
+      const contextFeatures = features.filter((feature) => {
+        const props = (feature && feature.properties) || {};
+        return props.feature_type === "paddock" || props.feature_type === "farm_boundary";
+      });
+      const fenceFeatures = features.filter((feature) => {
+        const props = (feature && feature.properties) || {};
+        return props.feature_type === "fence_section";
+      });
+      const contextLayer = L.geoJSON(featureCollection(contextFeatures), {
+        interactive: false,
+        style: styleForFeature,
+        onEachFeature: function (feature, geoLayer) {
+          addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
+        },
+      }).addTo(map);
+      layer = L.geoJSON(featureCollection(fenceFeatures), {
+        style: styleForFeature,
+        onEachFeature: bindFeatureInteractions,
+      }).addTo(map);
+      mapDataLayers.push(contextLayer, layer);
+      boundsLayer = L.featureGroup([contextLayer, layer]);
+    } else {
+      layer = L.geoJSON(featureCollection(features), {
+        style: styleForFeature,
+        pointToLayer: pointToMapLayer,
+        onEachFeature: bindFeatureInteractions,
+      }).addTo(map);
+      mapDataLayers.push(layer);
+      boundsLayer = layer;
+    }
+    mapFeatureLayer = layer;
+    gateMarkersById.clear();
+    gateLayer = L.geoJSON(featureCollection(gateFeatures), {
+      pointToLayer: function (feature, latlng) {
+        return gateMarker(feature, latlng);
+      },
+      onEachFeature: function (feature, geoLayer) {
+        geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
+      },
+    });
+    mapDataLayers.push(gateLayer);
+    syncGateVisibility();
+    syncPaddockLabelVisibility();
+    updateLabelToggleButton();
+
+    const view = renderOptions.view || null;
+    const bounds = boundsLayer.getBounds();
+    if (view) {
+      map.setView(view.center, view.zoom, { animate: false });
+    } else if (bounds.isValid()) {
+      map.fitBounds(bounds.pad(0.08));
+    }
+
+    const unmatched = Array.isArray(payload.unmatched_placemarks)
+      ? payload.unmatched_placemarks.length
+      : 0;
+    const missing = Array.isArray(payload.paddocks_without_kml)
+      ? payload.paddocks_without_kml.length
+      : 0;
+    const loadedLabel = renderOptions.userInitiated ? "Map refreshed" : "Map loaded";
+
+    if (warnings.length || unmatched > 0 || missing > 0 || missingKmlFarms > 0 || invalidKmlFarms > 0) {
+      const warningParts = [];
+      if (warnings.length) {
+        warningParts.push(warnings.join(" "));
+      }
+      if (missingKmlFarms > 0) {
+        warningParts.push("Missing farm KML files: " + missingKmlFarms + ".");
+      }
+      if (invalidKmlFarms > 0) {
+        warningParts.push("Invalid farm KML files: " + invalidKmlFarms + ".");
+      }
+      if (unmatched > 0) {
+        warningParts.push("Unmatched KML shapes: " + unmatched + ".");
+      }
+      if (missing > 0) {
+        warningParts.push("Paddocks without map geometry: " + missing + ".");
+      }
+      if (hasWaterAssetFilter && allWaterFeatureCount > 0 && visibleWaterFeatureCount === 0) {
+        warningParts.push("Current water asset filters hide all water features.");
+      }
+      setStatus(loadedLabel + " with warnings. " + warningParts.join(" "));
+    } else if (hasWaterAssetFilter && allWaterFeatureCount > 0 && visibleWaterFeatureCount === 0) {
+      setStatus(loadedLabel + ". Current water asset filters hide all water features.");
+    } else {
+      setStatus(loadedLabel + ".");
+    }
+  }
+
+  function loadMapData(options) {
+    const loadOptions = options || {};
+    if (mapReloading) {
+      return Promise.resolve();
+    }
+    const view = loadOptions.preserveView ? captureMapView() : null;
+    mapReloading = true;
+    updateRefreshButton();
+    setStatus(loadOptions.userInitiated ? "Refreshing map..." : "Loading map...");
+    return fetch(dataUrl, { headers: { Accept: "application/json" }, cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Map data is unavailable. Check instance/maps/<farm name>.kml.");
+        }
+        return response.json();
+      })
+      .then((payload) => {
+        renderMapPayload(payload, {
+          userInitiated: Boolean(loadOptions.userInitiated),
+          view: view,
+        });
+        mapDataLoaded = true;
+        refreshMapSize();
+      })
+      .catch((error) => {
+        setStatus(error.message);
+      })
+      .finally(() => {
+        mapReloading = false;
+        updateRefreshButton();
+      });
+  }
+
+  function refreshMapData() {
+    if (mapReloading) {
+      return;
+    }
+    refreshMapSize();
+    redrawBaseLayers();
+    loadMapData({ preserveView: mapDataLoaded, userInitiated: true });
+  }
+
   const LabelToggleControl = L.Control.extend({
     options: {
       position: "topright",
@@ -2351,6 +2670,24 @@
       L.DomEvent.on(gateToggleButton, "click", function (event) {
         L.DomEvent.stop(event);
         toggleGateVisibility();
+      });
+      return container;
+    },
+  });
+
+  const RefreshControl = L.Control.extend({
+    options: {
+      position: "topright",
+    },
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar map-refresh-control");
+      refreshButton = L.DomUtil.create("button", "map-control-button map-refresh-button", container);
+      refreshButton.type = "button";
+      updateRefreshButton();
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(refreshButton, "click", function (event) {
+        L.DomEvent.stop(event);
+        refreshMapData();
       });
       return container;
     },
@@ -2400,6 +2737,7 @@
     map.addControl(new GateToggleControl());
     map.addControl(new AddGateControl());
   }
+  map.addControl(new RefreshControl());
   map.addControl(new FullscreenControl());
 
   map.on("click", function (event) {
@@ -2436,202 +2774,5 @@
     updateFullscreenButton();
     refreshMapSize();
   });
-  fetch(dataUrl, { headers: { Accept: "application/json" } })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error("Map data is unavailable. Check instance/maps/<farm name>.kml.");
-      }
-      return response.json();
-    })
-    .then((payload) => {
-      const allFeatures = Array.isArray(payload.features) ? payload.features : [];
-      paddockOptions = mergePaddockOptions(paddockOptionsFromFeatures(allFeatures), configuredGatePaddockOptions);
-      updateAddGateButton();
-      const gateFeatures = allFeatures.filter((feature) => {
-        const props = (feature && feature.properties) || {};
-        return props.feature_type === "gate";
-      });
-      const features = allFeatures.filter((feature) => {
-        const props = (feature && feature.properties) || {};
-        return props.feature_type !== "gate" && isFeatureVisible(feature);
-      });
-      const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
-      const missingKmlFarms = Array.isArray(payload.missing_kml_farms)
-        ? payload.missing_kml_farms.length
-        : 0;
-      const invalidKmlFarms = Array.isArray(payload.invalid_kml_farms)
-        ? payload.invalid_kml_farms.length
-        : 0;
-      const visibleWaterFeatureCount = features.filter((feature) => {
-        const props = (feature && feature.properties) || {};
-        return props.feature_type === "water_asset" || props.feature_type === "water_connection";
-      }).length;
-      const allWaterFeatureCount = allFeatures.filter((feature) => {
-        const props = (feature && feature.properties) || {};
-        return props.feature_type === "water_asset" || props.feature_type === "water_connection";
-      }).length;
-      if (!features.length) {
-        if (warnings.length) {
-          setStatus(warnings.join(" "));
-        } else if (missingKmlFarms > 0 || invalidKmlFarms > 0) {
-          setStatus(
-            "No map polygons could be loaded. Missing farm KML files: " +
-              missingKmlFarms +
-              ". Invalid farm KML files: " +
-              invalidKmlFarms +
-              "."
-          );
-        } else {
-          setStatus("No polygons were found in the KML.");
-        }
-        return;
-      }
-
-      paddockLabelLayer = L.layerGroup().addTo(map);
-      const stockFloatLayer = showStockFloats ? L.layerGroup().addTo(map) : null;
-      const featureCollection = function (rows) {
-        return {
-          type: "FeatureCollection",
-          features: rows,
-        };
-      };
-      const pointToMapLayer = function (feature, latlng) {
-        const props = (feature && feature.properties) || {};
-        if (props.feature_type === "gate") {
-          return gateMarker(feature, latlng);
-        }
-        if (props.feature_type === "water_asset") {
-          return waterAssetMarker(feature, latlng);
-        }
-        return L.marker(latlng);
-      };
-      const bindFeatureInteractions = function (feature, geoLayer) {
-        const props = (feature && feature.properties) || {};
-        const passiveFenceContext =
-          fenceFocusMode && (props.feature_type === "paddock" || props.feature_type === "farm_boundary");
-        if (!passiveFenceContext) {
-          geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
-          bindWaterAlertTooltip(feature, geoLayer);
-        }
-        addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
-        if (!fenceFocusMode) {
-          addStockFloatMarker(feature, geoLayer, stockFloatLayer);
-        }
-        if (props.feature_type === "fence_section") {
-          const fenceId = fenceIdFromFeature(feature);
-          if (fenceId) {
-            fenceLayersById.set(fenceId, geoLayer);
-            geoLayer.on("click", function () {
-              if (fenceDrawing) {
-                return;
-              }
-              selectFenceById(fenceId);
-            });
-          }
-        }
-        if (!fenceFocusMode && props.feature_type === "paddock") {
-          geoLayer.on("click", function (event) {
-            if (!gateAddMode) {
-              return;
-            }
-            suppressNextMapCreateClick = true;
-            openGateCreatePopup(event.latlng, props.paddock_id);
-          });
-        }
-      };
-      let layer = null;
-      let boundsLayer = null;
-      if (fenceFocusMode) {
-        const contextFeatures = features.filter((feature) => {
-          const props = (feature && feature.properties) || {};
-          return props.feature_type === "paddock" || props.feature_type === "farm_boundary";
-        });
-        const fenceFeatures = features.filter((feature) => {
-          const props = (feature && feature.properties) || {};
-          return props.feature_type === "fence_section";
-        });
-        const contextLayer = L.geoJSON(featureCollection(contextFeatures), {
-          interactive: false,
-          style: styleForFeature,
-          onEachFeature: function (feature, geoLayer) {
-            addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
-          },
-        }).addTo(map);
-        layer = L.geoJSON(featureCollection(fenceFeatures), {
-          style: styleForFeature,
-          onEachFeature: bindFeatureInteractions,
-        }).addTo(map);
-        boundsLayer = L.featureGroup([contextLayer, layer]);
-      } else {
-        layer = L.geoJSON(featureCollection(features), {
-          style: styleForFeature,
-          pointToLayer: pointToMapLayer,
-          onEachFeature: bindFeatureInteractions,
-        }).addTo(map);
-        boundsLayer = layer;
-      }
-      mapFeatureLayer = layer;
-      gateMarkersById.clear();
-      gateLayer = L.geoJSON(
-        {
-          type: "FeatureCollection",
-          features: gateFeatures,
-        },
-        {
-          pointToLayer: function (feature, latlng) {
-            return gateMarker(feature, latlng);
-          },
-          onEachFeature: function (feature, geoLayer) {
-            geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
-          },
-        }
-      );
-      syncGateVisibility();
-      syncPaddockLabelVisibility();
-      updateLabelToggleButton();
-
-      const bounds = boundsLayer.getBounds();
-      if (bounds.isValid()) {
-        map.fitBounds(bounds.pad(0.08));
-      }
-
-      const unmatched = Array.isArray(payload.unmatched_placemarks)
-        ? payload.unmatched_placemarks.length
-        : 0;
-      const missing = Array.isArray(payload.paddocks_without_kml)
-        ? payload.paddocks_without_kml.length
-        : 0;
-
-      if (warnings.length || unmatched > 0 || missing > 0 || missingKmlFarms > 0 || invalidKmlFarms > 0) {
-        const warningParts = [];
-        if (warnings.length) {
-          warningParts.push(warnings.join(" "));
-        }
-        if (missingKmlFarms > 0) {
-          warningParts.push("Missing farm KML files: " + missingKmlFarms + ".");
-        }
-        if (invalidKmlFarms > 0) {
-          warningParts.push("Invalid farm KML files: " + invalidKmlFarms + ".");
-        }
-        if (unmatched > 0) {
-          warningParts.push("Unmatched KML shapes: " + unmatched + ".");
-        }
-        if (missing > 0) {
-          warningParts.push("Paddocks without map geometry: " + missing + ".");
-        }
-        if (hasWaterAssetFilter && allWaterFeatureCount > 0 && visibleWaterFeatureCount === 0) {
-          warningParts.push("Current water asset filters hide all water features.");
-        }
-        setStatus("Map loaded with warnings. " + warningParts.join(" "));
-      } else {
-        if (hasWaterAssetFilter && allWaterFeatureCount > 0 && visibleWaterFeatureCount === 0) {
-          setStatus("Map loaded. Current water asset filters hide all water features.");
-        } else {
-          setStatus("Map loaded.");
-        }
-      }
-    })
-    .catch((error) => {
-      setStatus(error.message);
-    });
+  loadMapData();
 })();
