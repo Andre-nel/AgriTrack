@@ -5,9 +5,18 @@ from types import SimpleNamespace
 import pytest
 
 from app.extensions import db
-from app.models import Farm, GrazingSession, Mob, Paddock
+from app.models import (
+    AnimalGroupBalance,
+    AnimalGroupType,
+    Farm,
+    GrazingAllocationGroupAssignment,
+    GrazingSession,
+    Mob,
+    Paddock,
+)
 from app.services.gate_service import GateService
 from app.services.movement_service import MovementService
+from app.services.reporting_service import ReportingService
 
 
 def _square(lon, lat, size=0.001):
@@ -142,6 +151,46 @@ def test_open_gate_network_adjusts_new_percentage_move_allocations(app):
         {"paddock_id": str(north.id), "allocation_fraction": "0.2500"},
         {"paddock_id": str(south.id), "allocation_fraction": "0.7500"},
     ]
+
+
+def test_open_gate_network_adjusts_new_count_move_allocations(app):
+    farm, (north, south) = _farm_with_paddocks(("North", 10, 10), ("South", 30, 30))
+    group = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+    mob = Mob(farm_id=farm.id, name="Count Gate Mob", status="active")
+    db.session.add_all([group, mob])
+    db.session.flush()
+    db.session.add(
+        AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=12)
+    )
+    gate = GateService.create_manual_gate(
+        farm_id=str(farm.id),
+        paddock_a_id=str(north.id),
+        paddock_b_id=str(south.id),
+    )
+    gate.status = "open"
+    db.session.commit()
+
+    MovementService.move_mob(
+        mob=mob,
+        allocations=[
+            {
+                "paddock_id": str(south.id),
+                "group_counts": [{"animal_group_type_id": str(group.id), "head_count": 12}],
+            }
+        ],
+        destination_farm_id=str(farm.id),
+        allocation_mode="counts",
+        when=datetime(2026, 6, 12, 11, 0, tzinfo=timezone.utc),
+    )
+    db.session.commit()
+
+    assert _allocation_map(mob) == {
+        str(north.id): Decimal("0.2500"),
+        str(south.id): Decimal("0.7500"),
+    }
+    assert GrazingAllocationGroupAssignment.query.count() == 0
+    assert ReportingService.paddock_current_stock(str(north.id))[str(group.id)] == 3.0
+    assert ReportingService.paddock_current_stock(str(south.id))[str(group.id)] == 9.0
 
 
 def test_open_gate_chain_redistributes_across_full_connected_component(app):

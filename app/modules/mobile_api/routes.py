@@ -1867,11 +1867,6 @@ def _handle_mob_move(farm: Farm, payload: dict) -> dict:
         _get_accessible_farm(str(destination_farm_id))
     allocation_mode = payload.get("allocation_mode")
     allocations = payload.get("allocations") or []
-    normalized_mode = str(allocation_mode or "").strip().lower()
-    if not normalized_mode and isinstance(allocations, list):
-        normalized_mode = "counts" if any(item.get("group_counts") for item in allocations if isinstance(item, dict)) else "percentage"
-    if normalized_mode != "counts" and isinstance(allocations, list):
-        allocations = GateService.allocations_for_open_gate_network(str(destination_farm_id), allocations)
     session = MovementService.move_mob(
         mob=mob,
         allocations=allocations,

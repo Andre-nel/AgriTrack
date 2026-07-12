@@ -758,6 +758,7 @@ class GateService:
                 allocations=payloads,
                 destination_farm_id=farm_id,
                 when=event_time,
+                apply_open_gate_network=False,
             )
             moved += 1
         return moved

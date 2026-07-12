@@ -87,10 +87,12 @@ def register_legacy_routes(bp) -> None:
 
                 MovementService.move_mob(
                     mob=mob,
-                    allocations=GateService.allocations_for_open_gate_network(
-                        destination_farm_id,
-                        [{"paddock_id": destination_paddock_id, "allocation_fraction": "1.0"}],
-                    ),
+                    allocations=[
+                        {
+                            "paddock_id": destination_paddock_id,
+                            "allocation_fraction": "1.0",
+                        }
+                    ],
                     destination_farm_id=destination_farm_id,
                 )
                 moved_count += 1

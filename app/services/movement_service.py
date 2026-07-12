@@ -312,6 +312,7 @@ class MovementService:
         destination_farm_id: str | None = None,
         when=None,
         allocation_mode: str | None = None,
+        apply_open_gate_network: bool = True,
     ):
         when = when or datetime.now(timezone.utc)
         allocations = MovementService._normalize_move_allocations(
@@ -324,6 +325,13 @@ class MovementService:
             allocations=allocations,
             destination_farm_id=destination_farm_id,
         )
+        if apply_open_gate_network:
+            from app.services.gate_service import GateService
+
+            allocations = GateService.allocations_for_open_gate_network(
+                resolved_destination_farm_id,
+                allocations,
+            )
 
         GrazingService.close_open_session(mob_id=mob.id, end_at=when)
         mob.farm_id = resolved_destination_farm_id
