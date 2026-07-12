@@ -1089,21 +1089,43 @@
   map.createPane("gatePane");
   map.getPane("gatePane").style.zIndex = "670";
 
-  const baseLayer =
-    baseLayerMode === "satellite"
-      ? L.tileLayer(
-          "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-          {
-            maxZoom: 20,
-            attribution:
-              "Powered by Esri | Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
-          }
-        )
-      : L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  function addBaseLayers() {
+    if (baseLayerMode === "satellite") {
+      L.tileLayer(
+        "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        {
           maxZoom: 20,
-          attribution: "&copy; OpenStreetMap contributors",
-        });
-  baseLayer.addTo(map);
+          zIndex: 1,
+          attribution:
+            "Powered by Esri | Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+        }
+      ).addTo(map);
+      L.tileLayer(
+        "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 20,
+          zIndex: 2,
+          attribution: "Roads: Esri",
+        }
+      ).addTo(map);
+      L.tileLayer(
+        "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 20,
+          zIndex: 3,
+          attribution: "Labels: Esri",
+        }
+      ).addTo(map);
+      return;
+    }
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 20,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+  }
+
+  addBaseLayers();
 
   map.setView([-32.9102, 25.449], 13);
 

@@ -30,6 +30,7 @@
     data-gate-detail-url-template="{{ url_for('web.farm_gate_detail', farm_id=farm.id, gate_id='__gate_id__') }}"
     data-gate-state-url-template="{{ url_for('web.update_farm_gate_state_form', farm_id=farm.id, gate_id='__gate_id__') }}"
     data-gate-location-url-template="{{ url_for('web.update_farm_gate_location', farm_id=farm.id, gate_id='__gate_id__') }}"
+    data-base-layer="satellite"
   ></div>
   <div class="map-legend map-legend-scale" aria-hidden="true">
     <span class="scale-label">Low</span>

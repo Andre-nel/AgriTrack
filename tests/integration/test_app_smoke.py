@@ -228,6 +228,7 @@ def test_web_dashboard_loads(client):
     response = client.get("/")
     assert response.status_code == 200
     assert b"Dashboard" in response.data
+    assert b'data-base-layer="satellite"' in response.data
 
 
 def test_analytics_pages_load(client):
@@ -1091,6 +1092,7 @@ def test_farm_detail_marks_unallocated_mobs_in_red(client, app):
     assert "Angora Groot Ramme" in body
     assert "(Not Located)" in body
     assert 'class="mob-unallocated"' in body
+    assert 'data-base-layer="satellite"' in body
 
 
 def test_import_farm_rejects_existing_map_file(client, app, tmp_path):
