@@ -153,6 +153,9 @@
           <a href="{{ item.detail_url }}">{{ item.title }}</a>
         </div>
         <p class="muted calendar-entry-subtitle">{{ item.subtitle }}</p>
+        {% if item.description %}
+        <p class="calendar-entry-description">{{ item.description }}</p>
+        {% endif %}
         {% if item.create_task_url %}
         <a class="calendar-entry-action" href="{{ item.create_task_url }}">Create Task From Activity</a>
         {% endif %}

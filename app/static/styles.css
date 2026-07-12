@@ -2282,6 +2282,12 @@ tr.is-selected-fence {
   font-size: 0.82rem;
 }
 
+.calendar-entry-description {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
 .calendar-inline-form {
   display: grid;
   gap: 0.35rem;
