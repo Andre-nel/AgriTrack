@@ -7,6 +7,7 @@
     <a class="btn btn-secondary" href="{{ url_for('shearing.detail', session_id=session.id) }}">Session</a>
     <a class="btn btn-secondary" href="{{ url_for('shearing.shearing_page', session_id=session.id) }}">Shearing</a>
     <a class="btn btn-secondary" href="{{ url_for('shearing.bales_page', session_id=session.id) }}">Bales</a>
+    <a class="btn btn-secondary" href="{{ url_for('shearing.session_analytics', session_id=session.id) }}">Analytics</a>
   </div>
 </section>
 {%- endmacro %}
@@ -109,6 +110,63 @@
     </div>
   </form>
 </details>
+{%- endmacro %}
+
+{% macro session_attachments(return_to="detail") -%}
+<section class="card">
+  <h2>Attachments</h2>
+  <form method="post" action="{{ url_for('shearing.upload_session_attachments', session_id=session.id) }}" class="grid-form" enctype="multipart/form-data">
+    <input type="hidden" name="return_to" value="{{ return_to }}" />
+    <div class="grid-two">
+      <label>Files
+        <input
+          type="file"
+          name="attachments"
+          accept="image/*,.pdf,.csv,.txt,.doc,.docx,.xls,.xlsx"
+          multiple
+          required
+        />
+      </label>
+      <label>Caption
+        <input name="caption" placeholder="Optional note for these files" />
+      </label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Upload Attachments</button>
+      <span class="muted">Images, PDFs, spreadsheets, documents, CSV, and text files are supported.</span>
+    </div>
+  </form>
+
+  <div class="task-attachment-grid shearing-attachment-grid">
+    {% for attachment in attachment_rows %}
+    <article class="task-attachment-card shearing-attachment-card">
+      {% if attachment.is_image %}
+      <a href="{{ attachment.url }}" target="_blank" rel="noopener">
+        <img src="{{ attachment.url }}" alt="{{ attachment.caption or attachment.original_filename }}" />
+      </a>
+      {% else %}
+      <a class="shearing-attachment-file" href="{{ attachment.url }}" target="_blank" rel="noopener">
+        <strong>{{ attachment.original_filename }}</strong>
+        <span>{{ attachment.content_type }}</span>
+      </a>
+      {% endif %}
+      <div>
+        <strong>{{ attachment.original_filename }}</strong>
+        <p class="muted">{{ attachment.content_type }} | {{ attachment.byte_size }} bytes | {{ attachment.created_at }}</p>
+        {% if attachment.caption %}
+        <p class="text-body">{{ attachment.caption }}</p>
+        {% endif %}
+        <form method="post" action="{{ url_for('shearing.delete_session_attachment', session_id=session.id, attachment_id=attachment.id) }}">
+          <input type="hidden" name="return_to" value="{{ return_to }}" />
+          <button type="submit" class="btn btn-danger">Delete</button>
+        </form>
+      </div>
+    </article>
+    {% else %}
+    <div class="task-empty-state">No session attachments yet.</div>
+    {% endfor %}
+  </div>
+</section>
 {%- endmacro %}
 
 {% macro add_shearer_card() -%}
@@ -605,13 +663,13 @@
 </section>
 {%- endmacro %}
 
-{% macro chart_panels(chart_payload, target_name, empty_text) -%}
+{% macro chart_panels(chart_payload, target_name, empty_text, title="Analytics and Statistics") -%}
 <section class="card">
-  <h2>Analytics and Statistics</h2>
+  <h2>{{ title }}</h2>
   {% if chart_payload.panels %}
-  <div class="grazing-chart-grid">
+  <div class="shearing-chart-grid">
     {% for panel in chart_payload.panels %}
-    <article class="grazing-chart-card">
+    <article class="grazing-chart-card shearing-chart-card">
       <h3>{{ panel.title }}</h3>
       <div class="analytics-chart-wrap">
         <canvas data-chart-target="{{ target_name }}" data-panel-index="{{ loop.index0 }}" role="img" aria-label="{{ panel.title }} bar chart"></canvas>

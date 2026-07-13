@@ -436,6 +436,37 @@ th, td {
   white-space: nowrap;
 }
 
+.shearing-chart-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.shearing-chart-card .analytics-chart-wrap {
+  min-height: 460px;
+}
+
+.shearing-attachment-grid {
+  margin-top: 1rem;
+}
+
+.shearing-attachment-file {
+  display: grid;
+  align-content: center;
+  gap: 0.4rem;
+  min-height: 10rem;
+  padding: 1rem;
+  color: var(--text);
+  text-decoration: none;
+  background: #eef3ea;
+}
+
+.shearing-attachment-file span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
 .balance-row {
   cursor: pointer;
 }
@@ -2724,6 +2755,10 @@ tr.is-selected-fence {
 
   .analytics-chart-wrap {
     min-height: 300px;
+  }
+
+  .shearing-chart-card .analytics-chart-wrap {
+    min-height: 340px;
   }
 
   .grazing-timeline-header {

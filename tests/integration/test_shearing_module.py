@@ -1,6 +1,8 @@
 import json
 import re
+from io import BytesIO
 from datetime import date, timedelta
+from pathlib import Path
 
 from app.extensions import db
 from app.models import (
@@ -11,6 +13,7 @@ from app.models import (
     ShearingBaleCode,
     ShearingEntry,
     ShearingSession,
+    ShearingSessionAttachment,
     User,
     UserFarmRole,
 )
@@ -601,6 +604,9 @@ def test_shearing_web_routes_create_session_shearer_and_entry(client, app):
     assert b"Animal Type Breakdown" in page.data
     assert b"Open Shearing" in page.data
     assert b"Open Bales" in page.data
+    assert b"Analytics and Statistics" in page.data
+    assert b"Open Analytics" in page.data
+    assert b"Attachments" in page.data
     assert "<summary><strong>Edit Session</strong></summary>" in text
 
     shearing_page = client.get(f"/shearing/sessions/{session_id}/shearing")
@@ -610,15 +616,82 @@ def test_shearing_web_routes_create_session_shearer_and_entry(client, app):
     assert "<summary><strong>Record Daily Count</strong></summary>" in shearing_text
     assert "Daily Breakdown" in shearing_text
     assert "Entry Rows" in shearing_text
-    assert "Open Shearing Analytics" in shearing_text
+    assert "Open Analytics and Statistics" in shearing_text
 
     bales_page = client.get(f"/shearing/sessions/{session_id}/bales")
     assert bales_page.status_code == 200
     bales_text = bales_page.get_data(as_text=True)
     assert "<summary><strong>Bales / Money</strong></summary>" in bales_text
     assert "Bale Rows" in bales_text
-    assert "Analytics and Statistics" in bales_text
-    assert "Bales By Code" in bales_text
+    assert "Open Analytics and Statistics" in bales_text
+    assert "Bales By Code" not in bales_text
+
+    analytics_page = client.get(f"/shearing/sessions/{session_id}/analytics")
+    assert analytics_page.status_code == 200
+    analytics_text = analytics_page.get_data(as_text=True)
+    assert "Analytics and Statistics" in analytics_text
+    assert "Shearing Counts" in analytics_text
+    assert "Bale Analytics" in analytics_text
+    assert "Bales By Code" in analytics_text
+    assert 'class="shearing-chart-grid"' in analytics_text
+
+
+def test_shearing_session_attachments_upload_download_and_delete(client, app):
+    instance_path = Path(app.instance_path)
+    with app.app_context():
+        farm = Farm(name="Attachment Shearing Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        session = ShearingService.create_session(
+            farm_id=farm.id,
+            name="Attachment wool",
+            species="Sheep",
+            start_date="2026-07-01",
+            end_date="2026-07-02",
+            lootjie_rate="10.00",
+        )
+        db.session.commit()
+        session_id = str(session.id)
+
+    response = client.post(
+        f"/shearing/sessions/{session_id}/attachments",
+        data={
+            "caption": "Classing sheet",
+            "attachments": (BytesIO(b"bale,class\nB1,FH\n"), "classing.csv"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "1 attachment uploaded" in body
+    assert "classing.csv" in body
+    assert "Classing sheet" in body
+
+    with app.app_context():
+        attachment = ShearingSessionAttachment.query.filter_by(session_id=session_id).one()
+        attachment_id = str(attachment.id)
+        assert attachment.content_type in {"application/vnd.ms-excel", "text/csv"}
+        assert attachment.caption == "Classing sheet"
+        stored_path = instance_path / attachment.storage_path
+        assert stored_path.exists()
+
+    file_response = client.get(f"/shearing/sessions/{session_id}/attachments/{attachment_id}")
+    assert file_response.status_code == 200
+    assert file_response.data == b"bale,class\nB1,FH\n"
+    file_response.close()
+
+    delete_response = client.post(
+        f"/shearing/sessions/{session_id}/attachments/{attachment_id}/delete",
+        data={"return_to": "detail"},
+        follow_redirects=True,
+    )
+    assert delete_response.status_code == 200
+    assert "Attachment deleted" in delete_response.get_data(as_text=True)
+
+    with app.app_context():
+        assert ShearingSessionAttachment.query.filter_by(session_id=session_id).count() == 0
+        assert not stored_path.exists()
 
 
 def test_shearing_batch_entry_route_is_atomic_and_feeds_session_subpages(client, app):

@@ -36,6 +36,11 @@ class ShearingSession(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         back_populates="session",
         cascade="all, delete-orphan",
     )
+    attachments = db.relationship(
+        "ShearingSessionAttachment",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         db.CheckConstraint("species IN ('Sheep', 'Goat')", name="ck_shearing_session_species_allowed"),
@@ -168,4 +173,29 @@ class ShearingBale(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
             "pricing_input_mode IN ('unpriced', 'price_per_kg', 'total_price', 'both')",
             name="ck_shearing_bale_pricing_input_mode",
         ),
+    )
+
+
+class ShearingSessionAttachment(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "shearing_session_attachments"
+
+    session_id = db.Column(
+        db.String(36),
+        db.ForeignKey("shearing_sessions.id"),
+        nullable=False,
+        index=True,
+    )
+    uploaded_by_user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=True, index=True)
+    original_filename = db.Column(db.String(255), nullable=False)
+    content_type = db.Column(db.String(120), nullable=False)
+    byte_size = db.Column(db.Integer, nullable=False)
+    sha256 = db.Column(db.String(64), nullable=False)
+    caption = db.Column(db.Text, nullable=True)
+    storage_path = db.Column(db.String(500), nullable=False)
+
+    session = db.relationship("ShearingSession", back_populates="attachments")
+    uploaded_by = db.relationship("User")
+
+    __table_args__ = (
+        db.CheckConstraint("byte_size >= 0", name="ck_shearing_session_attachments_byte_size_non_negative"),
     )

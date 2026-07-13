@@ -27,7 +27,14 @@ from app.models.note_attachment import NoteAttachment
 from app.models.paddock import Paddock
 from app.models.paddock_event import PaddockEvent
 from app.models.rainfall import RainfallRecord
-from app.models.shearing import Shearer, ShearingBale, ShearingBaleCode, ShearingEntry, ShearingSession
+from app.models.shearing import (
+    Shearer,
+    ShearingBale,
+    ShearingBaleCode,
+    ShearingEntry,
+    ShearingSession,
+    ShearingSessionAttachment,
+)
 from app.models.simulator import (
     SimulatorExpense,
     SimulatorFarm,
@@ -90,6 +97,7 @@ __all__ = [
     "ShearingBaleCode",
     "ShearingEntry",
     "ShearingSession",
+    "ShearingSessionAttachment",
     "SimulatorExpense",
     "SimulatorFarm",
     "SimulatorRevenueAssumption",

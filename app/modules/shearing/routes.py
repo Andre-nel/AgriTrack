@@ -1,11 +1,22 @@
 from datetime import date
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, send_file, url_for
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db
-from app.models import AnimalGroupType, Farm, Shearer, ShearingBale, ShearingBaleCode, ShearingEntry, ShearingSession
+from app.models import (
+    AnimalGroupType,
+    Farm,
+    Shearer,
+    ShearingBale,
+    ShearingBaleCode,
+    ShearingEntry,
+    ShearingSession,
+    ShearingSessionAttachment,
+)
+from app.services.shearing_attachment_service import ShearingAttachmentService
 from app.services.shearing_service import ShearingService
+from app.services.task_service import TaskService
 
 bp = Blueprint("shearing", __name__, url_prefix="/shearing")
 
@@ -57,6 +68,7 @@ def _session_redirect(session_id: str, default: str = "detail"):
         "detail": "shearing.detail",
         "shearing": "shearing.shearing_page",
         "shearing_analytics": "shearing.shearing_analytics",
+        "analytics": "shearing.session_analytics",
         "bales": "shearing.bales_page",
     }
     endpoint = endpoint_by_target.get(target, endpoint_by_target[default])
@@ -70,10 +82,45 @@ def _get_session_or_404(session_id: str) -> ShearingSession:
             selectinload(ShearingSession.entries).selectinload(ShearingEntry.shearer),
             selectinload(ShearingSession.entries).selectinload(ShearingEntry.animal_group_type),
             selectinload(ShearingSession.bales).selectinload(ShearingBale.bale_code),
+            selectinload(ShearingSession.attachments),
         )
         .filter_by(id=session_id)
         .first_or_404()
     )
+
+
+def _session_attachment_file_url(session: ShearingSession, attachment: ShearingSessionAttachment) -> str:
+    return url_for(
+        "shearing.session_attachment_file",
+        session_id=session.id,
+        attachment_id=attachment.id,
+    )
+
+
+def _session_attachment_rows(session: ShearingSession) -> list[dict]:
+    tz_name = session.farm.timezone if session.farm else "SAST"
+    rows = []
+    for attachment in sorted(
+        session.attachments,
+        key=lambda item: (
+            item.created_at.isoformat() if item.created_at else "",
+            str(item.id),
+        ),
+        reverse=True,
+    ):
+        rows.append(
+            {
+                "id": str(attachment.id),
+                "original_filename": attachment.original_filename,
+                "content_type": attachment.content_type,
+                "byte_size": attachment.byte_size,
+                "caption": attachment.caption,
+                "created_at": TaskService.format_local_datetime(attachment.created_at, tz_name),
+                "is_image": (attachment.content_type or "").startswith("image/"),
+                "url": _session_attachment_file_url(session, attachment),
+            }
+        )
+    return rows
 
 
 def _session_context(session: ShearingSession) -> dict:
@@ -82,6 +129,7 @@ def _session_context(session: ShearingSession) -> dict:
         "session_payload": ShearingService.serialize_session(session),
         "entries": ShearingService.sorted_entries(session.entries),
         "bales": ShearingService.sorted_bales(session.bales),
+        "attachment_rows": _session_attachment_rows(session),
         "bale_codes": ShearingService.bale_codes_for_species(session.species),
         "shearers": _shearers(),
         "group_types": _session_group_types(session),
@@ -278,6 +326,15 @@ def shearing_page(session_id: str):
 
 @bp.get("/sessions/<session_id>/shearing/analytics")
 def shearing_analytics(session_id: str):
+    return _render_session_analytics(session_id)
+
+
+@bp.get("/sessions/<session_id>/analytics")
+def session_analytics(session_id: str):
+    return _render_session_analytics(session_id)
+
+
+def _render_session_analytics(session_id: str):
     session = _get_session_or_404(session_id)
     selected_group_by = _selected_shearing_analytics_group_by()
     return render_template(
@@ -286,6 +343,7 @@ def shearing_analytics(session_id: str):
             session,
             group_by=selected_group_by,
         ),
+        bale_chart_payload=ShearingService.bale_chart_payload(session),
         group_by_options=[
             {"value": "date", "label": "Date"},
             {"value": "shearer", "label": "Shearer"},
@@ -302,9 +360,72 @@ def bales_page(session_id: str):
     return render_template(
         "shearing/bales.html",
         bale_statistics=ShearingService.bale_statistics(session),
-        chart_payload=ShearingService.bale_chart_payload(session),
         **_session_context(session),
     )
+
+
+@bp.post("/sessions/<session_id>/attachments")
+def upload_session_attachments(session_id: str):
+    session = _get_session_or_404(session_id)
+    try:
+        uploads = request.files.getlist("attachments")
+        if not any(upload is not None and upload.filename for upload in uploads):
+            raise ValueError("Choose at least one attachment to upload")
+        attachments = ShearingAttachmentService.create_attachments_from_uploads(
+            uploads,
+            session=session,
+            instance_path=current_app.instance_path,
+            uploaded_by_user_id=(str(g.web_user.id) if getattr(g, "web_user", None) is not None else None),
+            caption=request.form.get("caption"),
+        )
+        db.session.commit()
+        flash(f"{len(attachments)} attachment{'s' if len(attachments) != 1 else ''} uploaded", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    return _session_redirect(session_id)
+
+
+@bp.get("/sessions/<session_id>/attachments/<attachment_id>")
+def session_attachment_file(session_id: str, attachment_id: str):
+    attachment = ShearingSessionAttachment.query.filter_by(
+        id=attachment_id,
+        session_id=session_id,
+    ).first_or_404()
+    try:
+        target = ShearingAttachmentService.absolute_attachment_path(
+            current_app.instance_path,
+            attachment.storage_path,
+        )
+    except FileNotFoundError:
+        abort(404)
+    if not target.exists():
+        abort(404)
+    return send_file(
+        target,
+        mimetype=attachment.content_type,
+        as_attachment=False,
+        download_name=attachment.original_filename,
+    )
+
+
+@bp.post("/sessions/<session_id>/attachments/<attachment_id>/delete")
+def delete_session_attachment(session_id: str, attachment_id: str):
+    attachment = ShearingSessionAttachment.query.filter_by(
+        id=attachment_id,
+        session_id=session_id,
+    ).first_or_404()
+    try:
+        ShearingAttachmentService.delete_attachment(
+            attachment,
+            instance_path=current_app.instance_path,
+        )
+        db.session.commit()
+        flash("Attachment deleted", "success")
+    except FileNotFoundError:
+        db.session.rollback()
+        abort(404)
+    return _session_redirect(session_id)
 
 
 @bp.post("/sessions/<session_id>/edit")

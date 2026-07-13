@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "shearing/_components.html" import session_hero, summary_cards, session_status_actions, edit_session_card, money_by_code, shearer_payouts, animal_type_breakdown with context %}
+{% from "shearing/_components.html" import session_hero, summary_cards, session_status_actions, edit_session_card, session_attachments, money_by_code, shearer_payouts, animal_type_breakdown with context %}
 {% block title %}{{ session.name }} | Shearing | AgriTrack{% endblock %}
 {% block content %}
 {{ session_hero(session.species ~ " shearing from " ~ session.start_date ~ (" to " ~ session.end_date if session.end_date else "")) }}
@@ -9,17 +9,23 @@
 <section class="cards farm-grid shearing-section-links">
   <article class="card">
     <h2>Shearing</h2>
-    <p class="muted">Daily counts, shearers, payouts, animal types, and session-scoped count analytics.</p>
+    <p class="muted">Daily counts, shearers, payouts, animal types, and entry rows.</p>
     <a class="btn" href="{{ url_for('shearing.shearing_page', session_id=session.id) }}">Open Shearing</a>
   </article>
   <article class="card">
     <h2>Bales</h2>
-    <p class="muted">Bale capture, money by code, bale rows, and bale statistics.</p>
+    <p class="muted">Bale capture, money by code, bale rows, and revenue totals.</p>
     <a class="btn" href="{{ url_for('shearing.bales_page', session_id=session.id) }}">Open Bales</a>
+  </article>
+  <article class="card">
+    <h2>Analytics and Statistics</h2>
+    <p class="muted">Session graphs for shearing counts, bale weights, and wool or mohair revenue.</p>
+    <a class="btn" href="{{ url_for('shearing.session_analytics', session_id=session.id) }}">Open Analytics</a>
   </article>
 </section>
 
 {{ session_status_actions("detail") }}
+{{ session_attachments("detail") }}
 
 {{ money_by_code() }}
 {{ shearer_payouts() }}
