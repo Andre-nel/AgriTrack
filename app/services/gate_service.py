@@ -11,7 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import aliased
 
 from app.extensions import db
-from app.models import Farm, GrazingSession, Mob, Paddock, PaddockGate
+from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, PaddockGate
 from app.services.movement_service import MovementService
 from app.services.paddock_service import PaddockService
 
@@ -514,10 +514,92 @@ class GateService:
         )
 
     @classmethod
-    def _active_paddocks_by_id(cls, farm_id: str) -> dict[str, Paddock]:
+    def _open_gate_edges(
+        cls,
+        *,
+        override_gate: PaddockGate | None = None,
+        override_status: str | None = None,
+    ) -> list[tuple[str, str]]:
+        edges = []
+        for gate in PaddockGate.query.filter(PaddockGate.active.is_(True)).all():
+            status = gate.status
+            if override_gate is not None and str(gate.id) == str(override_gate.id):
+                status = override_status or status
+            if status == PaddockGate.STATUS_OPEN:
+                edges.append((str(gate.paddock_a_id), str(gate.paddock_b_id)))
+        if override_gate is not None and override_gate.id is None and override_status == PaddockGate.STATUS_OPEN:
+            edges.append((str(override_gate.paddock_a_id), str(override_gate.paddock_b_id)))
+        return edges
+
+    @classmethod
+    def _active_paddocks_by_id(
+        cls,
+        farm_id: str,
+        *,
+        override_gate: PaddockGate | None = None,
+        override_status: str | None = None,
+    ) -> dict[str, Paddock]:
+        seed_paddocks = (
+            Paddock.query.join(Farm)
+            .filter(
+                Paddock.farm_id == str(farm_id),
+                Paddock.status == "active",
+                Farm.active.is_(True),
+            )
+            .all()
+        )
+        seed_ids = {str(paddock.id) for paddock in seed_paddocks}
+        gate_endpoint_ids = {
+            paddock_id
+            for gate in PaddockGate.query.filter(PaddockGate.active.is_(True)).all()
+            for paddock_id in (str(gate.paddock_a_id), str(gate.paddock_b_id))
+        }
+        if override_gate is not None:
+            gate_endpoint_ids.update(
+                {str(override_gate.paddock_a_id), str(override_gate.paddock_b_id)}
+            )
+
+        active_gate_paddocks = cls._active_paddocks_for_ids(list(seed_ids | gate_endpoint_ids))
+        active_ids = set(active_gate_paddocks)
+        reachable_ids = {paddock_id for paddock_id in seed_ids if paddock_id in active_ids}
+        if override_gate is not None:
+            reachable_ids.update(
+                paddock_id
+                for paddock_id in (str(override_gate.paddock_a_id), str(override_gate.paddock_b_id))
+                if paddock_id in active_ids
+            )
+
+        open_edges = cls._open_gate_edges(
+            override_gate=override_gate,
+            override_status=override_status,
+        )
+        changed = True
+        while changed:
+            changed = False
+            for left, right in open_edges:
+                if left not in active_ids or right not in active_ids:
+                    continue
+                if left in reachable_ids or right in reachable_ids:
+                    before = len(reachable_ids)
+                    reachable_ids.update((left, right))
+                    changed = changed or len(reachable_ids) != before
+
+        farm_ids = {
+            str(active_gate_paddocks[paddock_id].farm_id)
+            for paddock_id in reachable_ids
+            if paddock_id in active_gate_paddocks
+        }
+        if not farm_ids:
+            return {}
         return {
             str(paddock.id): paddock
-            for paddock in Paddock.query.filter_by(farm_id=farm_id, status="active").all()
+            for paddock in Paddock.query.join(Farm)
+            .filter(
+                Paddock.farm_id.in_(farm_ids),
+                Paddock.status == "active",
+                Farm.active.is_(True),
+            )
+            .all()
         }
 
     @classmethod
@@ -527,17 +609,24 @@ class GateService:
         *,
         override_gate: PaddockGate | None = None,
         override_status: str | None = None,
+        paddock_ids: set[str] | None = None,
     ) -> list[tuple[str, str]]:
-        edges = []
-        for gate in cls.gates_for_farm(farm_id):
-            status = gate.status
-            if override_gate is not None and str(gate.id) == str(override_gate.id):
-                status = override_status or status
-            if status == PaddockGate.STATUS_OPEN:
-                edges.append((str(gate.paddock_a_id), str(gate.paddock_b_id)))
-        if override_gate is not None and override_gate.id is None and override_status == PaddockGate.STATUS_OPEN:
-            edges.append((str(override_gate.paddock_a_id), str(override_gate.paddock_b_id)))
-        return edges
+        if paddock_ids is None:
+            paddock_ids = set(
+                cls._active_paddocks_by_id(
+                    str(farm_id),
+                    override_gate=override_gate,
+                    override_status=override_status,
+                )
+            )
+        return [
+            (left, right)
+            for left, right in cls._open_gate_edges(
+                override_gate=override_gate,
+                override_status=override_status,
+            )
+            if left in paddock_ids and right in paddock_ids
+        ]
 
     @staticmethod
     def _components(paddock_ids: set[str], edges: list[tuple[str, str]]) -> list[set[str]]:
@@ -601,7 +690,7 @@ class GateService:
         all_ids = set(paddocks_by_id)
         anchor_paddock_id = cls._gate_anchor_paddock_id(gate, all_ids)
         before_component = cls._component_containing(
-            cls._components(all_ids, cls._open_edges(farm_id)),
+            cls._components(all_ids, cls._open_edges(farm_id, paddock_ids=all_ids)),
             anchor_paddock_id,
         )
         after_components = [
@@ -612,6 +701,7 @@ class GateService:
                     farm_id,
                     override_gate=gate,
                     override_status=PaddockGate.STATUS_CLOSED,
+                    paddock_ids=all_ids,
                 ),
             )
             if component
@@ -625,7 +715,7 @@ class GateService:
             for paddock_id in component
         }
         requirements = []
-        for session in cls._active_sessions(farm_id):
+        for session in cls._active_sessions(paddock_ids=set(component_by_paddock)):
             component_indexes = {
                 component_by_paddock[str(allocation.paddock_id)]
                 for allocation in session.allocations
@@ -647,17 +737,27 @@ class GateService:
         }
 
     @classmethod
-    def _active_sessions(cls, farm_id: str) -> list[GrazingSession]:
-        return (
-            GrazingSession.query.join(Mob)
-            .filter(
-                GrazingSession.farm_id == farm_id,
-                GrazingSession.end_at.is_(None),
-                Mob.status == "active",
-            )
-            .order_by(GrazingSession.start_at.asc())
-            .all()
+    def _active_sessions(
+        cls,
+        farm_id: str | None = None,
+        *,
+        paddock_ids: set[str] | None = None,
+    ) -> list[GrazingSession]:
+        query = GrazingSession.query.join(Mob).filter(
+            GrazingSession.end_at.is_(None),
+            Mob.status == "active",
         )
+        if paddock_ids is not None:
+            if not paddock_ids:
+                return []
+            query = (
+                query.join(GrazingAllocation)
+                .filter(GrazingAllocation.paddock_id.in_(list(paddock_ids)))
+                .distinct()
+            )
+        elif farm_id is not None:
+            query = query.filter(GrazingSession.farm_id == str(farm_id))
+        return query.order_by(GrazingSession.start_at.asc()).all()
 
     @staticmethod
     def _effective_area(paddock: Paddock) -> float:
@@ -755,6 +855,17 @@ class GateService:
         ]
 
     @classmethod
+    def _extend_paddocks_by_ids(
+        cls,
+        paddocks_by_id: dict[str, Paddock],
+        paddock_ids: set[str],
+    ) -> dict[str, Paddock]:
+        missing_ids = [paddock_id for paddock_id in paddock_ids if paddock_id not in paddocks_by_id]
+        if not missing_ids:
+            return paddocks_by_id
+        return {**paddocks_by_id, **cls._active_paddocks_for_ids(missing_ids)}
+
+    @classmethod
     def allocations_for_open_gate_network(
         cls,
         farm_id: str,
@@ -766,7 +877,10 @@ class GateService:
 
         connected_components = [
             component
-            for component in cls._components(set(paddocks_by_id), cls._open_edges(str(farm_id)))
+            for component in cls._components(
+                set(paddocks_by_id),
+                cls._open_edges(str(farm_id), paddock_ids=set(paddocks_by_id)),
+            )
             if len(component) > 1
         ]
         if not connected_components:
@@ -805,7 +919,6 @@ class GateService:
     def _apply_allocations(
         cls,
         *,
-        farm_id: str,
         sessions: list[GrazingSession],
         target_maps: dict[str, dict[str, Decimal]],
         paddocks_by_id: dict[str, Paddock],
@@ -825,9 +938,10 @@ class GateService:
             MovementService.move_mob(
                 mob=session.mob,
                 allocations=payloads,
-                destination_farm_id=farm_id,
+                destination_farm_id=str(session.farm_id),
                 when=event_time,
                 apply_open_gate_network=False,
+                allow_cross_farm_allocations=True,
             )
             moved += 1
         return moved
@@ -859,13 +973,15 @@ class GateService:
                     farm_id,
                     override_gate=gate,
                     override_status=PaddockGate.STATUS_OPEN,
+                    paddock_ids=all_ids,
                 ),
             ),
             anchor_paddock_id,
         )
         component_paddocks = [paddocks_by_id[paddock_id] for paddock_id in component]
-        sessions = cls._active_sessions(farm_id)
+        sessions = cls._active_sessions(paddock_ids=component)
         target_maps = {}
+        target_paddock_ids = set()
         for session in sessions:
             current = cls._allocation_map(session)
             total_in_component = sum(
@@ -881,8 +997,9 @@ class GateService:
             }
             target.update(cls._area_weighted_allocations(component_paddocks, total_in_component))
             target_maps[str(session.mob_id)] = target
+            target_paddock_ids.update(target)
+        paddocks_by_id = cls._extend_paddocks_by_ids(paddocks_by_id, target_paddock_ids)
         return cls._apply_allocations(
-            farm_id=farm_id,
             sessions=sessions,
             target_maps=target_maps,
             paddocks_by_id=paddocks_by_id,
@@ -901,7 +1018,7 @@ class GateService:
         all_ids = set(paddocks_by_id)
         anchor_paddock_id = cls._gate_anchor_paddock_id(gate, all_ids)
         before_component = cls._component_containing(
-            cls._components(all_ids, cls._open_edges(farm_id)),
+            cls._components(all_ids, cls._open_edges(farm_id, paddock_ids=all_ids)),
             anchor_paddock_id,
         )
         after_components = cls._components(
@@ -910,6 +1027,7 @@ class GateService:
                 farm_id,
                 override_gate=gate,
                 override_status=PaddockGate.STATUS_CLOSED,
+                paddock_ids=all_ids,
             ),
         )
         if len(after_components) <= 1:
@@ -921,9 +1039,10 @@ class GateService:
             for paddock_id in component
         }
         choices = cls._choice_map(closure_choices)
-        sessions = cls._active_sessions(farm_id)
+        sessions = cls._active_sessions(paddock_ids=before_component)
         target_maps = {}
         missing_choices = []
+        target_paddock_ids = set()
         for session in sessions:
             current = cls._allocation_map(session)
             total_in_previous = sum(
@@ -965,13 +1084,14 @@ class GateService:
                 )
             )
             target_maps[str(session.mob_id)] = target
+            target_paddock_ids.update(target)
 
         if missing_choices:
             names = ", ".join(sorted(missing_choices))
             raise ValueError(f"Choose a closing-side camp for: {names}")
 
+        paddocks_by_id = cls._extend_paddocks_by_ids(paddocks_by_id, target_paddock_ids)
         return cls._apply_allocations(
-            farm_id=farm_id,
             sessions=sessions,
             target_maps=target_maps,
             paddocks_by_id=paddocks_by_id,
@@ -992,7 +1112,8 @@ class GateService:
         event_time = cls._normalize_datetime(event_time)
         if not gate.active:
             raise ValueError("Gate is inactive")
-        if gate.status == target_status:
+        same_status = gate.status == target_status
+        if same_status and target_status != PaddockGate.STATUS_OPEN:
             return {"gate": gate, "moved_mob_count": 0}
 
         context_farm_id = str(farm_id or gate.farm_id)
@@ -1000,7 +1121,11 @@ class GateService:
         if set(gate_paddocks) != {str(gate.paddock_a_id), str(gate.paddock_b_id)}:
             raise ValueError("Gate paddocks must be active")
 
-        paddocks_by_id = cls._active_paddocks_by_id(context_farm_id)
+        paddocks_by_id = cls._active_paddocks_by_id(
+            context_farm_id,
+            override_gate=gate if target_status == PaddockGate.STATUS_OPEN else None,
+            override_status=target_status if target_status == PaddockGate.STATUS_OPEN else None,
+        )
         if str(gate.paddock_a_id) not in paddocks_by_id and str(gate.paddock_b_id) not in paddocks_by_id:
             raise ValueError("Gate is not connected to this farm")
 
@@ -1015,8 +1140,9 @@ class GateService:
                 context_farm_id,
             )
 
-        gate.status = target_status
-        gate.last_state_changed_at = event_time
+        if not same_status:
+            gate.status = target_status
+            gate.last_state_changed_at = event_time
         return {"gate": gate, "moved_mob_count": moved_count}
 
     @classmethod

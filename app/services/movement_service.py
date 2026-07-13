@@ -25,6 +25,7 @@ class MovementService:
         mob: Mob,
         allocations: list[dict],
         destination_farm_id: str | None = None,
+        allow_cross_farm_allocations: bool = False,
     ) -> str:
         farm_id = str(destination_farm_id or mob.farm_id).strip()
         if not farm_id:
@@ -45,7 +46,7 @@ class MovementService:
         if len(paddocks) != len(unique_paddock_ids):
             raise ValueError("One or more selected paddocks are invalid")
 
-        if any(str(paddock.farm_id) != farm_id for paddock in paddocks):
+        if not allow_cross_farm_allocations and any(str(paddock.farm_id) != farm_id for paddock in paddocks):
             raise ValueError("Selected paddocks do not belong to the chosen destination farm")
 
         if str(mob.farm_id) != farm_id:
@@ -313,6 +314,7 @@ class MovementService:
         when=None,
         allocation_mode: str | None = None,
         apply_open_gate_network: bool = True,
+        allow_cross_farm_allocations: bool = False,
     ):
         when = when or datetime.now(timezone.utc)
         allocations = MovementService._normalize_move_allocations(
@@ -324,6 +326,7 @@ class MovementService:
             mob=mob,
             allocations=allocations,
             destination_farm_id=destination_farm_id,
+            allow_cross_farm_allocations=allow_cross_farm_allocations,
         )
         if apply_open_gate_network:
             from app.services.gate_service import GateService

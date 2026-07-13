@@ -1429,14 +1429,17 @@
         postGateState(gateId, targetStatus, gateClosureChoicesFromForm(form), gateStateDirectUrl)
           .then((payload) => {
             const movedCount = Number(payload.moved_mob_count || 0);
-            updateGateMarkerAfterState((payload && payload.gate) || {});
-            setStatus(
+            const statusMessage =
               "Gate " +
-                (targetStatus === "open" ? "opened" : "closed") +
-                "; redistributed " +
-                movedCount +
-                " mob(s)."
-            );
+              (targetStatus === "open" ? "opened" : "closed") +
+              "; redistributed " +
+              movedCount +
+              " mob(s).";
+            updateGateMarkerAfterState((payload && payload.gate) || {});
+            setStatus(statusMessage);
+            return loadMapData({ preserveView: true, userInitiated: true }).then(() => {
+              setStatus(statusMessage);
+            });
           })
           .catch((error) => {
             restoreSubmit();

@@ -238,6 +238,11 @@ def test_farm_map_gate_create_uses_configured_paddocks_before_map_data_loads():
     assert "let paddockOptions = configuredGatePaddockOptions.slice();" in script
 
 
+def test_farm_map_gate_state_refreshes_map_data_after_update():
+    script = Path("app/static/farm_map.js").read_text(encoding="utf-8")
+    assert "loadMapData({ preserveView: true, userInitiated: true })" in script
+
+
 def test_analytics_pages_load(client):
     response = client.get("/analytics")
     assert response.status_code == 200
@@ -639,11 +644,22 @@ def test_web_gate_routes_allow_cross_farm_connected_camps(client, app):
             status="active",
         )
         db.session.add_all([source_camp, neighbor_camp])
+        db.session.flush()
+        mob = Mob(farm_id=neighbor_farm.id, name="Cross Gate Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+        MovementService.move_mob(
+            mob=mob,
+            allocations=[{"paddock_id": neighbor_camp.id, "allocation_fraction": "1.0"}],
+            destination_farm_id=str(neighbor_farm.id),
+            when=datetime(2026, 6, 12, 7, 0, tzinfo=timezone.utc),
+        )
         db.session.commit()
         source_farm_id = str(source_farm.id)
         neighbor_farm_id = str(neighbor_farm.id)
         source_camp_id = str(source_camp.id)
         neighbor_camp_id = str(neighbor_camp.id)
+        mob_id = str(mob.id)
 
     response = client.post(
         f"/farms/{source_farm_id}/gates",
@@ -673,10 +689,16 @@ def test_web_gate_routes_allow_cross_farm_connected_camps(client, app):
 
     response = client.post(f"/farms/{neighbor_farm_id}/gates/{gate_id}/state", json={"status": "open"})
     assert response.status_code == 200
-    assert response.get_json()["moved_mob_count"] == 0
+    assert response.get_json()["moved_mob_count"] == 1
 
     with app.app_context():
         assert db.session.get(PaddockGate, gate_id).status == "open"
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {
+            str(row.paddock_id): float(row.allocation_fraction)
+            for row in session.allocations
+        }
+        assert allocations == {source_camp_id: 0.4545, neighbor_camp_id: 0.5455}
 
 
 def test_dashboard_gate_create_route_requires_farm_selection(client, app):
@@ -737,6 +759,177 @@ def test_dashboard_gate_create_route_requires_farm_selection(client, app):
         "Dashboard Gate Source: Dashboard Source Camp",
         "Dashboard Gate Neighbor: Dashboard Neighbor Camp",
     }
+
+
+def test_dashboard_map_gate_state_url_redistributes_cross_farm_stock(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    with app.app_context():
+        source_farm = Farm(name="Z Combined Gate Source", timezone="SAST", active=True)
+        neighbor_farm = Farm(name="A Combined Gate Neighbor", timezone="SAST", active=True)
+        db.session.add_all([source_farm, neighbor_farm])
+        db.session.flush()
+        source_camp = Paddock(
+            farm_id=source_farm.id,
+            name="Wear Kamp",
+            area_ha=10,
+            grazeable_area_ha=10,
+            status="active",
+        )
+        neighbor_camp = Paddock(
+            farm_id=neighbor_farm.id,
+            name="Flakte",
+            area_ha=30,
+            grazeable_area_ha=30,
+            status="active",
+        )
+        db.session.add_all([source_camp, neighbor_camp])
+        db.session.flush()
+        mob = Mob(farm_id=neighbor_farm.id, name="Combined Gate Mob", status="active")
+        db.session.add(mob)
+        db.session.flush()
+        MovementService.move_mob(
+            mob=mob,
+            allocations=[{"paddock_id": neighbor_camp.id, "allocation_fraction": "1.0"}],
+            destination_farm_id=str(neighbor_farm.id),
+            when=datetime(2026, 6, 12, 7, 0, tzinfo=timezone.utc),
+        )
+        gate = GateService.create_manual_gate(
+            farm_id=str(source_farm.id),
+            paddock_a_id=str(source_camp.id),
+            paddock_b_id=str(neighbor_camp.id),
+            latitude="-32.11111111",
+            longitude="25.22222222",
+        )
+        db.session.commit()
+        source_farm_id = str(source_farm.id)
+        neighbor_farm_id = str(neighbor_farm.id)
+        source_camp_id = str(source_camp.id)
+        neighbor_camp_id = str(neighbor_camp.id)
+        mob_id = str(mob.id)
+        gate_id = str(gate.id)
+        _write_farm_kml(app, source_farm.name, source_camp.name)
+        _write_farm_kml(app, neighbor_farm.name, neighbor_camp.name)
+
+    map_response = client.get("/dashboard/map-data")
+    assert map_response.status_code == 200
+    gate_features = [
+        feature
+        for feature in map_response.get_json()["features"]
+        if feature["properties"].get("gate_id") == gate_id
+    ]
+    assert len(gate_features) == 1
+    gate_state_url = gate_features[0]["properties"]["gate_state_url"]
+    assert gate_state_url == f"/farms/{neighbor_farm_id}/gates/{gate_id}/state"
+
+    response = client.post(gate_state_url, json={"status": "open"})
+    assert response.status_code == 200
+    assert response.get_json()["moved_mob_count"] == 1
+
+    with app.app_context():
+        assert db.session.get(PaddockGate, gate_id).status == "open"
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {
+            str(row.paddock_id): float(row.allocation_fraction)
+            for row in session.allocations
+        }
+        assert allocations == {source_camp_id: 0.25, neighbor_camp_id: 0.75}
+        assert str(session.farm_id) == neighbor_farm_id
+        assert str(db.session.get(Mob, mob_id).farm_id) == neighbor_farm_id
+        assert source_farm_id != neighbor_farm_id
+
+
+def test_map_data_counts_cross_farm_allocations_by_paddock_farm(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    with app.app_context():
+        source_farm = Farm(name="Map Source Farm", timezone="SAST", active=True)
+        neighbor_farm = Farm(name="Map Neighbor Farm", timezone="SAST", active=True)
+        db.session.add_all([source_farm, neighbor_farm])
+        db.session.flush()
+        wear_kamp = Paddock(
+            farm_id=source_farm.id,
+            name="Wear Kamp",
+            area_ha=10,
+            grazeable_area_ha=10,
+            status="active",
+        )
+        flakte = Paddock(
+            farm_id=neighbor_farm.id,
+            name="Flakte",
+            area_ha=30,
+            grazeable_area_ha=30,
+            status="active",
+        )
+        db.session.add_all([wear_kamp, flakte])
+        cattle = AnimalGroupType(species="Cattle", breed="Afrikaner", sex="cow", age_class="adult")
+        sheep = AnimalGroupType(species="Sheep", breed="Dohne", sex="ewe", age_class="adult")
+        goats = AnimalGroupType(species="Goat", breed="Angora", sex="ewe", age_class="adult")
+        cattle_mob = Mob(farm_id=source_farm.id, name="Source Cattle", status="active")
+        sheep_mob = Mob(farm_id=neighbor_farm.id, name="Neighbor Sheep", status="active")
+        goat_mob = Mob(farm_id=neighbor_farm.id, name="Neighbor Goats", status="active")
+        db.session.add_all([cattle, sheep, goats, cattle_mob, sheep_mob, goat_mob])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(mob_id=cattle_mob.id, animal_group_type_id=cattle.id, head_count=26),
+                AnimalGroupBalance(mob_id=sheep_mob.id, animal_group_type_id=sheep.id, head_count=100),
+                AnimalGroupBalance(mob_id=goat_mob.id, animal_group_type_id=goats.id, head_count=50),
+            ]
+        )
+        for mob in [cattle_mob, sheep_mob, goat_mob]:
+            session = GrazingSession(
+                farm_id=mob.farm_id,
+                mob_id=mob.id,
+                start_at=datetime(2026, 6, 12, 8, 0, tzinfo=timezone.utc),
+                end_at=None,
+            )
+            db.session.add(session)
+            db.session.flush()
+            db.session.add(
+                GrazingAllocation(
+                    grazing_session_id=session.id,
+                    paddock_id=wear_kamp.id,
+                    allocation_fraction="0.5",
+                )
+            )
+        db.session.commit()
+        source_farm_id = str(source_farm.id)
+        wear_kamp_id = str(wear_kamp.id)
+        _write_farm_kml(app, source_farm.name, wear_kamp.name)
+        _write_farm_kml(app, neighbor_farm.name, flakte.name)
+
+    def wear_kamp_properties(payload):
+        return next(
+            feature["properties"]
+            for feature in payload["features"]
+            if feature["properties"].get("paddock_id") == wear_kamp_id
+        )
+
+    farm_response = client.get(f"/farms/{source_farm_id}/map-data")
+    assert farm_response.status_code == 200
+    farm_properties = wear_kamp_properties(farm_response.get_json())
+    assert {row["mob_name"] for row in farm_properties["mobs"]} == {
+        "Source Cattle",
+        "Neighbor Sheep",
+        "Neighbor Goats",
+    }
+    assert {
+        row["species"]: row["head"]
+        for row in farm_properties["species_heads"]
+    } == {"Cattle": 13.0, "Goat": 25.0, "Sheep": 50.0}
+    assert farm_properties["current_lsu"] > 20.0
+
+    dashboard_response = client.get("/dashboard/map-data")
+    assert dashboard_response.status_code == 200
+    dashboard_properties = wear_kamp_properties(dashboard_response.get_json())
+    assert {row["mob_name"] for row in dashboard_properties["mobs"]} == {
+        "Source Cattle",
+        "Neighbor Sheep",
+        "Neighbor Goats",
+    }
+    assert {
+        row["species"]: row["head"]
+        for row in dashboard_properties["species_heads"]
+    } == {"Cattle": 13.0, "Goat": 25.0, "Sheep": 50.0}
 
 
 def test_farm_gates_page_supports_update_delete_and_json_detail(client, app):

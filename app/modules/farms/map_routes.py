@@ -86,9 +86,12 @@ def _load_farm_kml_features(farm_name: str) -> tuple[list[dict], str]:
 
 def _active_grazing_snapshot_by_paddock(farm_id: str) -> dict[str, dict]:
     rows = (
-        GrazingAllocation.query.join(GrazingSession).join(Mob)
+        GrazingAllocation.query.join(GrazingSession)
+        .join(Mob)
+        .join(Paddock, GrazingAllocation.paddock_id == Paddock.id)
         .filter(
-            GrazingSession.farm_id == farm_id,
+            Paddock.farm_id == farm_id,
+            Paddock.status == "active",
             GrazingSession.end_at.is_(None),
             Mob.status == "active",
         )
