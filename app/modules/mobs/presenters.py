@@ -1,14 +1,25 @@
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.models import Farm, Mob, MobEvent, Paddock
-from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.models.stock_ledger import StockEventType
+from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.services.mob_event_service import MobEventService
 from app.services.reporting_service import ReportingService
+
+_CONTINUITY_TOLERANCE = timedelta(seconds=1)
 
 
 def _animal_group_label(group) -> str:
     return f"{group.species} | {group.breed} | {group.sex} | {group.age_class}"
+
+
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _head_count_display(value: float, *, exact: bool) -> str:
@@ -38,7 +49,62 @@ def _allocation_group_rows(allocation) -> list[dict]:
     return rows
 
 
-def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
+def _session_has_paddock(session, paddock_id: str) -> bool:
+    return any(str(allocation.paddock_id) == paddock_id for allocation in session.allocations)
+
+
+def _continuous_assignment_start(mob: Mob, active_session, paddock_id: str) -> datetime | None:
+    streak_start = _normalize_datetime(active_session.start_at)
+    if streak_start is None:
+        return None
+
+    prior_sessions = sorted(
+        (
+            session
+            for session in mob.grazing_sessions
+            if str(session.id) != str(active_session.id)
+        ),
+        key=lambda session: _normalize_datetime(session.start_at) or datetime.min,
+        reverse=True,
+    )
+
+    for session in prior_sessions:
+        session_start = _normalize_datetime(session.start_at)
+        session_end = _normalize_datetime(session.end_at)
+        if session_start is None or session_end is None:
+            continue
+        if session_start >= streak_start:
+            continue
+        if session_end + _CONTINUITY_TOLERANCE < streak_start:
+            break
+        if not _session_has_paddock(session, paddock_id):
+            break
+        streak_start = session_start
+
+    return streak_start
+
+
+def _continuous_assignment_days(
+    mob: Mob,
+    active_session,
+    paddock_id: str,
+    *,
+    as_of: datetime,
+) -> float:
+    now_dt = _normalize_datetime(as_of) or _normalize_datetime(datetime.now(timezone.utc))
+    streak_start = _continuous_assignment_start(mob, active_session, paddock_id)
+    if now_dt is None or streak_start is None:
+        return 0.0
+    return max(0.0, (now_dt - streak_start).total_seconds() / 86400.0)
+
+
+def build_mob_detail_context(
+    mob: Mob,
+    selected_event_tag: str,
+    *,
+    as_of: datetime | None = None,
+) -> dict:
+    as_of = as_of or datetime.now(timezone.utc)
     farms = Farm.query.order_by(Farm.name).all()
     all_paddocks = Paddock.query.filter_by(status="active").order_by(Paddock.name).all()
     all_active_mobs = Mob.query.filter_by(status="active").order_by(Mob.name).all()
@@ -82,6 +148,12 @@ def build_mob_detail_context(mob: Mob, selected_event_tag: str) -> dict:
                     "paddock_id": str(allocation.paddock_id),
                     "paddock_name": allocation.paddock.name,
                     "allocation_pct": float(pct),
+                    "days_assigned_continuously": _continuous_assignment_days(
+                        mob,
+                        active_session,
+                        str(allocation.paddock_id),
+                        as_of=as_of,
+                    ),
                     "group_rows": group_rows,
                     "has_exact_group_counts": any(row["is_exact"] for row in group_rows),
                 }

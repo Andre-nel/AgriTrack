@@ -160,12 +160,13 @@
 <section class="card">
   <h2>Current Paddock Allocation</h2>
   <table>
-    <thead><tr><th>Paddock</th><th>Allocation %</th><th>Animal Groups</th></tr></thead>
+    <thead><tr><th>Paddock</th><th>Allocation %</th><th>Days</th><th>Animal Groups</th></tr></thead>
     <tbody>
       {% for allocation in current_allocations %}
       <tr>
         <td><a href="{{ url_for('web.paddock_detail', paddock_id=allocation.paddock_id) }}">{{ allocation.paddock_name }}</a></td>
         <td>{{ "%.2f"|format(allocation.allocation_pct) }}%</td>
+        <td>{{ "%.1f"|format(allocation.days_assigned_continuously) }}</td>
         <td>
           {% if allocation.group_rows %}
             {% for group in allocation.group_rows %}
@@ -181,7 +182,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="3">No active paddock allocation.</td></tr>
+      <tr><td colspan="4">No active paddock allocation.</td></tr>
       {% endfor %}
     </tbody>
   </table>

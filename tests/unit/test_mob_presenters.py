@@ -65,7 +65,11 @@ def test_build_mob_detail_context_filters_events_and_builds_options(app):
         )
         db.session.commit()
 
-        context = build_mob_detail_context(mob, selected_event_tag="health")
+        context = build_mob_detail_context(
+            mob,
+            selected_event_tag="health",
+            as_of=datetime(2024, 1, 4, 12, 0, tzinfo=timezone.utc),
+        )
 
         assert context["move_farms"] == [{"id": str(farm.id), "name": "Mob Farm"}]
         assert context["move_paddocks_by_farm"][str(farm.id)] == [
@@ -79,6 +83,7 @@ def test_build_mob_detail_context_filters_events_and_builds_options(app):
         assert allocation_row["paddock_id"] == str(paddock.id)
         assert allocation_row["paddock_name"] == "North Camp"
         assert allocation_row["allocation_pct"] == 100.0
+        assert allocation_row["days_assigned_continuously"] == 3.5
         assert allocation_row["has_exact_group_counts"] is False
         assert allocation_row["group_rows"][0]["label"] == "Sheep | Merino | ewe | adult"
         assert allocation_row["group_rows"][0]["head_count_display"] == "12.00"
@@ -166,3 +171,71 @@ def test_build_mob_detail_context_prefills_exact_count_allocations(app):
                 "group_counts": {str(cattle.id): 5, str(ewes.id): 0},
             },
         ]
+
+
+def test_build_mob_detail_context_counts_back_to_back_paddock_assignment(app):
+    with app.app_context():
+        farm = Farm(name="Continuous Mob Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        north = Paddock(farm_id=farm.id, name="North Continuous", area_ha=10, grazeable_area_ha=8)
+        south = Paddock(farm_id=farm.id, name="South Continuous", area_ha=10, grazeable_area_ha=8)
+        east = Paddock(farm_id=farm.id, name="East Continuous", area_ha=10, grazeable_area_ha=8)
+        mob = Mob(farm_id=farm.id, name="Continuous Mob", status="active")
+        db.session.add_all([north, south, east, mob])
+        db.session.flush()
+
+        older_session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2024, 1, 1, 8, 0, tzinfo=timezone.utc),
+            end_at=datetime(2024, 1, 2, 8, 0, tzinfo=timezone.utc),
+        )
+        previous_session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2024, 1, 2, 8, 0, tzinfo=timezone.utc),
+            end_at=datetime(2024, 1, 4, 8, 0, tzinfo=timezone.utc),
+        )
+        active_session = GrazingSession(
+            farm_id=farm.id,
+            mob_id=mob.id,
+            start_at=datetime(2024, 1, 4, 8, 0, tzinfo=timezone.utc),
+        )
+        db.session.add_all([older_session, previous_session, active_session])
+        db.session.flush()
+        db.session.add_all(
+            [
+                GrazingAllocation(
+                    grazing_session_id=older_session.id,
+                    paddock_id=east.id,
+                    allocation_fraction="1.0",
+                ),
+                GrazingAllocation(
+                    grazing_session_id=previous_session.id,
+                    paddock_id=north.id,
+                    allocation_fraction="1.0",
+                ),
+                GrazingAllocation(
+                    grazing_session_id=active_session.id,
+                    paddock_id=north.id,
+                    allocation_fraction="0.5",
+                ),
+                GrazingAllocation(
+                    grazing_session_id=active_session.id,
+                    paddock_id=south.id,
+                    allocation_fraction="0.5",
+                ),
+            ]
+        )
+        db.session.commit()
+
+        context = build_mob_detail_context(
+            mob,
+            selected_event_tag="",
+            as_of=datetime(2024, 1, 5, 20, 0, tzinfo=timezone.utc),
+        )
+
+        rows_by_name = {row["paddock_name"]: row for row in context["current_allocations"]}
+        assert rows_by_name["North Continuous"]["days_assigned_continuously"] == 3.5
+        assert rows_by_name["South Continuous"]["days_assigned_continuously"] == 1.5

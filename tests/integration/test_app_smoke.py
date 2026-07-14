@@ -2178,6 +2178,7 @@ def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
 
     body = response.data.decode("utf-8")
     assert body.index("Current Paddock Allocation") < body.index("Mob Comments / Log Notes")
+    assert "<th>Days</th>" in body
     assert f'href="/paddocks/{paddock_id}"' in body
     assert "Default North Camp" in body
     for heading in [
