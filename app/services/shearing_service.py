@@ -669,6 +669,13 @@ class ShearingService:
     def serialize_session(cls, session: ShearingSession, *, include_entries: bool = True) -> dict:
         breakdown = cls.session_breakdown(session)
         bale_breakdown = cls.bale_money_breakdown(session)
+        total_quantity = int(breakdown["totals"]["quantity"])
+        average_kg_per_animal = None
+        if total_quantity > 0:
+            total_kg = Decimal(str(bale_breakdown["totals"]["total_kg"]))
+            average_kg_per_animal = float(
+                (total_kg / Decimal(total_quantity)).quantize(cls.WEIGHT_QUANT, rounding=ROUND_HALF_UP)
+            )
         payload = {
             "id": str(session.id),
             "farm_id": str(session.farm_id),
@@ -681,6 +688,7 @@ class ShearingService:
             "adult_old_ram_multiplier": float(session.adult_old_ram_multiplier or 2),
             "notes": session.notes,
             "totals": breakdown["totals"],
+            "average_kg_per_animal": average_kg_per_animal,
             "by_shearer": breakdown["by_shearer"],
             "by_animal_type": breakdown["by_animal_type"],
             "by_date": breakdown["by_date"],

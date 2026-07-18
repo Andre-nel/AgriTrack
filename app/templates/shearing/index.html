@@ -223,6 +223,7 @@
     <p class="cash-summary-value">{{ format_money(money["total_price"]) }}</p>
     <p class="muted">
       {{ money["total_bales"] }} bales | {{ "%.3f"|format(money["total_kg"]) }} kg
+      {% if payload["average_kg_per_animal"] is not none %} | Avg {{ "%.3f"|format(payload["average_kg_per_animal"]) }} kg/animal{% endif %}
       {% if money["average_price_per_kg"] is not none %} | Avg {{ format_money(money["average_price_per_kg"]) }}/kg{% endif %}
     </p>
     <p class="muted">{{ payload["totals"]["quantity"] }} shorn | Payout {{ format_money(payload["totals"]["amount"]) }}</p>

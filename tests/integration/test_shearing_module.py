@@ -182,6 +182,17 @@ def test_shearing_service_bales_calculate_money_totals_and_validate_species(app)
             start_date="2026-10-01",
             lootjie_rate="10.00",
         )
+        shearer = ShearingService.create_shearer(farm_id=farm.id, name="Bale Shearer")
+        ewe = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add(ewe)
+        db.session.flush()
+        ShearingService.record_entry(
+            session=session,
+            work_date="2026-10-01",
+            shearer_id=shearer.id,
+            animal_group_type=ewe,
+            quantity=4,
+        )
         wool_code = ShearingService.upsert_bale_code(
             species="Sheep",
             code="FH",
@@ -242,6 +253,7 @@ def test_shearing_service_bales_calculate_money_totals_and_validate_species(app)
         assert money["unpriced_bales"] == 1
         assert money["total_price"] == 2350.0
         assert money["average_price_per_kg"] == 19.5833
+        assert payload["average_kg_per_animal"] == 32.5
         assert payload["bale_summary_by_code"][0]["code"] == "ADHOC"
         assert payload["bale_summary_by_code"][1]["code"] == "FH"
         assert payload["bale_summary_by_code"][1]["unpriced_bales"] == 1

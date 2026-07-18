@@ -30,6 +30,17 @@
     <p class="muted">{{ session_payload["bale_money_totals"]["total_bales"] }} bales captured</p>
   </article>
   <article class="card">
+    <h2>Average Kg/Animal</h2>
+    <p class="cash-summary-value">
+      {% if session_payload["average_kg_per_animal"] is not none %}
+      {{ "%.3f"|format(session_payload["average_kg_per_animal"]) }}
+      {% else %}
+      -
+      {% endif %}
+    </p>
+    <p class="muted">Total Kg / Total Shorn</p>
+  </article>
+  <article class="card">
     <h2>Bale Revenue</h2>
     <p class="cash-summary-value">{{ format_money(session_payload["bale_money_totals"]["total_price"]) }}</p>
     <p class="muted">{{ session_payload["bale_money_totals"]["unpriced_bales"] }} unpriced bales</p>
