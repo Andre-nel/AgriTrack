@@ -254,6 +254,11 @@ def test_shearing_service_bales_calculate_money_totals_and_validate_species(app)
         assert money["total_price"] == 2350.0
         assert money["average_price_per_kg"] == 19.5833
         assert payload["average_kg_per_animal"] == 32.5
+        assert payload["revenue_per_animal"] == {
+            "overall": 587.5,
+            "kid_goats": None,
+            "non_kid_goats": None,
+        }
         assert payload["bale_summary_by_code"][0]["code"] == "ADHOC"
         assert payload["bale_summary_by_code"][1]["code"] == "FH"
         assert payload["bale_summary_by_code"][1]["unpriced_bales"] == 1
@@ -296,6 +301,89 @@ def test_shearing_service_bales_calculate_money_totals_and_validate_species(app)
 
         ShearingService.delete_bale(session=session, bale_id=str(first.id))
         assert ShearingBale.query.filter_by(id=first.id).first() is None
+
+
+def test_shearing_service_calculates_goat_revenue_per_animal_split(app):
+    with app.app_context():
+        farm = Farm(name="Goat Revenue Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        shearer = ShearingService.create_shearer(farm_id=farm.id, name="Revenue Shearer")
+        session = ShearingService.create_session(
+            farm_id=farm.id,
+            name="October mohair",
+            species="Goat",
+            start_date="2026-10-01",
+            lootjie_rate="10.00",
+        )
+        kid = AnimalGroupType(species="Goat", breed="Angora", sex="mixed", age_class="kid")
+        adult = AnimalGroupType(species="Goat", breed="Angora", sex="ewe", age_class="adult")
+        db.session.add_all([kid, adult])
+        db.session.flush()
+
+        ShearingService.record_entry(
+            session=session,
+            work_date="2026-10-01",
+            shearer_id=shearer.id,
+            animal_group_type=kid,
+            quantity=5,
+        )
+        ShearingService.record_entry(
+            session=session,
+            work_date="2026-10-01",
+            shearer_id=shearer.id,
+            animal_group_type=adult,
+            quantity=10,
+        )
+        kid_code = ShearingService.upsert_bale_code(species="Goat", code="Kid-A")
+        adult_code = ShearingService.upsert_bale_code(species="Goat", code="YGA")
+        ShearingService.record_bale(
+            session=session,
+            bale_code=kid_code,
+            bale_number="K1",
+            weight_kg="20",
+            total_price="1000",
+        )
+        ShearingService.record_bale(
+            session=session,
+            bale_code=adult_code,
+            bale_number="A1",
+            weight_kg="30",
+            total_price="1500",
+        )
+        ShearingService.record_bale(
+            session=session,
+            code_text="K-SKIRT",
+            bale_number="K2",
+            weight_kg="5",
+        )
+
+        payload = ShearingService.serialize_session(session)
+        assert payload["revenue_per_animal"] == {
+            "overall": 166.67,
+            "kid_goats": 200.0,
+            "non_kid_goats": 150.0,
+        }
+
+        empty_session = ShearingService.create_session(
+            farm_id=farm.id,
+            name="No-count mohair",
+            species="Goat",
+            start_date="2026-10-02",
+            lootjie_rate="10.00",
+        )
+        ShearingService.record_bale(
+            session=empty_session,
+            code_text="KID",
+            bale_number="E1",
+            weight_kg="10",
+            total_price="500",
+        )
+        assert ShearingService.serialize_session(empty_session)["revenue_per_animal"] == {
+            "overall": None,
+            "kid_goats": None,
+            "non_kid_goats": None,
+        }
 
 
 def test_shearing_analytics_report_summarizes_bales_codes_and_costs(app):
@@ -607,6 +695,7 @@ def test_shearing_web_routes_create_session_shearer_and_entry(client, app):
         payload = ShearingService.serialize_session(session)
         assert payload["bale_money_totals"]["total_bales"] == 1
         assert payload["bale_money_totals"]["total_price"] == 1250.0
+        assert payload["revenue_per_animal"]["overall"] == 250.0
 
     page = client.get(f"/shearing/sessions/{session_id}")
     assert page.status_code == 200
@@ -619,6 +708,10 @@ def test_shearing_web_routes_create_session_shearer_and_entry(client, app):
     assert b"Analytics and Statistics" in page.data
     assert b"Open Analytics" in page.data
     assert b"Attachments" in page.data
+    assert "Average R/Animal" in text
+    assert "Kid Avg R/Animal" in text
+    assert "Non-Kid Avg R/Animal" in text
+    assert "R 250.00" in text
     assert "<summary><strong>Edit Session</strong></summary>" in text
 
     shearing_page = client.get(f"/shearing/sessions/{session_id}/shearing")
@@ -646,6 +739,65 @@ def test_shearing_web_routes_create_session_shearer_and_entry(client, app):
     assert "Bale Analytics" in analytics_text
     assert "Bales By Code" in analytics_text
     assert 'class="shearing-chart-grid"' in analytics_text
+
+
+def test_shearing_detail_renders_goat_revenue_per_animal_cards(client, app):
+    with app.app_context():
+        farm = Farm(name="Revenue Card Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        shearer = ShearingService.create_shearer(farm_id=farm.id, name="Revenue Card Shearer")
+        session = ShearingService.create_session(
+            farm_id=farm.id,
+            name="Revenue card mohair",
+            species="Goat",
+            start_date="2026-11-01",
+            lootjie_rate="10.00",
+        )
+        kid = AnimalGroupType(species="Goat", breed="Card Angora", sex="mixed", age_class="kid")
+        adult = AnimalGroupType(species="Goat", breed="Card Angora", sex="ewe", age_class="adult")
+        db.session.add_all([kid, adult])
+        db.session.flush()
+        ShearingService.record_entry(
+            session=session,
+            work_date="2026-11-01",
+            shearer_id=shearer.id,
+            animal_group_type=kid,
+            quantity=4,
+        )
+        ShearingService.record_entry(
+            session=session,
+            work_date="2026-11-01",
+            shearer_id=shearer.id,
+            animal_group_type=adult,
+            quantity=6,
+        )
+        ShearingService.record_bale(
+            session=session,
+            code_text="KID",
+            bale_number="K1",
+            weight_kg="18",
+            total_price="800",
+        )
+        ShearingService.record_bale(
+            session=session,
+            code_text="YG",
+            bale_number="A1",
+            weight_kg="24",
+            total_price="900",
+        )
+        db.session.commit()
+        session_id = str(session.id)
+
+    page = client.get(f"/shearing/sessions/{session_id}")
+    assert page.status_code == 200
+    text = page.get_data(as_text=True)
+    assert "Average R/Animal" in text
+    assert "Kid Avg R/Animal" in text
+    assert "Non-Kid Avg R/Animal" in text
+    assert "R 170.00" in text
+    assert "R 200.00" in text
+    assert "R 150.00" in text
 
 
 def test_shearing_session_attachments_upload_download_and_delete(client, app):
@@ -845,6 +997,122 @@ def test_shearing_batch_entry_route_is_atomic_and_feeds_session_subpages(client,
     assert grouped_payload["panels"][0]["datasets"] == [
         {"label": "Animals shorn", "values": [3, 4]}
     ]
+
+
+def test_shearing_bale_rows_can_be_updated_in_batch_atomically(client, app):
+    with app.app_context():
+        farm = Farm(name="Batch Bale Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        session = ShearingService.create_session(
+            farm_id=farm.id,
+            name="Batch bales",
+            species="Sheep",
+            start_date="2026-07-01",
+            lootjie_rate="10.00",
+        )
+        fleece_code = ShearingService.upsert_bale_code(species="Sheep", code="FH")
+        bellies_code = ShearingService.upsert_bale_code(species="Sheep", code="B")
+        first = ShearingService.record_bale(
+            session=session,
+            bale_code=fleece_code,
+            bale_number="B1",
+            weight_kg="20",
+            price_per_kg="10",
+            notes="Original first",
+        )
+        second = ShearingService.record_bale(
+            session=session,
+            bale_code=bellies_code,
+            bale_number="B2",
+            weight_kg="15",
+            price_per_kg="12",
+            notes="Original second",
+        )
+        db.session.commit()
+        session_id = str(session.id)
+        first_id = str(first.id)
+        second_id = str(second.id)
+        fleece_code_id = str(fleece_code.id)
+
+    page = client.get(f"/shearing/sessions/{session_id}/bales")
+    page_text = page.get_data(as_text=True)
+    assert "Update Bale Rows" in page_text
+    assert f"/shearing/sessions/{session_id}/bales/rows" in page_text
+    assert "bales-0-bale_id" in page_text
+
+    response = client.post(
+        f"/shearing/sessions/{session_id}/bales/rows",
+        data={
+            "return_to": "bales",
+            "bale_row_count": "2",
+            "bales-0-bale_id": first_id,
+            "bales-0-bale_code_id": fleece_code_id,
+            "bales-0-code_text": "FH",
+            "bales-0-bale_number": "B1A",
+            "bales-0-weight_kg": "21",
+            "bales-0-price_per_kg": "11",
+            "bales-0-total_price": "",
+            "bales-0-notes": "Updated first",
+            "bales-1-bale_id": second_id,
+            "bales-1-bale_code_id": "",
+            "bales-1-code_text": "ADHOC",
+            "bales-1-bale_number": "B2A",
+            "bales-1-weight_kg": "12",
+            "bales-1-price_per_kg": "",
+            "bales-1-total_price": "360",
+            "bales-1-notes": "Updated second",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"2 bale rows updated" in response.data
+
+    with app.app_context():
+        first = ShearingBale.query.filter_by(id=first_id).one()
+        second = ShearingBale.query.filter_by(id=second_id).one()
+        assert first.bale_number == "B1A"
+        assert str(first.weight_kg) == "21.000"
+        assert str(first.total_price) == "231.00"
+        assert first.notes == "Updated first"
+        assert second.bale_code_id is None
+        assert second.code_text == "ADHOC"
+        assert str(second.price_per_kg) == "30.0000"
+        assert str(second.total_price) == "360.00"
+
+    invalid = client.post(
+        f"/shearing/sessions/{session_id}/bales/rows",
+        data={
+            "return_to": "bales",
+            "bale_row_count": "2",
+            "bales-0-bale_id": first_id,
+            "bales-0-bale_code_id": fleece_code_id,
+            "bales-0-code_text": "FH",
+            "bales-0-bale_number": "SHOULD-NOT-STICK",
+            "bales-0-weight_kg": "22",
+            "bales-0-price_per_kg": "10",
+            "bales-0-total_price": "",
+            "bales-1-bale_id": second_id,
+            "bales-1-bale_code_id": "",
+            "bales-1-code_text": "ADHOC",
+            "bales-1-bale_number": "B2A",
+            "bales-1-weight_kg": "12",
+            "bales-1-price_per_kg": "10",
+            "bales-1-total_price": "99",
+        },
+        follow_redirects=True,
+    )
+    assert invalid.status_code == 200
+    assert b"Row 2: Total price must match weight kg multiplied by price per kg" in invalid.data
+
+    with app.app_context():
+        first = ShearingBale.query.filter_by(id=first_id).one()
+        second = ShearingBale.query.filter_by(id=second_id).one()
+        assert first.bale_number == "B1A"
+        assert str(first.weight_kg) == "21.000"
+        assert str(first.total_price) == "231.00"
+        assert second.code_text == "ADHOC"
+        assert str(second.total_price) == "360.00"
 
 
 def test_shearing_analytics_web_route_renders_empty_and_landing_link(client):

@@ -46,6 +46,41 @@
     <p class="muted">{{ session_payload["bale_money_totals"]["unpriced_bales"] }} unpriced bales</p>
   </article>
   <article class="card">
+    <h2>Average R/Animal</h2>
+    <p class="cash-summary-value">
+      {% if session_payload["revenue_per_animal"]["overall"] is not none %}
+      {{ format_money(session_payload["revenue_per_animal"]["overall"]) }}
+      {% else %}
+      -
+      {% endif %}
+    </p>
+    <p class="muted">Bale Revenue / Total Shorn</p>
+  </article>
+  {% if session.species == "Goat" %}
+  <article class="card">
+    <h2>Kid Avg R/Animal</h2>
+    <p class="cash-summary-value">
+      {% if session_payload["revenue_per_animal"]["kid_goats"] is not none %}
+      {{ format_money(session_payload["revenue_per_animal"]["kid_goats"]) }}
+      {% else %}
+      -
+      {% endif %}
+    </p>
+    <p class="muted">Kid bale revenue / kid count</p>
+  </article>
+  <article class="card">
+    <h2>Non-Kid Avg R/Animal</h2>
+    <p class="cash-summary-value">
+      {% if session_payload["revenue_per_animal"]["non_kid_goats"] is not none %}
+      {{ format_money(session_payload["revenue_per_animal"]["non_kid_goats"]) }}
+      {% else %}
+      -
+      {% endif %}
+    </p>
+    <p class="muted">Non-kid bale revenue / non-kid count</p>
+  </article>
+  {% endif %}
+  <article class="card">
     <h2>Average P/kg</h2>
     <p class="cash-summary-value">
       {% if session_payload["bale_money_totals"]["average_price_per_kg"] is not none %}
@@ -619,58 +654,68 @@
 {% macro bale_rows() -%}
 <section class="card">
   <h2>Bale Rows</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Bale</th>
-          <th>Code</th>
-          <th>Weight</th>
-          <th>Price/kg</th>
-          <th>Total</th>
-          <th>Notes</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for bale in bales %}
-        {% set row = serialize_bale(bale) %}
-        {% set form_id = "bale-form-" ~ row["id"] %}
-        <tr>
-          <td><input form="{{ form_id }}" name="bale_number" value="{{ row["bale_number"] or "" }}" /></td>
-          <td>
-            <select form="{{ form_id }}" name="bale_code_id">
-              <option value="">Ad-hoc</option>
-              {% for code in bale_codes %}
-              <option value="{{ code.id }}" {% if row["bale_code_id"] == code.id|string %}selected{% endif %}>
-                {{ code.code }}{% if not code.active %} (inactive){% endif %}
-              </option>
-              {% endfor %}
-            </select>
-            <input form="{{ form_id }}" name="code_text" value="{{ row["code_text"] }}" />
-          </td>
-          <td><input form="{{ form_id }}" name="weight_kg" inputmode="decimal" value="{{ "%.3f"|format(row["weight_kg"]) }}" required /></td>
-          <td><input form="{{ form_id }}" name="price_per_kg" inputmode="decimal" value="{{ row["price_per_kg"] if row["price_per_kg"] is not none else "" }}" /></td>
-          <td><input form="{{ form_id }}" name="total_price" inputmode="decimal" value="{{ row["total_price"] if row["total_price"] is not none else "" }}" /></td>
-          <td><input form="{{ form_id }}" name="notes" value="{{ row["notes"] or "" }}" /></td>
-          <td class="row-actions">
-            <form id="{{ form_id }}" method="post" action="{{ url_for('shearing.record_bale', session_id=session.id) }}" class="inline-form">
-              <input type="hidden" name="return_to" value="bales" />
-              <input type="hidden" name="bale_id" value="{{ row["id"] }}" />
-              <button type="submit" class="btn btn-secondary">Update</button>
-            </form>
-            <form method="post" action="{{ url_for('shearing.delete_bale', session_id=session.id, bale_id=row['id']) }}">
-              <input type="hidden" name="return_to" value="bales" />
-              <button type="submit" class="btn btn-danger">Delete</button>
-            </form>
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="7" class="muted">No bales captured yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <form method="post" action="{{ url_for('shearing.update_bale_rows', session_id=session.id) }}" class="grid-form">
+    <input type="hidden" name="return_to" value="bales" />
+    <input type="hidden" name="bale_row_count" value="{{ bales|length }}" />
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Bale</th>
+            <th>Code</th>
+            <th>Weight</th>
+            <th>Price/kg</th>
+            <th>Total</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for bale in bales %}
+          {% set row = serialize_bale(bale) %}
+          {% set row_index = loop.index0 %}
+          <tr>
+            <td>
+              <input type="hidden" name="bales-{{ row_index }}-bale_id" value="{{ row["id"] }}" />
+              <input name="bales-{{ row_index }}-bale_number" value="{{ row["bale_number"] or "" }}" />
+            </td>
+            <td>
+              <select name="bales-{{ row_index }}-bale_code_id">
+                <option value="">Ad-hoc</option>
+                {% for code in bale_codes %}
+                <option value="{{ code.id }}" {% if row["bale_code_id"] == code.id|string %}selected{% endif %}>
+                  {{ code.code }}{% if not code.active %} (inactive){% endif %}
+                </option>
+                {% endfor %}
+              </select>
+              <input name="bales-{{ row_index }}-code_text" value="{{ row["code_text"] }}" />
+            </td>
+            <td><input name="bales-{{ row_index }}-weight_kg" inputmode="decimal" value="{{ "%.3f"|format(row["weight_kg"]) }}" required /></td>
+            <td><input name="bales-{{ row_index }}-price_per_kg" inputmode="decimal" value="{{ row["price_per_kg"] if row["price_per_kg"] is not none else "" }}" /></td>
+            <td><input name="bales-{{ row_index }}-total_price" inputmode="decimal" value="{{ row["total_price"] if row["total_price"] is not none else "" }}" /></td>
+            <td><input name="bales-{{ row_index }}-notes" value="{{ row["notes"] or "" }}" /></td>
+            <td class="row-actions">
+              <button
+                type="submit"
+                class="btn btn-danger"
+                formaction="{{ url_for('shearing.delete_bale', session_id=session.id, bale_id=row['id']) }}"
+                formmethod="post"
+              >Delete</button>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="muted">No bales captured yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if bales %}
+    <div class="row-actions">
+      <button type="submit" class="btn">Update Bale Rows</button>
+      <span class="muted">Save all edited bale rows at once.</span>
+    </div>
+    {% endif %}
+  </form>
 </section>
 {%- endmacro %}
 

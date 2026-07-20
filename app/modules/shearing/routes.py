@@ -140,15 +140,16 @@ def _session_context(session: ShearingSession) -> dict:
     }
 
 
-def _batch_row_indexes() -> list[int]:
+def _indexed_row_indexes(prefix: str, count_field: str) -> list[int]:
     indexes: set[int] = set()
     try:
-        row_count = int(request.form.get("row_count") or 0)
+        row_count = int(request.form.get(count_field) or 0)
     except ValueError:
         row_count = 0
     indexes.update(range(max(row_count, 0)))
+    key_prefix = f"{prefix}-"
     for key in request.form:
-        if not key.startswith("rows-"):
+        if not key.startswith(key_prefix):
             continue
         parts = key.split("-", 2)
         if len(parts) < 3:
@@ -160,8 +161,20 @@ def _batch_row_indexes() -> list[int]:
     return sorted(indexes)
 
 
+def _batch_row_indexes() -> list[int]:
+    return _indexed_row_indexes("rows", "row_count")
+
+
 def _batch_row_value(index: int, name: str) -> str:
     return (request.form.get(f"rows-{index}-{name}") or "").strip()
+
+
+def _bale_row_indexes() -> list[int]:
+    return _indexed_row_indexes("bales", "bale_row_count")
+
+
+def _bale_row_value(index: int, name: str) -> str:
+    return (request.form.get(f"bales-{index}-{name}") or "").strip()
 
 
 def _batch_row_is_empty(row: dict) -> bool:
@@ -241,6 +254,51 @@ def _record_batch_entries(session: ShearingSession) -> int:
                 animal_group_type=row["animal_group_type"],
                 quantity=row["quantity"],
                 note=row["note"],
+            )
+        except ValueError as exc:
+            raise ValueError(f"Row {row['row_number']}: {exc}") from exc
+    return len(rows)
+
+
+def _update_bale_rows(session: ShearingSession) -> int:
+    rows = []
+    for index in _bale_row_indexes():
+        row = {
+            "row_number": index + 1,
+            "bale_id": _bale_row_value(index, "bale_id"),
+            "bale_code_id": _bale_row_value(index, "bale_code_id"),
+            "code_text": _bale_row_value(index, "code_text"),
+            "bale_number": _bale_row_value(index, "bale_number"),
+            "weight_kg": _bale_row_value(index, "weight_kg"),
+            "price_per_kg": _bale_row_value(index, "price_per_kg"),
+            "total_price": _bale_row_value(index, "total_price"),
+            "notes": _bale_row_value(index, "notes"),
+        }
+        if not row["bale_id"]:
+            continue
+        rows.append(row)
+
+    if not rows:
+        raise ValueError("At least one bale row is required")
+
+    for row in rows:
+        try:
+            bale_code = None
+            if row["bale_code_id"]:
+                bale_code = ShearingService.bale_code_from_payload(
+                    {"bale_code_id": row["bale_code_id"]},
+                    expected_species=session.species,
+                )
+            ShearingService.record_bale(
+                session=session,
+                bale_id=row["bale_id"],
+                bale_code=bale_code,
+                code_text=row["code_text"],
+                bale_number=row["bale_number"],
+                weight_kg=row["weight_kg"],
+                price_per_kg=row["price_per_kg"],
+                total_price=row["total_price"],
+                notes=row["notes"],
             )
         except ValueError as exc:
             raise ValueError(f"Row {row['row_number']}: {exc}") from exc
@@ -612,6 +670,19 @@ def record_bale(session_id: str):
         )
         db.session.commit()
         flash("Bale saved" if bale is not None else "Bale updated", "success")
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    return _session_redirect(session_id, "bales")
+
+
+@bp.post("/sessions/<session_id>/bales/rows")
+def update_bale_rows(session_id: str):
+    session = _get_session_or_404(session_id)
+    try:
+        row_count = _update_bale_rows(session)
+        db.session.commit()
+        flash(f"{row_count} bale row{'s' if row_count != 1 else ''} updated", "success")
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")

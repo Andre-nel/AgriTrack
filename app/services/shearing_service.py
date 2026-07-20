@@ -666,6 +666,50 @@ class ShearingService:
         }
 
     @classmethod
+    def _average_money_per_animal(cls, total_amount: Decimal, quantity: int) -> float | None:
+        if quantity <= 0:
+            return None
+        average = (total_amount / Decimal(quantity)).quantize(cls.MONEY_QUANT, rounding=ROUND_HALF_UP)
+        return float(average)
+
+    @classmethod
+    def _revenue_per_animal_breakdown(cls, session: ShearingSession, total_quantity: int) -> dict:
+        total_revenue = Decimal("0.00")
+        kid_revenue = Decimal("0.00")
+        non_kid_revenue = Decimal("0.00")
+
+        for bale in session.bales:
+            if bale.total_price is None:
+                continue
+            amount = Decimal(bale.total_price or 0)
+            total_revenue += amount
+            if session.species == "Goat":
+                if "k" in (bale.code_key or "").casefold():
+                    kid_revenue += amount
+                else:
+                    non_kid_revenue += amount
+
+        kid_quantity = 0
+        non_kid_quantity = 0
+        if session.species == "Goat":
+            for entry in session.entries:
+                quantity = int(entry.quantity)
+                if entry.animal_group_type.age_class == "kid":
+                    kid_quantity += quantity
+                else:
+                    non_kid_quantity += quantity
+
+        return {
+            "overall": cls._average_money_per_animal(total_revenue, total_quantity),
+            "kid_goats": cls._average_money_per_animal(kid_revenue, kid_quantity)
+            if session.species == "Goat"
+            else None,
+            "non_kid_goats": cls._average_money_per_animal(non_kid_revenue, non_kid_quantity)
+            if session.species == "Goat"
+            else None,
+        }
+
+    @classmethod
     def serialize_session(cls, session: ShearingSession, *, include_entries: bool = True) -> dict:
         breakdown = cls.session_breakdown(session)
         bale_breakdown = cls.bale_money_breakdown(session)
@@ -689,6 +733,7 @@ class ShearingService:
             "notes": session.notes,
             "totals": breakdown["totals"],
             "average_kg_per_animal": average_kg_per_animal,
+            "revenue_per_animal": cls._revenue_per_animal_breakdown(session, total_quantity),
             "by_shearer": breakdown["by_shearer"],
             "by_animal_type": breakdown["by_animal_type"],
             "by_date": breakdown["by_date"],
