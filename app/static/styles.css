@@ -212,6 +212,28 @@ body {
   margin-bottom: 1rem;
 }
 
+.mob-page-header {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.mob-page-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.mob-page-title-row h1 {
+  margin: 0;
+}
+
+.mob-page-header p {
+  margin: 0;
+}
+
 .paddock-page-header h1 {
   margin-bottom: 0.35rem;
 }
@@ -473,6 +495,30 @@ th, td {
 
 .balance-row.is-selected {
   background: var(--accent-soft);
+}
+
+.mob-species-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+
+.mob-species-totals li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fbfcfa;
+  color: var(--muted);
+}
+
+.mob-species-totals strong {
+  color: var(--text);
 }
 
 a { color: #1b5f49; }
@@ -2707,6 +2753,8 @@ tr.is-selected-fence {
 
   .calendar-toolbar,
   .paddock-page-header,
+  .mob-page-header,
+  .mob-page-title-row,
   .calendar-month-card-header,
   .calendar-day-header,
   .calendar-entry-topline,

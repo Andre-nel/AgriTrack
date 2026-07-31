@@ -5,8 +5,37 @@
   <a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=mob.farm_id) }}">Back To Farm</a>
   <a class="btn" href="{{ url_for('tasks.new_task_page', mob_id=mob.id) }}">Create Task</a>
 </div>
-<h1>{{ mob.name }}</h1>
-<p class="muted">Status: {{ mob.status }}</p>
+<div class="mob-page-header">
+  <div class="mob-page-title-row">
+    <h1>{{ mob.name }}</h1>
+    <button
+      type="button"
+      class="btn btn-secondary"
+      data-open-mob-name-modal
+      aria-controls="mob-name-modal"
+      aria-haspopup="dialog"
+    >
+      Edit Name
+    </button>
+  </div>
+  <p class="muted">Status: {{ mob.status }}</p>
+</div>
+
+<dialog id="mob-name-modal" class="entity-edit-modal">
+  <div class="entity-edit-modal-header">
+    <h2>Edit Name</h2>
+    <button type="button" class="btn btn-secondary" data-close-mob-name-modal>Close</button>
+  </div>
+  <form method="post" action="{{ url_for('web.mob_rename_form', mob_id=mob.id) }}" class="grid-form">
+    <label>Name
+      <input name="name" value="{{ mob.name }}" required data-mob-name-input />
+    </label>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Name</button>
+      <button type="button" class="btn btn-secondary" data-close-mob-name-modal>Cancel</button>
+    </div>
+  </form>
+</dialog>
 
 <section class="card">
   <div class="task-section-heading">
@@ -33,19 +62,16 @@
   </ul>
 </section>
 
-<section class="card">
-  <h2>Edit Mob Name</h2>
-  <form method="post" action="{{ url_for('web.mob_rename_form', mob_id=mob.id) }}" class="grid-two">
-    <label>Name
-      <input name="name" value="{{ mob.name }}" required />
-    </label>
-    <button type="submit" class="btn">Save Name</button>
-  </form>
-</section>
-
 <section class="split">
   <article class="card">
     <h2>Balances</h2>
+    {% if mob_species_totals %}
+    <ul class="mob-species-totals" aria-label="Species totals">
+      {% for total in mob_species_totals %}
+      <li><span>{{ total.species }}</span><strong>{{ total.head_count }}</strong> head</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
     <p class="muted">Select a balance line, then edit its sex, age class, and head count.</p>
     <table id="balanceTable">
       <thead><tr><th>Select</th><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
@@ -600,6 +626,50 @@
     if (eventTypeSelect) {
       eventTypeSelect.addEventListener("change", updateAdjustQuantityHelp);
       updateAdjustQuantityHelp();
+    }
+
+    const mobNameDialog = document.getElementById("mob-name-modal");
+    const mobNameOpenButton = document.querySelector("[data-open-mob-name-modal]");
+    const mobNameInput = document.querySelector("[data-mob-name-input]");
+
+    function closeDialog(dialog) {
+      if (typeof dialog.close === "function") {
+        dialog.close();
+      } else {
+        dialog.removeAttribute("open");
+      }
+    }
+
+    if (mobNameDialog && mobNameOpenButton) {
+      mobNameOpenButton.addEventListener("click", () => {
+        if (typeof mobNameDialog.showModal === "function") {
+          mobNameDialog.showModal();
+        } else {
+          mobNameDialog.setAttribute("open", "open");
+        }
+        if (mobNameInput) {
+          mobNameInput.focus();
+          mobNameInput.select();
+        }
+      });
+
+      mobNameDialog.querySelectorAll("[data-close-mob-name-modal]").forEach((button) => {
+        button.addEventListener("click", () => {
+          closeDialog(mobNameDialog);
+        });
+      });
+
+      mobNameDialog.addEventListener("click", (event) => {
+        const rect = mobNameDialog.getBoundingClientRect();
+        const outside =
+          event.clientX < rect.left ||
+          event.clientX > rect.right ||
+          event.clientY < rect.top ||
+          event.clientY > rect.bottom;
+        if (outside) {
+          closeDialog(mobNameDialog);
+        }
+      });
     }
 
     const balanceTable = document.getElementById("balanceTable");

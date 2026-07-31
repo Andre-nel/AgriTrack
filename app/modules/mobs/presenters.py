@@ -49,6 +49,24 @@ def _allocation_group_rows(allocation) -> list[dict]:
     return rows
 
 
+def _species_total_rows(mob: Mob) -> list[dict]:
+    totals_by_species: dict[str, int] = {}
+    for balance in mob.balances:
+        head_count = int(balance.head_count or 0)
+        if head_count <= 0:
+            continue
+        species = balance.animal_group_type.species
+        totals_by_species[species] = totals_by_species.get(species, 0) + head_count
+
+    return [
+        {"species": species, "head_count": head_count}
+        for species, head_count in sorted(
+            totals_by_species.items(),
+            key=lambda item: item[0].lower(),
+        )
+    ]
+
+
 def _session_has_paddock(session, paddock_id: str) -> bool:
     return any(str(allocation.paddock_id) == paddock_id for allocation in session.allocations)
 
@@ -248,6 +266,7 @@ def build_mob_detail_context(
         "stock_event_types": StockEventType,
         "current_allocations": current_allocations,
         "allocation_total_pct": float(allocation_total_pct),
+        "mob_species_totals": _species_total_rows(mob),
         "split_group_options": split_group_options,
         "initial_count_allocation_rows": initial_count_allocation_rows,
         "has_current_count_allocations": bool(current_count_allocations),

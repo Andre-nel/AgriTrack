@@ -173,6 +173,36 @@ def test_build_mob_detail_context_prefills_exact_count_allocations(app):
         ]
 
 
+def test_build_mob_detail_context_sums_positive_balances_by_species(app):
+    with app.app_context():
+        farm = Farm(name="Species Totals Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        mob = Mob(farm_id=farm.id, name="Species Total Mob", status="active")
+        ewes = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        lambs = AnimalGroupType(species="Sheep", breed="Merino", sex="mixed", age_class="lamb")
+        cows = AnimalGroupType(species="Cattle", breed="Bonsmara", sex="cow", age_class="adult")
+        goats = AnimalGroupType(species="Goat", breed="Boer", sex="ewe", age_class="adult")
+        db.session.add_all([mob, ewes, lambs, cows, goats])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=ewes.id, head_count=12),
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=lambs.id, head_count=4),
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=cows.id, head_count=5),
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=goats.id, head_count=0),
+            ]
+        )
+        db.session.commit()
+
+        context = build_mob_detail_context(mob, selected_event_tag="")
+
+        assert context["mob_species_totals"] == [
+            {"species": "Cattle", "head_count": 5},
+            {"species": "Sheep", "head_count": 16},
+        ]
+
+
 def test_build_mob_detail_context_counts_back_to_back_paddock_assignment(app):
     with app.app_context():
         farm = Farm(name="Continuous Mob Farm", timezone="SAST", active=True)

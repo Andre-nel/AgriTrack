@@ -2244,6 +2244,14 @@ def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):
     assert response.status_code == 200
 
     body = response.data.decode("utf-8")
+    assert "Edit Mob Name" not in body
+    assert 'data-open-mob-name-modal' in body
+    assert 'aria-controls="mob-name-modal"' in body
+    assert 'value="Detail Count Mob"' in body
+    assert body.index('class="mob-species-totals"') < body.index(
+        "Select a balance line, then edit its sex, age class, and head count."
+    )
+    assert "<span>Sheep</span><strong>12</strong> head" in body
     assert "Animal Groups" in body
     assert "Sheep | Merino | ewe | adult:" in body
     assert "12 head" in body
