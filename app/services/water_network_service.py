@@ -902,6 +902,7 @@ class WaterNetworkService:
             operational_pump_ids = set()
             down_pump_ids = set()
             has_operational_path = False
+            has_available_served_water = False
             level_alert_service_assets = []
             empty_service_asset_notes = []
 
@@ -923,17 +924,25 @@ class WaterNetworkService:
                 down_pump_ids.update(summary["down_pump_ids"])
                 has_operational_path = has_operational_path or bool(summary["has_operational_path"])
 
+                effective_water_level = cls._normalized_water_level(summary["effective_water_level"])
+                if effective_water_level and effective_water_level != "empty":
+                    has_available_served_water = True
+
                 if service_asset.asset_type in cls.WATER_LEVEL_ALERT_EXCLUDED_TYPES:
                     continue
 
                 level_alert_service_assets.append(service_asset)
-                if cls.normalize_choice(summary["effective_water_level"]) == "empty":
+                if effective_water_level == "empty":
                     note = service_asset.name
                     if summary["warning"]:
                         note = f"{note} ({summary['warning']})"
                     empty_service_asset_notes.append(note)
 
-            if level_alert_service_assets and len(empty_service_asset_notes) == len(level_alert_service_assets):
+            if (
+                not has_available_served_water
+                and level_alert_service_assets
+                and len(empty_service_asset_notes) == len(level_alert_service_assets)
+            ):
                 message = "All monitored served water points are empty: " + "; ".join(empty_service_asset_notes)
                 paddock_alerts[paddock_id] = {
                     "level": "critical",

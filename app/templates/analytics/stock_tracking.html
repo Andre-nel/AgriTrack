@@ -11,11 +11,10 @@
   <h2>Filters</h2>
   <form method="get" action="{{ url_for('web.analytics_stock_tracking') }}" class="grid-form">
     <div class="grid-two">
-      <label>Farm
-        <select name="farm_id">
-          <option value="">All farms</option>
+      <label>Farms
+        <select name="farm_id" multiple size="6" class="analytics-multi-select">
           {% for farm in filter_options.farms %}
-          <option value="{{ farm.id }}" {% if selected_filters.farm_id == farm.id %}selected{% endif %}>
+          <option value="{{ farm.id }}" {% if farm.id in selected_farm_ids %}selected{% endif %}>
             {{ farm.name }}
           </option>
           {% endfor %}

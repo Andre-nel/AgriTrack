@@ -1,3 +1,5 @@
+import json
+import re
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -1635,6 +1637,60 @@ def test_stock_tracking_renders_series(client, app):
     assert response.status_code == 200
     assert b"Goat" in response.data
     assert b"Latest Totals" in response.data
+
+
+def test_stock_tracking_allows_multiple_farm_filters(client, app):
+    with app.app_context():
+        farms = [
+            Farm(name="Multi Stock North", timezone="SAST"),
+            Farm(name="Multi Stock South", timezone="SAST"),
+            Farm(name="Multi Stock Outside", timezone="SAST"),
+        ]
+        db.session.add_all(farms)
+        db.session.flush()
+        selected_farm_ids = [str(farms[0].id), str(farms[1].id)]
+
+        group = AnimalGroupType(species="Goat", breed="Angora", sex="ewe", age_class="adult")
+        db.session.add(group)
+        db.session.flush()
+
+        quantities = [5, 7, 11]
+        for farm, quantity in zip(farms, quantities):
+            mob = Mob(farm_id=farm.id, name=f"{farm.name} Mob", status="active")
+            db.session.add(mob)
+            db.session.flush()
+            db.session.add(
+                StockLedgerEntry(
+                    farm_id=farm.id,
+                    mob_id=mob.id,
+                    animal_group_type_id=group.id,
+                    event_time=datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc),
+                    event_type=StockEventType.purchase,
+                    quantity=quantity,
+                )
+            )
+        db.session.commit()
+
+    response = client.get(
+        "/analytics/stock-tracking"
+        f"?farm_id={selected_farm_ids[0]}&farm_id={selected_farm_ids[1]}"
+        "&start_date=2026-01-01&end_date=2026-01-01&group_by=farm"
+    )
+    assert response.status_code == 200
+
+    text = response.data.decode("utf-8")
+    assert 'select name="farm_id" multiple' in text
+
+    match = re.search(
+        r'<script id="stockTrackingChartData" type="application/json">(.*?)</script>',
+        text,
+    )
+    assert match is not None
+    payload = json.loads(match.group(1))
+    assert sorted(dataset["label"] for dataset in payload["datasets"]) == [
+        "Multi Stock North",
+        "Multi Stock South",
+    ]
 
 
 def test_stock_tracking_reconciles_latest_to_current_balance(client, app):

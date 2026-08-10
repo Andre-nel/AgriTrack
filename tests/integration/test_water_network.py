@@ -1374,6 +1374,69 @@ def test_farm_map_data_marks_paddocks_with_critical_water_alerts(client, app, tm
     assert "WM-1" in paddock_feature["properties"]["water_alert_message"]
 
 
+def test_farm_map_data_does_not_mark_paddock_empty_when_served_weir_has_water(client, app, tmp_path):
+    app.instance_path = str(tmp_path)
+    with app.app_context():
+        farm = Farm(name="Served Weir Water Farm", timezone="SAST")
+        db.session.add(farm)
+        db.session.flush()
+        paddock = Paddock(farm_id=farm.id, name="North Camp", area_ha=12, grazeable_area_ha=12)
+        db.session.add(paddock)
+        db.session.flush()
+
+        trough = WaterAsset(
+            farm_id=farm.id,
+            name="Trough A",
+            asset_type="trough",
+            active=True,
+            status="operational",
+            water_level="empty",
+            latitude=-32.0008,
+            longitude=25.0008,
+            location_paddock_id=paddock.id,
+        )
+        weir = WaterAsset(
+            farm_id=farm.id,
+            name="Weir A",
+            asset_type="weir",
+            active=True,
+            status="operational",
+            water_level="high",
+            latitude=-32.0012,
+            longitude=25.0012,
+            location_paddock_id=paddock.id,
+        )
+        db.session.add_all([trough, weir])
+        db.session.flush()
+        db.session.add_all(
+            [
+                WaterAssetServedPaddock(water_asset_id=trough.id, paddock_id=paddock.id),
+                WaterAssetServedPaddock(water_asset_id=weir.id, paddock_id=paddock.id),
+            ]
+        )
+        db.session.commit()
+        farm_id = str(farm.id)
+        paddock_id = str(paddock.id)
+
+    _write_map(
+        app,
+        "Served Weir Water Farm",
+        _kml_bytes(_placemark_polygon_xml("North Camp", _square_ring(25.0000, -32.0000, 0.0010))),
+    )
+
+    response = client.get(f"/farms/{farm_id}/map-data")
+    assert response.status_code == 200
+    payload = response.get_json()
+    paddock_feature = next(
+        feature
+        for feature in payload["features"]
+        if feature["properties"]["feature_type"] == "paddock"
+        and feature["properties"]["paddock_id"] == paddock_id
+    )
+    assert paddock_feature["properties"]["water_alert_level"] is None
+    assert paddock_feature["properties"]["water_alert_message"] is None
+
+
 def test_farm_map_data_counts_served_ground_dams_and_weirs_for_paddock_water(client, app, tmp_path):
     app.instance_path = str(tmp_path)
     with app.app_context():

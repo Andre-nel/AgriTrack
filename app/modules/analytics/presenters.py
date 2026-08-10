@@ -57,7 +57,7 @@ def _stock_series_label(group_by_fields: list[str], group_key: tuple[str, ...]) 
 
 
 def current_stock_totals_by_group(
-    selected_filters: dict[str, str],
+    selected_filters: dict[str, str | list[str]],
     group_by_fields: list[str],
 ) -> dict[tuple[str, ...], int]:
     rows = (
@@ -68,8 +68,15 @@ def current_stock_totals_by_group(
         .filter(Mob.status == "active", AnimalGroupBalance.head_count > 0)
     )
 
-    if selected_filters["farm_id"]:
-        rows = rows.filter(Mob.farm_id == selected_filters["farm_id"])
+    selected_farm_ids = selected_filters.get("farm_ids") or []
+    if isinstance(selected_farm_ids, str):
+        selected_farm_ids = [selected_farm_ids] if selected_farm_ids else []
+    if not selected_farm_ids:
+        selected_farm_id = selected_filters.get("farm_id") or ""
+        if isinstance(selected_farm_id, str) and selected_farm_id:
+            selected_farm_ids = [selected_farm_id]
+    if selected_farm_ids:
+        rows = rows.filter(Mob.farm_id.in_(selected_farm_ids))
     if selected_filters["species"]:
         rows = rows.filter(AnimalGroupType.species == selected_filters["species"])
     if selected_filters["breed"]:

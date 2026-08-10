@@ -141,8 +141,15 @@ def register_legacy_routes(bp) -> None:
 
     @bp.get("/analytics/stock-tracking")
     def analytics_stock_tracking():
+        farms = Farm.query.order_by(Farm.name).all()
+        valid_farm_ids = {str(farm.id) for farm in farms}
+        selected_farm_ids = [
+            farm_id
+            for farm_id in normalize_repeated_query_ids(request.args.getlist("farm_id"))
+            if farm_id in valid_farm_ids
+        ]
         selected_filters = {
-            "farm_id": (request.args.get("farm_id") or "").strip(),
+            "farm_ids": selected_farm_ids,
             "species": (request.args.get("species") or "").strip(),
             "breed": (request.args.get("breed") or "").strip(),
             "sex": (request.args.get("sex") or "").strip(),
@@ -162,7 +169,6 @@ def register_legacy_routes(bp) -> None:
             flash("Analytics end date must be on or after the start date", "error")
             return redirect(url_for("web.analytics_stock_tracking"))
 
-        farms = Farm.query.order_by(Farm.name).all()
         group_types = AnimalGroupType.query.order_by(
             AnimalGroupType.species,
             AnimalGroupType.breed,
@@ -187,8 +193,8 @@ def register_legacy_routes(bp) -> None:
             .join(AnimalGroupType, StockLedgerEntry.animal_group_type_id == AnimalGroupType.id)
         )
 
-        if selected_filters["farm_id"]:
-            ledger_query = ledger_query.filter(StockLedgerEntry.farm_id == selected_filters["farm_id"])
+        if selected_farm_ids:
+            ledger_query = ledger_query.filter(StockLedgerEntry.farm_id.in_(selected_farm_ids))
         if selected_filters["species"]:
             ledger_query = ledger_query.filter(AnimalGroupType.species == selected_filters["species"])
         if selected_filters["breed"]:
@@ -234,6 +240,7 @@ def register_legacy_routes(bp) -> None:
             "analytics/stock_tracking.html",
             filter_options=filter_options,
             selected_filters=selected_filters,
+            selected_farm_ids=selected_farm_ids,
             group_by_options=group_by_options,
             selected_group_by=selected_group_by,
             start_date=start_date,
