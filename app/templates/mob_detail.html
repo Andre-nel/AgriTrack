@@ -174,8 +174,16 @@
         </label>
         <label>Quantity<input type="number" min="1" step="1" name="quantity" required /></label>
       </div>
+      <label>Apply to paddock
+        <select name="allocation_paddock_id" id="adjustPaddockId" {% if not adjust_paddock_options %}disabled{% endif %}>
+          <option value="">All current paddocks</option>
+          {% for paddock in adjust_paddock_options %}
+          <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <p class="muted" id="adjustQuantityHelp">
-        Quantity is posted as the number of head for the selected event. Use count only when you want to set the final head count for this exact line.
+        Quantity is posted as the number of head for the selected event. Use count only when you want to set the final head count for this exact line. Pick a paddock to apply the resulting change there only.
       </p>
       <label>Note<input name="note" /></label>
       <button type="submit" class="btn">Apply Adjustment</button>
@@ -351,7 +359,8 @@
               <option value="">Choose paddock</option>
             </select>
           </label>
-          <label>Animal Type
+          <label>
+            <span>Animal Type <span class="count-group-remaining" hidden></span></span>
             <select name="count_group_id" class="count-allocation-group-select" required>
               <option value="">Choose type</option>
               {% for option in split_group_options %}
@@ -365,7 +374,6 @@
               </option>
               {% endfor %}
             </select>
-            <span class="muted count-group-available">Available: 0</span>
           </label>
           <label>Count
             <input
@@ -377,14 +385,12 @@
               required
             />
           </label>
-          <p class="muted count-row-pct">Calculated: 0.00%</p>
           <button type="button" class="btn btn-secondary count-row-remove">Remove</button>
         </div>
         {% endfor %}
       </div>
       <div class="row-actions">
         <button type="button" id="addCountAllocationRow" class="btn btn-secondary">Add Count Row</button>
-        <span id="countAllocationTotal" class="muted">Remaining: all stock</span>
       </div>
       {% else %}
       <p>No active animal groups are available for count allocation.</p>
@@ -430,7 +436,8 @@
           <option value="">Choose paddock</option>
         </select>
       </label>
-      <label>Animal Type
+      <label>
+        <span>Animal Type <span class="count-group-remaining" hidden></span></span>
         <select name="count_group_id" class="count-allocation-group-select" required>
           <option value="">Choose type</option>
           {% for option in split_group_options %}
@@ -443,7 +450,6 @@
           </option>
           {% endfor %}
         </select>
-        <span class="muted count-group-available">Available: 0</span>
       </label>
       <label>Count
         <input
@@ -454,7 +460,6 @@
           required
         />
       </label>
-      <p class="muted count-row-pct">Calculated: 0.00%</p>
       <button type="button" class="btn btn-secondary count-row-remove">Remove</button>
     </div>
   </template>
@@ -667,11 +672,11 @@
       if (!eventTypeSelect || !adjustQuantityHelp) return;
       if (eventTypeSelect.value === "count") {
         adjustQuantityHelp.textContent =
-          "Count uses the quantity as the final head count for this exact species, breed, sex, and age-class line.";
+          "Count uses the quantity as the final head count for this exact species, breed, sex, and age-class line. A selected paddock receives the resulting change only.";
         return;
       }
       adjustQuantityHelp.textContent =
-        "Quantity is posted as the number of head for the selected event. Use count only when you want to set the final head count for this exact line.";
+        "Quantity is posted as the number of head for the selected event. Use count only when you want to set the final head count for this exact line. Pick a paddock to apply the resulting change there only.";
     }
 
     if (speciesSelect) {
@@ -832,7 +837,6 @@
     const countRowsContainer = document.getElementById("countAllocationRows");
     const addCountBtn = document.getElementById("addCountAllocationRow");
     const countTemplate = document.getElementById("countAllocationRowTemplate");
-    const countTotalEl = document.getElementById("countAllocationTotal");
     const moveGroupOptionsEl = document.getElementById("moveGroupOptions");
     let moveGroupOptions = [];
     if (moveGroupOptionsEl) {
@@ -962,19 +966,21 @@
       });
     }
 
+    function formatCountForLabel(value) {
+      const number = Number(value || 0);
+      if (Number.isNaN(number)) return "0";
+      if (Number.isInteger(number)) return String(number);
+      return number.toFixed(2).replace(/\.?0+$/, "");
+    }
+
     function recalcCountTotals() {
-      if (!countRowsContainer || !countTotalEl) return;
+      if (!countRowsContainer) return;
       const totals = {};
       moveGroupOptions.forEach((group) => {
         totals[group.id] = 0;
       });
-      const totalLsu = moveGroupOptions.reduce(
-        (sum, group) => sum + (Number(group.head_count || 0) * Number(group.lsu_per_head || 0)),
-        0
-      );
 
       countRowsContainer.querySelectorAll(".count-allocation-row").forEach((row) => {
-        let rowLsu = 0;
         const groupSelect = row.querySelector("select[name='count_group_id']");
         const countInput = row.querySelector("input[name='count_head_count']");
         const groupId = groupSelect ? groupSelect.value || "" : "";
@@ -982,36 +988,26 @@
         const quantity = Math.max(0, Number(countInput ? countInput.value || 0 : 0));
         if (group && !Number.isNaN(quantity)) {
           totals[groupId] = (totals[groupId] || 0) + quantity;
-          rowLsu += quantity * Number(group.lsu_per_head || 0);
-        }
-        const pctEl = row.querySelector(".count-row-pct");
-        if (pctEl) {
-          const pct = totalLsu > 0 ? (rowLsu / totalLsu) * 100 : 0;
-          pctEl.textContent = `Calculated: ${pct.toFixed(2)}%`;
         }
       });
 
-      const remaining = moveGroupOptions.map((group) => {
-        const available = Number(group.head_count || 0);
-        const assigned = Number(totals[group.id] || 0);
-        return {
-          label: group.label || group.id,
-          remaining: available - assigned,
-        };
-      });
-      const allCovered = remaining.every((row) => row.remaining === 0);
-      countTotalEl.textContent = remaining
-        .map((row) => `${row.label}: ${row.remaining} remaining`)
-        .join(" | ");
-      countTotalEl.classList.toggle("error-text", !allCovered);
-    }
+      countRowsContainer.querySelectorAll(".count-allocation-row").forEach((row) => {
+        const groupSelect = row.querySelector("select[name='count_group_id']");
+        const remainingEl = row.querySelector(".count-group-remaining");
+        if (!groupSelect || !remainingEl) return;
 
-    function syncCountRowAvailable(row) {
-      const groupSelect = row.querySelector("select[name='count_group_id']");
-      const availableEl = row.querySelector(".count-group-available");
-      if (!groupSelect || !availableEl) return;
-      const group = moveGroupOptionsById[groupSelect.value || ""];
-      availableEl.textContent = `Available: ${group ? group.head_count : 0}`;
+        const group = moveGroupOptionsById[groupSelect.value || ""];
+        const remaining = group
+          ? Number(group.head_count || 0) - Number(totals[group.id] || 0)
+          : 0;
+        if (group && remaining !== 0) {
+          remainingEl.textContent = `(${formatCountForLabel(remaining)} remaining)`;
+          remainingEl.hidden = false;
+        } else {
+          remainingEl.textContent = "";
+          remainingEl.hidden = true;
+        }
+      });
     }
 
     function bindCountRow(row) {
@@ -1032,7 +1028,6 @@
       }
       if (groupSelect) {
         groupSelect.addEventListener("change", () => {
-          syncCountRowAvailable(row);
           recalcCountTotals();
         });
       }
@@ -1047,7 +1042,6 @@
           }
         });
       }
-      syncCountRowAvailable(row);
     }
 
     if (countRowsContainer && addCountBtn && countTemplate) {

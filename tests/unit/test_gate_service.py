@@ -414,7 +414,7 @@ def test_open_gate_network_adjusts_new_count_move_allocations(app):
         str(north.id): Decimal("0.2500"),
         str(south.id): Decimal("0.7500"),
     }
-    assert GrazingAllocationGroupAssignment.query.count() == 0
+    assert GrazingAllocationGroupAssignment.query.count() == 2
     assert ReportingService.paddock_current_stock(str(north.id))[str(group.id)] == 3.0
     assert ReportingService.paddock_current_stock(str(south.id))[str(group.id)] == 9.0
 

@@ -1844,6 +1844,7 @@ def _handle_stock_count_record(farm: Farm, payload: dict) -> dict:
         quantity=abs(delta),
         note=payload.get("note") or "mobile stock count",
         event_time=_parse_iso_datetime(payload.get("event_time"), "event_time"),
+        allocation_paddock_id=payload.get("allocation_paddock_id") or payload.get("paddock_id"),
     )
     db.session.flush()
     return {

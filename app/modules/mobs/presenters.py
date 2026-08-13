@@ -235,6 +235,10 @@ def build_mob_detail_context(
                 "head_count": "",
             }
         ]
+    adjust_paddock_options = [
+        {"id": row["paddock_id"], "name": row["paddock_name"]}
+        for row in current_allocations
+    ]
 
     mob_events_all = []
     event_rows = (
@@ -275,6 +279,7 @@ def build_mob_detail_context(
         "default_transfer_farm_id": str(mob.farm_id),
         "stock_event_types": StockEventType,
         "current_allocations": current_allocations,
+        "adjust_paddock_options": adjust_paddock_options,
         "allocation_total_pct": float(allocation_total_pct),
         "mob_species_totals": _species_total_rows(mob),
         "split_group_options": split_group_options,

@@ -4,6 +4,7 @@ from typing import Mapping
 from app.extensions import db
 from app.models import AnimalGroupBalance, Mob
 from app.models.stock_ledger import StockEventType
+from app.services.allocation_distribution_service import AllocationDistributionService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.mob_event_service import MobEventService
 from app.services.stock_service import StockService
@@ -51,6 +52,10 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
             event_type=event_type,
             quantity=event_quantity,
             note=form.get("note"),
+            allocation_paddock_id=(
+                (form.get("allocation_paddock_id") or form.get("adjust_paddock_id") or "").strip()
+                or None
+            ),
         )
         db.session.commit()
         return success_message
@@ -130,6 +135,12 @@ def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
             event_tags = "stock,balance edit,reclassification"
             ledger_note = f"{description} Note: {note_text}" if note_text else description
             change_time = datetime.now(timezone.utc)
+            AllocationDistributionService.apply_reclassification(
+                mob,
+                source_group_id=str(source_group.id),
+                target_group_id=str(target_group.id),
+                target_head_count=target_head,
+            )
             StockService.adjust_stock(
                 mob_id=mob.id,
                 farm_id=mob.farm_id,
@@ -139,6 +150,7 @@ def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
                 note=ledger_note,
                 event_time=change_time,
                 sync_grazing_history=False,
+                sync_allocation_distribution=False,
             )
             StockService.adjust_stock(
                 mob_id=mob.id,
@@ -149,6 +161,7 @@ def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
                 note=ledger_note,
                 event_time=change_time,
                 sync_grazing_history=False,
+                sync_allocation_distribution=False,
             )
             GrazingHistoryService.sync_live_history_for_mob(mob, effective_at=change_time)
 

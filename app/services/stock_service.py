@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from app.extensions import db
-from app.models import AnimalGroupBalance, AnimalGroupType, StockLedgerEntry
+from app.models import AnimalGroupBalance, AnimalGroupType, Mob, StockLedgerEntry
 from app.models.stock_ledger import StockEventType
 from app.services.validation_service import ValidationService
 
@@ -88,11 +88,14 @@ class StockService:
         note: str | None = None,
         event_time: datetime | None = None,
         sync_grazing_history: bool = True,
+        sync_allocation_distribution: bool = True,
+        allocation_paddock_id: str | None = None,
     ) -> StockLedgerEntry:
         if event_type == StockEventType.count:
             raise ValueError("Count events must be resolved to adjustment_in or missing before posting.")
 
         ValidationService.validate_positive_int(quantity, "quantity")
+        posted_at = event_time or datetime.now(timezone.utc)
 
         ledger = StockLedgerEntry(
             mob_id=mob_id,
@@ -100,7 +103,7 @@ class StockService:
             animal_group_type_id=animal_group_type_id,
             event_type=event_type,
             quantity=quantity,
-            event_time=event_time or datetime.now(timezone.utc),
+            event_time=posted_at,
             note=note,
         )
         db.session.add(ledger)
@@ -121,13 +124,29 @@ class StockService:
         if next_balance < 0:
             raise ValueError("Stock balance cannot go negative")
 
+        if sync_allocation_distribution:
+            from app.services.allocation_distribution_service import AllocationDistributionService
+
+            AllocationDistributionService.apply_stock_delta(
+                mob_id,
+                animal_group_type_id=animal_group_type_id,
+                delta=delta,
+                final_head_count=next_balance,
+                paddock_id=allocation_paddock_id,
+            )
+
         if next_balance == 0:
             db.session.delete(balance)
         else:
             balance.head_count = next_balance
 
+        db.session.flush()
+        mob_obj = db.session.get(Mob, mob_id)
+        if mob_obj is not None:
+            db.session.expire(mob_obj, ["balances"])
+
         if sync_grazing_history:
             from app.services.grazing_history_service import GrazingHistoryService
 
-            GrazingHistoryService.sync_live_history_for_mob(mob_id, effective_at=ledger.event_time)
+            GrazingHistoryService.sync_live_history_for_mob(mob_id, effective_at=posted_at)
         return ledger

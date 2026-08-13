@@ -69,7 +69,7 @@ def test_map_species_move_keeps_other_species_in_source_paddock(client, app):
         assert target_counts == {cattle_id: 5}
 
 
-def test_map_species_move_rejects_fractional_source_counts(client, app):
+def test_map_species_move_converts_percentage_allocations_to_whole_head_counts(client, app):
     with app.app_context():
         farm = Farm(name="Fractional Species Drag Farm", timezone="SAST")
         db.session.add(farm)
@@ -95,7 +95,10 @@ def test_map_species_move_rejects_fractional_source_counts(client, app):
         db.session.commit()
 
         source_id = str(source.id)
+        middle_id = str(middle.id)
         target_id = str(target.id)
+        mob_id = str(mob.id)
+        cattle_id = str(cattle.id)
 
     response = client.post(
         "/api/mobs/map-species-move",
@@ -106,5 +109,21 @@ def test_map_species_move_rejects_fractional_source_counts(client, app):
         },
     )
 
-    assert response.status_code == 400
-    assert "fractional head counts" in response.get_json()["error"]
+    assert response.status_code == 200
+    moved_head_count = response.get_json()["moved_head_count"]
+    assert moved_head_count in {2, 3}
+
+    with app.app_context():
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {str(allocation.paddock_id): allocation for allocation in session.allocations}
+        assert source_id not in allocations
+        assert set(allocations) == {middle_id, target_id}
+        counts = {
+            paddock_id: {
+                str(row.animal_group_type_id): row.head_count
+                for row in allocation.group_assignments
+            }
+            for paddock_id, allocation in allocations.items()
+        }
+        assert counts[target_id] == {cattle_id: moved_head_count}
+        assert counts[middle_id] == {cattle_id: 5 - moved_head_count}

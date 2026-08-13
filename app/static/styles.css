@@ -183,11 +183,11 @@ body {
 .move-count-row {
   grid-template-columns:
     minmax(140px, 1fr) minmax(170px, 1.1fr) minmax(220px, 1.3fr) minmax(100px, 0.7fr)
-    auto auto;
+    auto;
 }
-.count-group-available {
-  display: block;
-  margin-top: 0.25rem;
+.count-group-remaining {
+  color: var(--muted);
+  font-weight: 400;
 }
 .split-row {
   display: grid;

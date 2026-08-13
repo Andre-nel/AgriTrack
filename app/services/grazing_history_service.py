@@ -301,8 +301,13 @@ class GrazingHistoryService:
             if group_row is None:
                 continue
 
-            group_fraction = float(assignment.group_fraction)
-            allocated_head_count = float(group_row["head_count"]) * group_fraction
+            allocated_head_count = float(assignment.head_count or 0)
+            group_total_head_count = float(group_row["head_count"] or 0)
+            group_fraction = (
+                allocated_head_count / group_total_head_count
+                if group_total_head_count > 0
+                else float(assignment.group_fraction)
+            )
             allocated_lsu = allocated_head_count * float(group_row["lsu_per_head"])
             if allocated_lsu <= 0:
                 continue

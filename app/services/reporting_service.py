@@ -140,7 +140,7 @@ class ReportingService:
                 if balance is None:
                     continue
                 group = balance.animal_group_type
-                head_count = float(balance.head_count or 0) * float(assignment.group_fraction)
+                head_count = float(assignment.head_count or 0)
                 if head_count <= 0:
                     continue
                 rows.append(

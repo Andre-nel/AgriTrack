@@ -103,6 +103,7 @@ def adjust_mob_stock(mob_id):
             event_type=event_type,
             quantity=event_quantity,
             note=payload.get("note"),
+            allocation_paddock_id=payload.get("allocation_paddock_id") or payload.get("paddock_id"),
         )
         db.session.commit()
     except (KeyError, ValueError) as exc:

@@ -12,6 +12,7 @@ from sqlalchemy.orm import aliased
 
 from app.extensions import db
 from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, PaddockGate
+from app.services.allocation_distribution_service import AllocationDistributionService
 from app.services.movement_service import MovementService
 from app.services.paddock_service import PaddockService
 
@@ -833,6 +834,87 @@ class GateService:
             for allocation in session.allocations
         }
 
+    @staticmethod
+    def _clean_count_map(counts_by_paddock: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
+        clean = {}
+        for paddock_id, group_counts in counts_by_paddock.items():
+            clean_groups = {
+                str(group_id): int(head_count)
+                for group_id, head_count in group_counts.items()
+                if int(head_count or 0) > 0
+            }
+            if clean_groups:
+                clean[str(paddock_id)] = clean_groups
+        return clean
+
+    @classmethod
+    def _count_map_for_session(cls, session: GrazingSession) -> dict[str, dict[str, int]]:
+        context = AllocationDistributionService.balance_context(session.mob)
+        if not context:
+            return {}
+        return cls._clean_count_map(
+            AllocationDistributionService.snapshot_session_counts(session, context=context)
+        )
+
+    @staticmethod
+    def _count_payloads(counts_by_paddock: dict[str, dict[str, int]]) -> list[dict]:
+        payloads = []
+        for paddock_id in sorted(counts_by_paddock):
+            group_counts = [
+                {"animal_group_type_id": group_id, "head_count": head_count}
+                for group_id, head_count in sorted(counts_by_paddock[paddock_id].items())
+                if int(head_count or 0) > 0
+            ]
+            if group_counts:
+                payloads.append({"paddock_id": paddock_id, "group_counts": group_counts})
+        return payloads
+
+    @classmethod
+    def _split_group_totals_across_paddocks(
+        cls,
+        group_totals: dict[str, int],
+        paddocks: list[Paddock],
+    ) -> dict[str, dict[str, int]]:
+        weights = [
+            (str(paddock.id), cls._effective_area(paddock))
+            for paddock in sorted(paddocks, key=lambda item: item.name.lower())
+        ]
+        target: dict[str, dict[str, int]] = defaultdict(dict)
+        for group_id, total_count in group_totals.items():
+            splits = AllocationDistributionService.split_count(int(total_count or 0), weights)
+            for paddock_id, head_count in splits.items():
+                if head_count <= 0:
+                    continue
+                paddock_counts = target.setdefault(paddock_id, {})
+                paddock_counts[str(group_id)] = paddock_counts.get(str(group_id), 0) + head_count
+        return cls._clean_count_map(target)
+
+    @classmethod
+    def _redistribute_count_map(
+        cls,
+        counts_by_paddock: dict[str, dict[str, int]],
+        source_paddock_ids: set[str],
+        target_paddocks: list[Paddock],
+    ) -> dict[str, dict[str, int]]:
+        target: dict[str, dict[str, int]] = defaultdict(dict)
+        group_totals: dict[str, int] = defaultdict(int)
+        for paddock_id, group_counts in counts_by_paddock.items():
+            if paddock_id in source_paddock_ids:
+                for group_id, head_count in group_counts.items():
+                    if int(head_count or 0) > 0:
+                        group_totals[str(group_id)] += int(head_count)
+                continue
+            for group_id, head_count in group_counts.items():
+                if int(head_count or 0) > 0:
+                    target.setdefault(paddock_id, {})[str(group_id)] = int(head_count)
+
+        split_counts = cls._split_group_totals_across_paddocks(group_totals, target_paddocks)
+        for paddock_id, group_counts in split_counts.items():
+            paddock_counts = target.setdefault(paddock_id, {})
+            for group_id, head_count in group_counts.items():
+                paddock_counts[group_id] = paddock_counts.get(group_id, 0) + head_count
+        return cls._clean_count_map(target)
+
     @classmethod
     def _allocation_payloads(
         cls,
@@ -891,6 +973,12 @@ class GateService:
             for component in connected_components
             for paddock_id in component
         }
+        if any(item.get("group_counts") for item in allocations if isinstance(item, dict)):
+            return cls._count_allocations_for_open_gate_network(
+                allocations,
+                paddocks_by_id,
+                component_by_paddock,
+            )
         target: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         changed = False
 
@@ -914,6 +1002,57 @@ class GateService:
         if not changed:
             return allocations
         return cls._allocation_payloads(target, paddocks_by_id)
+
+    @classmethod
+    def _count_allocations_for_open_gate_network(
+        cls,
+        allocations: list[dict],
+        paddocks_by_id: dict[str, Paddock],
+        component_by_paddock: dict[str, set[str]],
+    ) -> list[dict]:
+        target: dict[str, dict[str, int]] = defaultdict(dict)
+        component_group_totals: dict[tuple[str, ...], dict[str, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
+        changed = False
+
+        for item in allocations:
+            if not isinstance(item, dict):
+                return allocations
+            paddock_id = str(item.get("paddock_id") or "").strip()
+            if paddock_id not in paddocks_by_id:
+                return allocations
+            group_counts = item.get("group_counts") or []
+            component = component_by_paddock.get(paddock_id)
+            for group_count in group_counts:
+                group_id = str(group_count.get("animal_group_type_id") or "").strip()
+                try:
+                    head_count = int(group_count.get("head_count") or 0)
+                except (TypeError, ValueError):
+                    return allocations
+                if not group_id or head_count <= 0:
+                    continue
+                if component is None:
+                    paddock_counts = target.setdefault(paddock_id, {})
+                    paddock_counts[group_id] = paddock_counts.get(group_id, 0) + head_count
+                else:
+                    component_key = tuple(sorted(component))
+                    component_group_totals[component_key][group_id] += head_count
+                    changed = True
+
+        if not changed:
+            return allocations
+
+        for component_key, group_totals in component_group_totals.items():
+            split_counts = cls._split_group_totals_across_paddocks(
+                group_totals,
+                [paddocks_by_id[paddock_id] for paddock_id in component_key],
+            )
+            for paddock_id, group_counts in split_counts.items():
+                paddock_counts = target.setdefault(paddock_id, {})
+                for group_id, head_count in group_counts.items():
+                    paddock_counts[group_id] = paddock_counts.get(group_id, 0) + head_count
+        return cls._count_payloads(cls._clean_count_map(target))
 
     @classmethod
     def _apply_allocations(
@@ -940,6 +1079,40 @@ class GateService:
                 allocations=payloads,
                 destination_farm_id=str(session.farm_id),
                 when=event_time,
+                apply_open_gate_network=False,
+                allow_cross_farm_allocations=True,
+            )
+            moved += 1
+        return moved
+
+    @classmethod
+    def _apply_count_allocations(
+        cls,
+        *,
+        sessions: list[GrazingSession],
+        target_count_maps: dict[str, dict[str, dict[str, int]]],
+        event_time: datetime,
+    ) -> int:
+        moved = 0
+        for session in sessions:
+            mob_id = str(session.mob_id)
+            target_map = target_count_maps.get(mob_id)
+            if target_map is None:
+                continue
+            target_map = cls._clean_count_map(target_map)
+            if not target_map:
+                continue
+            if cls._count_map_for_session(session) == target_map:
+                continue
+            payloads = cls._count_payloads(target_map)
+            if not payloads:
+                continue
+            MovementService.move_mob(
+                mob=session.mob,
+                allocations=payloads,
+                destination_farm_id=str(session.farm_id),
+                when=event_time,
+                allocation_mode="counts",
                 apply_open_gate_network=False,
                 allow_cross_farm_allocations=True,
             )
@@ -980,9 +1153,27 @@ class GateService:
         )
         component_paddocks = [paddocks_by_id[paddock_id] for paddock_id in component]
         sessions = cls._active_sessions(paddock_ids=component)
+        target_count_maps = {}
         target_maps = {}
         target_paddock_ids = set()
         for session in sessions:
+            current_counts = cls._count_map_for_session(session)
+            if current_counts:
+                counts_in_component = {
+                    paddock_id: group_counts
+                    for paddock_id, group_counts in current_counts.items()
+                    if paddock_id in component
+                }
+                if not counts_in_component:
+                    continue
+                target_counts = cls._redistribute_count_map(
+                    current_counts,
+                    component,
+                    component_paddocks,
+                )
+                target_count_maps[str(session.mob_id)] = target_counts
+                continue
+
             current = cls._allocation_map(session)
             total_in_component = sum(
                 (fraction for paddock_id, fraction in current.items() if paddock_id in component),
@@ -999,12 +1190,18 @@ class GateService:
             target_maps[str(session.mob_id)] = target
             target_paddock_ids.update(target)
         paddocks_by_id = cls._extend_paddocks_by_ids(paddocks_by_id, target_paddock_ids)
-        return cls._apply_allocations(
+        moved_count = cls._apply_count_allocations(
+            sessions=sessions,
+            target_count_maps=target_count_maps,
+            event_time=event_time,
+        )
+        moved_count += cls._apply_allocations(
             sessions=sessions,
             target_maps=target_maps,
             paddocks_by_id=paddocks_by_id,
             event_time=event_time,
         )
+        return moved_count
 
     @classmethod
     def _redistribute_for_close(
@@ -1040,10 +1237,45 @@ class GateService:
         }
         choices = cls._choice_map(closure_choices)
         sessions = cls._active_sessions(paddock_ids=before_component)
+        target_count_maps = {}
         target_maps = {}
         missing_choices = []
         target_paddock_ids = set()
         for session in sessions:
+            current_counts = cls._count_map_for_session(session)
+            if current_counts:
+                active_component_paddocks = {
+                    paddock_id
+                    for paddock_id, group_counts in current_counts.items()
+                    if paddock_id in before_component
+                    and any(int(head_count or 0) > 0 for head_count in group_counts.values())
+                }
+                if not active_component_paddocks:
+                    continue
+
+                component_indexes = {
+                    component_by_paddock[paddock_id]
+                    for paddock_id in active_component_paddocks
+                    if paddock_id in component_by_paddock
+                }
+                if len(component_indexes) > 1:
+                    selected_paddock_id = choices.get(str(session.mob_id))
+                    if selected_paddock_id not in component_by_paddock:
+                        missing_choices.append(session.mob.name)
+                        continue
+                    target_component = after_components[component_by_paddock[selected_paddock_id]]
+                elif component_indexes:
+                    target_component = after_components[next(iter(component_indexes))]
+                else:
+                    target_component = after_components[0]
+
+                target_count_maps[str(session.mob_id)] = cls._redistribute_count_map(
+                    current_counts,
+                    before_component,
+                    [paddocks_by_id[paddock_id] for paddock_id in target_component],
+                )
+                continue
+
             current = cls._allocation_map(session)
             total_in_previous = sum(
                 (
@@ -1091,12 +1323,18 @@ class GateService:
             raise ValueError(f"Choose a closing-side camp for: {names}")
 
         paddocks_by_id = cls._extend_paddocks_by_ids(paddocks_by_id, target_paddock_ids)
-        return cls._apply_allocations(
+        moved_count = cls._apply_count_allocations(
+            sessions=sessions,
+            target_count_maps=target_count_maps,
+            event_time=event_time,
+        )
+        moved_count += cls._apply_allocations(
             sessions=sessions,
             target_maps=target_maps,
             paddocks_by_id=paddocks_by_id,
             event_time=event_time,
         )
+        return moved_count
 
     @classmethod
     def set_gate_state(

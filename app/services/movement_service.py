@@ -16,6 +16,7 @@ from app.models import (
 from app.models.animal_group import AnimalGroupBalance
 from app.models.movement import MobLineage, MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
+from app.services.allocation_distribution_service import AllocationDistributionService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.grazing_service import GrazingService
 from app.services.mob_event_service import MobEventService
@@ -46,20 +47,13 @@ class MovementService:
 
     @classmethod
     def _active_session_count_map(cls, session: GrazingSession) -> tuple[dict[str, dict[str, int]], dict[str, str]]:
-        counts_by_paddock: dict[str, dict[str, int]] = defaultdict(dict)
-        species_by_group_id: dict[str, str] = {}
-        for allocation in session.allocations:
-            paddock_id = str(allocation.paddock_id)
-            paddock_counts = counts_by_paddock.setdefault(paddock_id, {})
-            for group_row in ReportingService.allocation_group_head_rows(allocation):
-                head_count = cls._whole_head_count(group_row["head_count"])
-                if head_count <= 0:
-                    continue
-                group_id = str(group_row["animal_group_type_id"])
-                group = group_row["animal_group_type"]
-                species_by_group_id[group_id] = group.species
-                paddock_counts[group_id] = paddock_counts.get(group_id, 0) + head_count
-        return counts_by_paddock, species_by_group_id
+        context = AllocationDistributionService.balance_context(session.mob)
+        counts = AllocationDistributionService.snapshot_session_counts(session, context=context)
+        species_by_group_id = {
+            str(group_id): meta["group"].species
+            for group_id, meta in context.items()
+        }
+        return defaultdict(dict, {paddock_id: dict(group_counts) for paddock_id, group_counts in counts.items()}), species_by_group_id
 
     @staticmethod
     def _count_allocations_from_map(counts_by_paddock: dict[str, dict[str, int]]) -> list[dict]:
@@ -381,8 +375,27 @@ class MovementService:
         mode = MovementService._normalize_allocation_mode(allocation_mode, allocations)
         if mode == "counts":
             return MovementService._normalize_count_allocations(mob, allocations)
+        return MovementService._normalize_percentage_allocations(mob, allocations)
+
+    @staticmethod
+    def _normalize_percentage_allocations(mob: Mob, allocations: list[dict]) -> list[dict]:
         ValidationService.validate_allocations(allocations)
-        return allocations
+        context = AllocationDistributionService.balance_context(mob)
+        if not context:
+            return allocations
+        counts_by_paddock = AllocationDistributionService.count_map_for_fraction_allocations(
+            mob,
+            allocations,
+            context=context,
+        )
+        exact_allocations = AllocationDistributionService.allocations_from_count_map(
+            mob,
+            counts_by_paddock,
+            context=context,
+        )
+        if not exact_allocations:
+            return allocations
+        return exact_allocations
 
     @staticmethod
     def move_mob(
@@ -395,6 +408,7 @@ class MovementService:
         allow_cross_farm_allocations: bool = False,
     ):
         when = when or datetime.now(timezone.utc)
+        allocation_mode = MovementService._normalize_allocation_mode(allocation_mode, allocations)
         allocations = MovementService._normalize_move_allocations(
             mob=mob,
             allocations=allocations,
@@ -413,6 +427,10 @@ class MovementService:
                 resolved_destination_farm_id,
                 allocations,
             )
+            if any(item.get("group_counts") for item in allocations or []):
+                allocations = MovementService._normalize_count_allocations(mob, allocations)
+            elif allocation_mode == "percentage":
+                allocations = MovementService._normalize_percentage_allocations(mob, allocations)
 
         GrazingService.close_open_session(mob_id=mob.id, end_at=when)
         mob.farm_id = resolved_destination_farm_id

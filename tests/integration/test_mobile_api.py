@@ -1267,7 +1267,12 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert target_balance.head_count == 2
         active_session = GrazingSession.query.filter_by(farm_id=farm_id, mob_id=mob_id, end_at=None).first()
         assert active_session is not None
-        assert sorted(float(row.allocation_fraction) for row in active_session.allocations) == [0.5, 0.5]
+        assert sorted(float(row.allocation_fraction) for row in active_session.allocations) == [0.4, 0.6]
+        assert sorted(
+            assignment.head_count
+            for allocation in active_session.allocations
+            for assignment in allocation.group_assignments
+        ) == [2, 3]
         assert db.session.get(WaterAsset, tank_id).water_level == "full"
         assert db.session.get(FenceSection, fence_id).condition == "fair"
         assert db.session.get(FenceSection, fence_id).electric_wire is True

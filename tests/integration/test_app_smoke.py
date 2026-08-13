@@ -2309,6 +2309,9 @@ def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
     assert 'option value="adjustment_in" selected' in body
     assert "count (set final total)" in body
     assert "Use count only when you want to set the final head count for this exact line." in body
+    assert 'name="allocation_paddock_id"' in body
+    assert "All current paddocks" in body
+    assert f'<option value="{paddock_id}">Default North Camp</option>' in body
 
 
 def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):
@@ -2378,3 +2381,7 @@ def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):
     assert f'value="{group_id}"' in body
     assert 'name="count_head_count"' in body
     assert 'value="12"' in body
+    assert 'class="count-group-remaining"' in body
+    assert "Calculated:" not in body
+    assert "Available:" not in body
+    assert "countAllocationTotal" not in body
