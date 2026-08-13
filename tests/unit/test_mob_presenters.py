@@ -89,7 +89,7 @@ def test_build_mob_detail_context_filters_events_and_builds_options(app):
         assert allocation_row["group_rows"][0]["head_count_display"] == "12.00"
         assert allocation_row["group_rows"][0]["source_label"] == "percentage-derived"
         assert context["initial_count_allocation_rows"] == [
-            {"paddock_id": "", "group_counts": {str(group_type.id): 0}}
+            {"farm_id": str(farm.id), "paddock_id": "", "group_id": "", "head_count": ""}
         ]
         assert context["split_group_options"][0]["head_count"] == 12
         assert [row["description"] for row in context["mob_events"]] == ["Checked condition"]
@@ -163,12 +163,16 @@ def test_build_mob_detail_context_prefills_exact_count_allocations(app):
         assert context["current_allocations"][0]["group_rows"][0]["source_label"] == "exact count"
         assert context["initial_count_allocation_rows"] == [
             {
+                "farm_id": str(farm.id),
                 "paddock_id": str(north.id),
-                "group_counts": {str(cattle.id): 0, str(ewes.id): 12},
+                "group_id": str(ewes.id),
+                "head_count": 12,
             },
             {
+                "farm_id": str(farm.id),
                 "paddock_id": str(south.id),
-                "group_counts": {str(cattle.id): 5, str(ewes.id): 0},
+                "group_id": str(cattle.id),
+                "head_count": 5,
             },
         ]
 

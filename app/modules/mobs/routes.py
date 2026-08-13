@@ -111,46 +111,42 @@ def register_legacy_routes(bp) -> None:
     @bp.post("/mobs/<mob_id>/move")
     def mob_move_form(mob_id):
         mob = _get_active_mob_or_404(mob_id)
-        destination_farm_id = (request.form.get("destination_farm_id") or str(mob.farm_id)).strip()
         allocation_mode = (request.form.get("allocation_mode") or "percentage").strip().lower()
 
         try:
-            if not destination_farm_id:
-                raise ValueError("Destination farm is required")
-            if not Farm.query.filter_by(id=destination_farm_id).first():
-                raise ValueError("Destination farm is invalid")
-
-            valid_paddock_ids = {
-                str(p.id) for p in Paddock.query.filter_by(farm_id=destination_farm_id).all()
-            }
+            valid_farm_ids = {str(farm.id) for farm in Farm.query.all()}
+            valid_paddock_farm_ids = {str(p.id): str(p.farm_id) for p in Paddock.query.all()}
+            valid_paddock_ids = set(valid_paddock_farm_ids)
             if allocation_mode == "counts":
-                group_ids = [
-                    str(balance.animal_group_type_id)
-                    for balance in mob.balances
-                    if int(balance.head_count or 0) > 0
-                ]
-                group_counts_by_id = {
-                    group_id: request.form.getlist(f"count_group_count:{group_id}")
-                    for group_id in group_ids
-                }
                 allocations = parse_count_move_allocations(
                     paddock_ids=request.form.getlist("count_paddock_id"),
-                    group_counts_by_id=group_counts_by_id,
+                    farm_ids=request.form.getlist("count_farm_id"),
+                    group_ids=request.form.getlist("count_group_id"),
+                    head_counts=request.form.getlist("count_head_count"),
+                    valid_farm_ids=valid_farm_ids,
                     valid_paddock_ids=valid_paddock_ids,
+                    valid_paddock_farm_ids=valid_paddock_farm_ids,
                 )
             else:
                 allocation_mode = "percentage"
                 allocations = parse_move_allocations(
                     paddock_ids=request.form.getlist("paddock_id"),
                     allocation_pcts=request.form.getlist("allocation_pct"),
+                    farm_ids=request.form.getlist("allocation_farm_id"),
+                    valid_farm_ids=valid_farm_ids,
                     valid_paddock_ids=valid_paddock_ids,
+                    valid_paddock_farm_ids=valid_paddock_farm_ids,
                 )
+            destination_farm_id = valid_paddock_farm_ids.get(str(allocations[0]["paddock_id"]))
+            if not destination_farm_id:
+                raise ValueError("Destination farm is required")
 
             MovementService.move_mob(
                 mob=mob,
                 allocations=allocations,
                 destination_farm_id=destination_farm_id,
                 allocation_mode=allocation_mode,
+                allow_cross_farm_allocations=True,
             )
             db.session.commit()
             flash("Mob moved", "success")

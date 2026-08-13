@@ -1,23 +1,65 @@
 from decimal import Decimal
 
 
+def _form_list_value(values: list[str] | None, index: int) -> str:
+    if not values or index >= len(values):
+        return ""
+    return (values[index] or "").strip()
+
+
+def _validate_selected_farm_and_paddock(
+    *,
+    farm_id: str,
+    paddock_id: str,
+    valid_farm_ids: set[str] | None = None,
+    valid_paddock_ids: set[str] | None = None,
+    valid_paddock_farm_ids: dict[str, str] | None = None,
+) -> None:
+    if valid_farm_ids is not None and farm_id not in valid_farm_ids:
+        raise ValueError("Selected farm is invalid")
+    if valid_paddock_farm_ids is not None:
+        if paddock_id not in valid_paddock_farm_ids:
+            raise ValueError("Selected paddock is invalid")
+        if valid_paddock_farm_ids[paddock_id] != farm_id:
+            raise ValueError("Selected paddock is invalid for the selected farm")
+        return
+    if valid_paddock_ids is not None and paddock_id not in valid_paddock_ids:
+        raise ValueError("Selected paddock is invalid for the chosen destination farm")
+
+
 def parse_move_allocations(
     paddock_ids: list[str],
     allocation_pcts: list[str],
-    valid_paddock_ids: set[str],
+    valid_paddock_ids: set[str] | None = None,
+    *,
+    farm_ids: list[str] | None = None,
+    valid_farm_ids: set[str] | None = None,
+    valid_paddock_farm_ids: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     allocations = []
     used_paddocks = set()
     total_pct = Decimal("0")
+    row_count = max(len(paddock_ids), len(allocation_pcts), len(farm_ids or []))
 
-    for paddock_id_raw, pct_raw in zip(paddock_ids, allocation_pcts):
-        paddock_id = (paddock_id_raw or "").strip()
-        pct_text = (pct_raw or "").strip()
-        if not paddock_id and not pct_text:
+    for index in range(row_count):
+        farm_id = _form_list_value(farm_ids, index)
+        paddock_id = _form_list_value(paddock_ids, index)
+        pct_text = _form_list_value(allocation_pcts, index)
+        if not farm_id and not paddock_id and not pct_text:
             continue
+        if farm_ids is not None and not farm_id:
+            raise ValueError("Each allocation row requires a farm")
         if not paddock_id:
             raise ValueError("Each allocation row requires a paddock")
-        if paddock_id not in valid_paddock_ids:
+        if farm_ids is not None:
+            _validate_selected_farm_and_paddock(
+                farm_id=farm_id,
+                paddock_id=paddock_id,
+                valid_farm_ids=valid_farm_ids,
+                valid_paddock_ids=valid_paddock_ids,
+                valid_paddock_farm_ids=valid_paddock_farm_ids,
+            )
+        elif valid_paddock_ids is not None and paddock_id not in valid_paddock_ids:
             raise ValueError("Selected paddock is invalid for the chosen destination farm")
         if paddock_id in used_paddocks:
             raise ValueError("Duplicate paddock rows are not allowed")
@@ -48,11 +90,29 @@ def parse_move_allocations(
 
 def parse_count_move_allocations(
     paddock_ids: list[str],
-    group_counts_by_id: dict[str, list[str]],
-    valid_paddock_ids: set[str],
+    group_counts_by_id: dict[str, list[str]] | None = None,
+    valid_paddock_ids: set[str] | None = None,
+    *,
+    farm_ids: list[str] | None = None,
+    group_ids: list[str] | None = None,
+    head_counts: list[str] | None = None,
+    valid_farm_ids: set[str] | None = None,
+    valid_paddock_farm_ids: dict[str, str] | None = None,
 ) -> list[dict]:
+    if group_ids is not None or head_counts is not None:
+        return _parse_count_move_allocation_rows(
+            farm_ids=farm_ids or [],
+            paddock_ids=paddock_ids,
+            group_ids=group_ids or [],
+            head_counts=head_counts or [],
+            valid_farm_ids=valid_farm_ids,
+            valid_paddock_ids=valid_paddock_ids,
+            valid_paddock_farm_ids=valid_paddock_farm_ids,
+        )
+
     allocations_by_paddock: dict[str, dict[str, int]] = {}
     paddock_order: list[str] = []
+    group_counts_by_id = group_counts_by_id or {}
 
     for index, paddock_id_raw in enumerate(paddock_ids):
         paddock_id = (paddock_id_raw or "").strip()
@@ -76,7 +136,7 @@ def parse_count_move_allocations(
             continue
         if not paddock_id:
             raise ValueError("Each count allocation row requires a paddock")
-        if paddock_id not in valid_paddock_ids:
+        if valid_paddock_ids is not None and paddock_id not in valid_paddock_ids:
             raise ValueError("Selected paddock is invalid for the chosen destination farm")
         if not any(item["head_count"] > 0 for item in group_counts):
             raise ValueError("Each count allocation row must assign at least one animal")
@@ -91,6 +151,73 @@ def parse_count_move_allocations(
                 continue
             group_id = item["animal_group_type_id"]
             totals[group_id] = totals.get(group_id, 0) + quantity
+
+    if not paddock_order:
+        raise ValueError("At least one count allocation row is required")
+    return [
+        {
+            "paddock_id": paddock_id,
+            "group_counts": [
+                {"animal_group_type_id": group_id, "head_count": quantity}
+                for group_id, quantity in allocations_by_paddock[paddock_id].items()
+            ],
+        }
+        for paddock_id in paddock_order
+    ]
+
+
+def _parse_count_move_allocation_rows(
+    *,
+    farm_ids: list[str],
+    paddock_ids: list[str],
+    group_ids: list[str],
+    head_counts: list[str],
+    valid_farm_ids: set[str] | None = None,
+    valid_paddock_ids: set[str] | None = None,
+    valid_paddock_farm_ids: dict[str, str] | None = None,
+) -> list[dict]:
+    allocations_by_paddock: dict[str, dict[str, int]] = {}
+    paddock_order: list[str] = []
+    row_count = max(len(farm_ids), len(paddock_ids), len(group_ids), len(head_counts))
+
+    for index in range(row_count):
+        farm_id = _form_list_value(farm_ids, index)
+        paddock_id = _form_list_value(paddock_ids, index)
+        group_id = _form_list_value(group_ids, index)
+        qty_text = _form_list_value(head_counts, index)
+
+        if not farm_id and not paddock_id and not group_id and not qty_text:
+            continue
+        if not farm_id:
+            raise ValueError("Each count allocation row requires a farm")
+        if not paddock_id:
+            raise ValueError("Each count allocation row requires a paddock")
+        _validate_selected_farm_and_paddock(
+            farm_id=farm_id,
+            paddock_id=paddock_id,
+            valid_farm_ids=valid_farm_ids,
+            valid_paddock_ids=valid_paddock_ids,
+            valid_paddock_farm_ids=valid_paddock_farm_ids,
+        )
+        if not group_id:
+            raise ValueError("Each count allocation row requires an animal type")
+        if not qty_text:
+            raise ValueError("Each count allocation row requires a count")
+
+        try:
+            quantity = int(qty_text)
+        except ValueError:
+            raise ValueError("Count allocations must be whole numbers")
+        if quantity < 0:
+            raise ValueError("Count allocations cannot be negative")
+        if quantity == 0:
+            raise ValueError("Each count allocation row must assign at least one animal")
+
+        if paddock_id not in allocations_by_paddock:
+            allocations_by_paddock[paddock_id] = {}
+            paddock_order.append(paddock_id)
+        totals = allocations_by_paddock[paddock_id]
+        totals[group_id] = totals.get(group_id, 0) + quantity
 
     if not paddock_order:
         raise ValueError("At least one count allocation row is required")

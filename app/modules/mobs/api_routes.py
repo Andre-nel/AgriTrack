@@ -158,6 +158,26 @@ def move_mob(mob_id):
     return jsonify({"grazing_session_id": str(session.id)}), 201
 
 
+@bp.post("/map-species-move")
+def move_map_species():
+    payload = request.get_json() or {}
+    try:
+        result = MovementService.move_species_between_paddocks(
+            source_paddock_id=payload.get("source_paddock_id"),
+            target_paddock_id=payload.get("target_paddock_id"),
+            species=payload.get("species"),
+        )
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Move failed: active mob name already exists on the destination farm"}), 400
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(result), 200
+
+
 @bp.post("/<mob_id>/events")
 def create_mob_event(mob_id):
     mob = _get_active_mob_or_404(mob_id)

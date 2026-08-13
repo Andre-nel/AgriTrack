@@ -157,12 +157,14 @@ def build_mob_detail_context(
             if exact_group_counts:
                 current_count_allocations.append(
                     {
+                        "farm_id": str(allocation.paddock.farm_id),
                         "paddock_id": str(allocation.paddock_id),
                         "group_counts": exact_group_counts,
                     }
                 )
             current_allocations.append(
                 {
+                    "farm_id": str(allocation.paddock.farm_id),
                     "paddock_id": str(allocation.paddock_id),
                     "paddock_name": allocation.paddock.name,
                     "allocation_pct": float(pct),
@@ -208,21 +210,29 @@ def build_mob_detail_context(
         )
 
     if current_count_allocations:
-        initial_count_allocation_rows = [
-            {
-                "paddock_id": row["paddock_id"],
-                "group_counts": {
-                    option["id"]: row["group_counts"].get(option["id"], 0)
-                    for option in split_group_options
-                },
-            }
-            for row in current_count_allocations
-        ]
+        initial_count_allocation_rows = []
+        for row in current_count_allocations:
+            for option in split_group_options:
+                head_count = row["group_counts"].get(option["id"], 0)
+                if head_count <= 0:
+                    continue
+                initial_count_allocation_rows.append(
+                    {
+                        "farm_id": row["farm_id"],
+                        "paddock_id": row["paddock_id"],
+                        "group_id": option["id"],
+                        "head_count": head_count,
+                    }
+                )
     else:
+        initial_count_allocation_rows = []
+    if not initial_count_allocation_rows:
         initial_count_allocation_rows = [
             {
+                "farm_id": str(mob.farm_id),
                 "paddock_id": "",
-                "group_counts": {option["id"]: 0 for option in split_group_options},
+                "group_id": "",
+                "head_count": "",
             }
         ]
 

@@ -1281,6 +1281,67 @@ def test_count_based_mob_move_persists_group_assignments_and_lsu_history(client,
         assert south_stock[str(cattle.id)] == 5.0
 
 
+def test_web_count_mob_move_allows_destination_rows_on_different_farms(client, app):
+    with app.app_context():
+        source_farm = Farm(name="Count Row Source Farm", timezone="SAST")
+        neighbor_farm = Farm(name="Count Row Neighbor Farm", timezone="SAST")
+        db.session.add_all([source_farm, neighbor_farm])
+        db.session.flush()
+        home = Paddock(
+            farm_id=source_farm.id,
+            name="Home Count Row",
+            area_ha=10,
+            grazeable_area_ha=10,
+        )
+        away = Paddock(
+            farm_id=neighbor_farm.id,
+            name="Away Count Row",
+            area_ha=10,
+            grazeable_area_ha=10,
+        )
+        mob = Mob(farm_id=source_farm.id, name="Cross Farm Count Mob", status="active")
+        group = AnimalGroupType(species="Goat", breed="Boer", sex="ewe", age_class="adult")
+        db.session.add_all([home, away, mob, group])
+        db.session.flush()
+        db.session.add(AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=10))
+        db.session.commit()
+
+        mob_id = str(mob.id)
+        source_farm_id = str(source_farm.id)
+        neighbor_farm_id = str(neighbor_farm.id)
+        home_id = str(home.id)
+        away_id = str(away.id)
+        group_id = str(group.id)
+
+    response = client.post(
+        f"/mobs/{mob_id}/move",
+        data={
+            "allocation_mode": "counts",
+            "count_farm_id": [source_farm_id, neighbor_farm_id],
+            "count_paddock_id": [home_id, away_id],
+            "count_group_id": [group_id, group_id],
+            "count_head_count": ["4", "6"],
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Mob moved" in response.data
+
+    with app.app_context():
+        mob = db.session.get(Mob, mob_id)
+        assert str(mob.farm_id) == source_farm_id
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        allocations = {str(row.paddock_id): float(row.allocation_fraction) for row in session.allocations}
+        assert allocations == {home_id: 0.4, away_id: 0.6}
+
+        history_farms = {
+            str(row.paddock_id): str(row.farm_id)
+            for row in GrazingAllocationLsuHistory.query.filter_by(grazing_session_id=session.id).all()
+        }
+        assert history_farms == {home_id: source_farm_id, away_id: neighbor_farm_id}
+
+
 def test_count_based_mob_move_merges_duplicate_destination_paddocks(client, app):
     with app.app_context():
         farm = Farm(name="Count Merge Farm", timezone="SAST")
@@ -2313,5 +2374,7 @@ def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):
     assert "12 head" in body
     assert "(exact count)" in body
     assert f'data-selected-value="{paddock_id}"' in body
-    assert f'name="count_group_count:{group_id}"' in body
+    assert 'name="count_group_id"' in body
+    assert f'value="{group_id}"' in body
+    assert 'name="count_head_count"' in body
     assert 'value="12"' in body

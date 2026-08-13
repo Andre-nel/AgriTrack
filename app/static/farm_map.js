@@ -15,6 +15,7 @@
     .trim()
     .toLowerCase();
   const showStockFloats = mapElement.dataset.showStockFloats !== "0";
+  const speciesMoveUrl = mapElement.dataset.speciesMoveUrl || "";
   const gateCreateUrl = mapElement.dataset.gateCreateUrl || "";
   const gateRequiresFarmSelection = mapElement.dataset.gateRequiresFarmSelection === "1";
   const configuredGateFarmOptions = parseGateFarmOptions(mapElement.dataset.gateFarmOptions || "[]");
@@ -283,6 +284,27 @@
     );
   }
 
+  function postSpeciesMove(payload) {
+    if (!speciesMoveUrl) {
+      return Promise.reject(new Error("Stock moves are not available from this map."));
+    }
+    return fetch(speciesMoveUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }).then((response) =>
+      response.json().then((body) => {
+        if (!response.ok) {
+          throw new Error(body.error || "Stock could not be moved.");
+        }
+        return body;
+      })
+    );
+  }
+
   function gateFeatureFromGate(gate) {
     const latitude = Number(gate && gate.latitude);
     const longitude = Number(gate && gate.longitude);
@@ -352,50 +374,72 @@
     return Number(value).toFixed(1);
   }
 
-  function stockFloatHtml(properties) {
+  function stockFloatRows(properties) {
     const speciesRows = Array.isArray(properties.species_heads) ? properties.species_heads : [];
-    const rows = speciesRows
+    return speciesRows
       .map((row) => ({
+        speciesName: String(row.species || "").trim(),
         species: normalizeSpecies(row.species),
         count: Number(row.head || 0),
       }))
       .filter((row) => row.count > 0)
       .sort((a, b) => b.count - a.count);
+  }
 
-    if (!rows.length) {
-      return "";
+  function stockMarkerOffset(index, total) {
+    if (total <= 1) {
+      return { x: 0, y: 0 };
     }
+    const spacing = 36;
+    return {
+      x: (index - (total - 1) / 2) * spacing,
+      y: total > 2 && index === 1 ? -3 : 0,
+    };
+  }
 
-    const chips = rows
-      .map((row) => {
-        const iconUrl = speciesIconUrls[row.species] || "";
-        const speciesLabel = row.species ? row.species.charAt(0).toUpperCase() + row.species.slice(1) : "Stock";
-        return (
-          '<div class="stock-float-chip" title="' +
-          escapeHtml(speciesLabel + ": " + formatHeadCount(row.count)) +
-          '">' +
-          (iconUrl
-            ? '<img src="' + escapeHtml(iconUrl) + '" alt="' + escapeHtml(speciesLabel) + '" />'
-            : '<span class="stock-float-fallback">' + escapeHtml(speciesLabel.slice(0, 1)) + "</span>") +
-          '<span class="stock-float-count">' +
-          escapeHtml(formatHeadCount(row.count)) +
-          "</span>" +
-          "</div>"
-        );
-      })
-      .join("");
+  function stockMarkerDropLatLng(marker, offset) {
+    const latlng = marker.getLatLng();
+    if (!latlng || !map.latLngToLayerPoint || !map.layerPointToLatLng) {
+      return latlng;
+    }
+    const point = map.latLngToLayerPoint(latlng).add([offset.x, offset.y]);
+    return map.layerPointToLatLng(point);
+  }
+
+  function stockFloatMarkerHtml(row, offset, canDrag) {
+    const iconUrl = speciesIconUrls[row.species] || "";
+    const speciesLabel =
+      row.speciesName || (row.species ? row.species.charAt(0).toUpperCase() + row.species.slice(1) : "Stock");
+    const title = canDrag
+      ? "Drag " + speciesLabel + " to another paddock"
+      : speciesLabel + ": " + formatHeadCount(row.count);
 
     return (
-      '<div class="stock-float-badge" aria-hidden="true">' +
+      '<div class="stock-float-marker" style="--stock-offset-x:' +
+      Number(offset.x).toFixed(1) +
+      "px;--stock-offset-y:" +
+      Number(offset.y).toFixed(1) +
+      'px">' +
+      '<div class="stock-float-badge" aria-hidden="true" title="' +
+      escapeHtml(title) +
+      '">' +
       '<div class="stock-float-chip-row">' +
-      chips +
+      '<div class="stock-float-chip">' +
+      (iconUrl
+        ? '<img src="' + escapeHtml(iconUrl) + '" alt="' + escapeHtml(speciesLabel) + '" />'
+        : '<span class="stock-float-fallback">' + escapeHtml(speciesLabel.slice(0, 1)) + "</span>") +
+      '<span class="stock-float-count">' +
+      escapeHtml(formatHeadCount(row.count)) +
+      "</span>" +
+      "</div>" +
       "</div>" +
       '<div class="stock-float-tail"></div>' +
+      "</div>" +
       "</div>"
     );
   }
 
-  function addStockFloatMarker(feature, geoLayer, markerLayer) {
+  function addStockFloatMarkers(feature, geoLayer, markerLayer) {
     if (!markerLayer) {
       return;
     }
@@ -404,8 +448,8 @@
       return;
     }
 
-    const html = stockFloatHtml(props);
-    if (!html) {
+    const rows = stockFloatRows(props);
+    if (!rows.length) {
       return;
     }
 
@@ -414,18 +458,78 @@
       return;
     }
 
-    const marker = L.marker(bounds.getCenter(), {
-      pane: "stockFloatPane",
-      interactive: false,
-      keyboard: false,
-      icon: L.divIcon({
-        className: "stock-float-marker-wrap",
-        html: '<div class="stock-float-marker">' + html + "</div>",
-        iconSize: [1, 1],
-        iconAnchor: [0, 0],
-      }),
+    const sourcePaddockId = String(props.paddock_id || "");
+    const sourcePaddockName = String(props.name || "this paddock");
+    const canDrag = Boolean(speciesMoveUrl && sourcePaddockId);
+    rows.forEach((row, index) => {
+      const offset = stockMarkerOffset(index, rows.length);
+      const speciesLabel =
+        row.speciesName || (row.species ? row.species.charAt(0).toUpperCase() + row.species.slice(1) : "Stock");
+      const marker = L.marker(bounds.getCenter(), {
+        pane: "stockFloatPane",
+        interactive: canDrag,
+        draggable: canDrag,
+        keyboard: false,
+        icon: L.divIcon({
+          className: "stock-float-marker-wrap" + (canDrag ? " stock-float-marker-wrap-draggable" : ""),
+          html: stockFloatMarkerHtml(row, offset, canDrag),
+          iconSize: [1, 1],
+          iconAnchor: [0, 0],
+        }),
+      });
+      if (canDrag) {
+        let previousLatLng = null;
+        marker.on("dragstart", function () {
+          previousLatLng = marker.getLatLng();
+          marker.setZIndexOffset(1000);
+          setStatus("Drop " + speciesLabel + " on another paddock to move it.");
+        });
+        marker.on("drag", function () {
+          setStockDropTarget(paddockDropTargetAt(stockMarkerDropLatLng(marker, offset)));
+        });
+        marker.on("dragend", function () {
+          const target = paddockDropTargetAt(stockMarkerDropLatLng(marker, offset));
+          setStockDropTarget(null);
+          marker.setZIndexOffset(0);
+          if (!target) {
+            marker.setLatLng(previousLatLng);
+            setStatus("Drop " + speciesLabel + " on a mapped paddock to move it.");
+            return;
+          }
+          if (target.paddockId === sourcePaddockId) {
+            marker.setLatLng(previousLatLng);
+            setStatus(speciesLabel + " is already in " + sourcePaddockName + ".");
+            return;
+          }
+          if (marker.dragging) {
+            marker.dragging.disable();
+          }
+          setStatus("Moving " + speciesLabel + " to " + target.name + "...");
+          postSpeciesMove({
+            source_paddock_id: sourcePaddockId,
+            target_paddock_id: target.paddockId,
+            species: row.speciesName || row.species,
+          })
+            .then((payload) => {
+              const movedHead = formatHeadCount(
+                payload && payload.moved_head_count !== undefined ? payload.moved_head_count : row.count
+              );
+              const message = "Moved " + movedHead + " " + speciesLabel.toLowerCase() + " head to " + target.name + ".";
+              return loadMapData({ preserveView: true, userInitiated: true }).then(() => {
+                setStatus(message);
+              });
+            })
+            .catch((error) => {
+              marker.setLatLng(previousLatLng);
+              if (marker.dragging) {
+                marker.dragging.enable();
+              }
+              setStatus(error.message || "Stock could not be moved.");
+            });
+        });
+      }
+      markerLayer.addLayer(marker);
     });
-    markerLayer.addLayer(marker);
   }
 
   function addPaddockNameLabel(feature, geoLayer, labelLayer) {
@@ -1089,7 +1193,7 @@
   map.getPane("paddockLabelPane").style.pointerEvents = "none";
   map.createPane("stockFloatPane");
   map.getPane("stockFloatPane").style.zIndex = "650";
-  map.getPane("stockFloatPane").style.pointerEvents = "none";
+  map.getPane("stockFloatPane").style.pointerEvents = "auto";
   map.createPane("gatePane");
   map.getPane("gatePane").style.zIndex = "670";
 
@@ -1154,6 +1258,8 @@
   let gatesVisible = false;
   let gateAddMode = false;
   let suppressNextMapCreateClick = false;
+  let paddockDropTargets = [];
+  let currentStockDropTargetLayer = null;
 
   function paddockOptionsFromFeatures(features) {
     const seen = new Set();
@@ -1228,6 +1334,105 @@
       }
     });
     return Array.from(merged.values());
+  }
+
+  function pointInRing(point, ring) {
+    if (!Array.isArray(ring) || ring.length < 4) {
+      return false;
+    }
+    const x = Number(point[0]);
+    const y = Number(point[1]);
+    let inside = false;
+    for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index++) {
+      const currentPoint = ring[index] || [];
+      const previousPoint = ring[previous] || [];
+      const xi = Number(currentPoint[0]);
+      const yi = Number(currentPoint[1]);
+      const xj = Number(previousPoint[0]);
+      const yj = Number(previousPoint[1]);
+      if (![xi, yi, xj, yj].every(Number.isFinite)) {
+        continue;
+      }
+      const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+      if (intersects) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  function pointInPolygon(point, polygon) {
+    if (!Array.isArray(polygon) || !pointInRing(point, polygon[0])) {
+      return false;
+    }
+    return !polygon.slice(1).some((ring) => pointInRing(point, ring));
+  }
+
+  function pointInGeometry(latlng, geometry) {
+    if (!latlng || !geometry || !Array.isArray(geometry.coordinates)) {
+      return false;
+    }
+    const point = [Number(latlng.lng), Number(latlng.lat)];
+    if (!point.every(Number.isFinite)) {
+      return false;
+    }
+    if (geometry.type === "Polygon") {
+      return pointInPolygon(point, geometry.coordinates);
+    }
+    if (geometry.type === "MultiPolygon") {
+      return geometry.coordinates.some((polygon) => pointInPolygon(point, polygon));
+    }
+    return false;
+  }
+
+  function registerPaddockDropTarget(feature, geoLayer) {
+    const props = (feature && feature.properties) || {};
+    if (props.feature_type !== "paddock" || !props.paddock_id || !geoLayer.getBounds) {
+      return;
+    }
+    const bounds = geoLayer.getBounds();
+    if (!bounds.isValid()) {
+      return;
+    }
+    const farmName = String(props.farm_name || "").trim();
+    const paddockName = String(props.name || "target paddock").trim();
+    paddockDropTargets.push({
+      paddockId: String(props.paddock_id),
+      name: farmName ? paddockName + " (" + farmName + ")" : paddockName,
+      bounds: bounds,
+      geometry: feature.geometry || null,
+      layer: geoLayer,
+    });
+  }
+
+  function paddockDropTargetAt(latlng) {
+    for (let index = paddockDropTargets.length - 1; index >= 0; index -= 1) {
+      const target = paddockDropTargets[index];
+      if (target.bounds.contains(latlng) && pointInGeometry(latlng, target.geometry)) {
+        return target;
+      }
+    }
+    return null;
+  }
+
+  function setStockDropTarget(target) {
+    const nextLayer = target && target.layer ? target.layer : null;
+    if (currentStockDropTargetLayer === nextLayer) {
+      return;
+    }
+    if (currentStockDropTargetLayer && currentStockDropTargetLayer.getElement) {
+      const previousElement = currentStockDropTargetLayer.getElement();
+      if (previousElement) {
+        previousElement.classList.remove("map-stock-drop-target");
+      }
+    }
+    currentStockDropTargetLayer = nextLayer;
+    if (currentStockDropTargetLayer && currentStockDropTargetLayer.getElement) {
+      const nextElement = currentStockDropTargetLayer.getElement();
+      if (nextElement) {
+        nextElement.classList.add("map-stock-drop-target");
+      }
+    }
   }
 
   function updateAddGateButton() {
@@ -2371,6 +2576,7 @@
 
   function clearMapDataLayers() {
     map.closePopup();
+    setStockDropTarget(null);
     if (gateAddMode) {
       setGateAddMode(false);
     }
@@ -2393,6 +2599,7 @@
     stockFloatLayer = null;
     mapFeatureLayer = null;
     gateLayer = null;
+    paddockDropTargets = [];
     gateMarkersById.clear();
     fenceLayersById.clear();
     paddockOptions = configuredGatePaddockOptions.slice();
@@ -2475,6 +2682,7 @@
     };
     const bindFeatureInteractions = function (feature, geoLayer) {
       const props = (feature && feature.properties) || {};
+      registerPaddockDropTarget(feature, geoLayer);
       const passiveFenceContext =
         fenceFocusMode && (props.feature_type === "paddock" || props.feature_type === "farm_boundary");
       if (!passiveFenceContext) {
@@ -2483,7 +2691,7 @@
       }
       addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);
       if (!fenceFocusMode) {
-        addStockFloatMarker(feature, geoLayer, stockFloatLayer);
+        addStockFloatMarkers(feature, geoLayer, stockFloatLayer);
       }
       if (props.feature_type === "fence_section") {
         const fenceId = fenceIdFromFeature(feature);

@@ -37,6 +37,30 @@ def test_parse_move_allocations_rejects_duplicate_paddocks():
         )
 
 
+def test_parse_move_allocations_validates_farm_per_row():
+    assert parse_move_allocations(
+        farm_ids=["farm-a", "farm-b"],
+        paddock_ids=["north", "south"],
+        allocation_pcts=["25", "75"],
+        valid_farm_ids={"farm-a", "farm-b"},
+        valid_paddock_farm_ids={"north": "farm-a", "south": "farm-b"},
+    ) == [
+        {"paddock_id": "north", "allocation_fraction": "0.25"},
+        {"paddock_id": "south", "allocation_fraction": "0.75"},
+    ]
+
+
+def test_parse_move_allocations_rejects_mismatched_row_farm():
+    with pytest.raises(ValueError, match="Selected paddock is invalid for the selected farm"):
+        parse_move_allocations(
+            farm_ids=["farm-a"],
+            paddock_ids=["south"],
+            allocation_pcts=["100"],
+            valid_farm_ids={"farm-a", "farm-b"},
+            valid_paddock_farm_ids={"south": "farm-b"},
+        )
+
+
 def test_parse_count_move_allocations_merges_duplicate_destination_paddocks():
     assert parse_count_move_allocations(
         paddock_ids=["north", "north", "south"],
@@ -58,6 +82,51 @@ def test_parse_count_move_allocations_merges_duplicate_destination_paddocks():
             "group_counts": [{"animal_group_type_id": "lambs", "head_count": 4}],
         },
     ]
+
+
+def test_parse_count_move_allocations_accepts_one_animal_type_per_row():
+    assert parse_count_move_allocations(
+        farm_ids=["farm-a", "farm-a", "farm-b"],
+        paddock_ids=["north", "north", "south"],
+        group_ids=["ewes", "lambs", "lambs"],
+        head_counts=["2", "1", "4"],
+        valid_farm_ids={"farm-a", "farm-b"},
+        valid_paddock_farm_ids={"north": "farm-a", "south": "farm-b"},
+    ) == [
+        {
+            "paddock_id": "north",
+            "group_counts": [
+                {"animal_group_type_id": "ewes", "head_count": 2},
+                {"animal_group_type_id": "lambs", "head_count": 1},
+            ],
+        },
+        {
+            "paddock_id": "south",
+            "group_counts": [{"animal_group_type_id": "lambs", "head_count": 4}],
+        },
+    ]
+
+
+def test_parse_count_move_allocations_requires_type_and_count_per_row():
+    with pytest.raises(ValueError, match="requires an animal type"):
+        parse_count_move_allocations(
+            farm_ids=["farm-a"],
+            paddock_ids=["north"],
+            group_ids=[""],
+            head_counts=["2"],
+            valid_farm_ids={"farm-a"},
+            valid_paddock_farm_ids={"north": "farm-a"},
+        )
+
+    with pytest.raises(ValueError, match="requires a count"):
+        parse_count_move_allocations(
+            farm_ids=["farm-a"],
+            paddock_ids=["north"],
+            group_ids=["ewes"],
+            head_counts=[""],
+            valid_farm_ids={"farm-a"},
+            valid_paddock_farm_ids={"north": "farm-a"},
+        )
 
 
 def test_parse_transfer_rows_combines_duplicate_groups():

@@ -24,6 +24,7 @@
     data-cow-icon="{{ url_for('static', filename='cow.png') }}"
     data-sheep-icon="{{ url_for('static', filename='sheep.png') }}"
     data-goat-icon="{{ url_for('static', filename='goat.png') }}"
+    data-species-move-url="{{ url_for('mobs.move_map_species') }}"
     data-gate-open-icon="{{ url_for('static', filename='ranch_gate_open.svg') }}"
     data-gate-closed-icon="{{ url_for('static', filename='ranch_gate_closed.svg') }}"
     data-gate-create-url="{{ url_for('web.create_farm_gate_form', farm_id=farm.id) }}"

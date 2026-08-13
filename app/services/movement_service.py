@@ -3,7 +3,16 @@ from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.extensions import db
-from app.models import Farm, Mob, MobEvent, MovementEvent, MovementEventMob, Paddock
+from app.models import (
+    Farm,
+    GrazingAllocation,
+    GrazingSession,
+    Mob,
+    MobEvent,
+    MovementEvent,
+    MovementEventMob,
+    Paddock,
+)
 from app.models.animal_group import AnimalGroupBalance
 from app.models.movement import MobLineage, MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
@@ -19,6 +28,75 @@ from app.services.validation_service import ValidationService
 class MovementService:
     FRACTION_QUANT = Decimal("0.0001")
     GROUP_FRACTION_QUANT = Decimal("0.000001")
+
+    @staticmethod
+    def _normalize_species_key(value: str | None) -> str:
+        return " ".join((value or "").strip().lower().split())
+
+    @staticmethod
+    def _whole_head_count(value) -> int:
+        numeric = float(value or 0)
+        rounded = int(round(numeric))
+        if abs(numeric - rounded) > 0.0001:
+            raise ValueError(
+                "This species cannot be dragged because its current allocation "
+                "contains fractional head counts. Move the mob from its detail page instead."
+            )
+        return rounded
+
+    @classmethod
+    def _active_session_count_map(cls, session: GrazingSession) -> tuple[dict[str, dict[str, int]], dict[str, str]]:
+        counts_by_paddock: dict[str, dict[str, int]] = defaultdict(dict)
+        species_by_group_id: dict[str, str] = {}
+        for allocation in session.allocations:
+            paddock_id = str(allocation.paddock_id)
+            paddock_counts = counts_by_paddock.setdefault(paddock_id, {})
+            for group_row in ReportingService.allocation_group_head_rows(allocation):
+                head_count = cls._whole_head_count(group_row["head_count"])
+                if head_count <= 0:
+                    continue
+                group_id = str(group_row["animal_group_type_id"])
+                group = group_row["animal_group_type"]
+                species_by_group_id[group_id] = group.species
+                paddock_counts[group_id] = paddock_counts.get(group_id, 0) + head_count
+        return counts_by_paddock, species_by_group_id
+
+    @staticmethod
+    def _count_allocations_from_map(counts_by_paddock: dict[str, dict[str, int]]) -> list[dict]:
+        allocations = []
+        for paddock_id in sorted(counts_by_paddock):
+            group_counts = [
+                {"animal_group_type_id": group_id, "head_count": head_count}
+                for group_id, head_count in sorted(counts_by_paddock[paddock_id].items())
+                if head_count > 0
+            ]
+            if group_counts:
+                allocations.append({"paddock_id": paddock_id, "group_counts": group_counts})
+        return allocations
+
+    @staticmethod
+    def _destination_farm_for_count_map(
+        mob: Mob,
+        target_paddock: Paddock,
+        counts_by_paddock: dict[str, dict[str, int]],
+    ) -> str:
+        paddock_ids = [
+            paddock_id
+            for paddock_id, group_counts in counts_by_paddock.items()
+            if any(head_count > 0 for head_count in group_counts.values())
+        ]
+        if not paddock_ids:
+            return str(target_paddock.farm_id)
+
+        paddocks = Paddock.query.filter(Paddock.id.in_(paddock_ids)).all()
+        farm_ids = {str(paddock.farm_id) for paddock in paddocks}
+        if len(farm_ids) == 1:
+            return next(iter(farm_ids))
+        if str(mob.farm_id) in farm_ids:
+            return str(mob.farm_id)
+        if str(target_paddock.farm_id) in farm_ids:
+            return str(target_paddock.farm_id)
+        return sorted(farm_ids)[0]
 
     @staticmethod
     def _resolve_move_destination_farm_id(
@@ -357,6 +435,99 @@ class MovementService:
         )
 
         return session
+
+    @classmethod
+    def move_species_between_paddocks(
+        cls,
+        *,
+        source_paddock_id: str,
+        target_paddock_id: str,
+        species: str,
+        when=None,
+    ) -> dict:
+        source_id = str(source_paddock_id or "").strip()
+        target_id = str(target_paddock_id or "").strip()
+        species_key = cls._normalize_species_key(species)
+        if not source_id or not target_id:
+            raise ValueError("Source and target paddocks are required")
+        if source_id == target_id:
+            raise ValueError("Drop the species on a different paddock")
+        if not species_key:
+            raise ValueError("Species is required")
+
+        source_paddock = Paddock.query.filter_by(id=source_id, status="active").first()
+        if source_paddock is None:
+            raise ValueError("Source paddock is invalid")
+        target_paddock = Paddock.query.filter_by(id=target_id, status="active").first()
+        if target_paddock is None:
+            raise ValueError("Target paddock is invalid")
+
+        sessions = (
+            GrazingSession.query.join(Mob)
+            .join(GrazingAllocation)
+            .filter(
+                GrazingSession.end_at.is_(None),
+                Mob.status == "active",
+                GrazingAllocation.paddock_id == source_id,
+            )
+            .all()
+        )
+
+        moved_mob_count = 0
+        moved_head_count = 0
+        event_time = when or datetime.now(timezone.utc)
+        for session in sessions:
+            counts_by_paddock, species_by_group_id = cls._active_session_count_map(session)
+            source_counts = counts_by_paddock.get(source_id, {})
+            move_counts = {
+                group_id: head_count
+                for group_id, head_count in source_counts.items()
+                if head_count > 0
+                and cls._normalize_species_key(species_by_group_id.get(group_id)) == species_key
+            }
+            if not move_counts:
+                continue
+
+            target_counts = counts_by_paddock.setdefault(target_id, {})
+            for group_id, head_count in move_counts.items():
+                next_source_count = source_counts.get(group_id, 0) - head_count
+                if next_source_count > 0:
+                    source_counts[group_id] = next_source_count
+                else:
+                    source_counts.pop(group_id, None)
+                target_counts[group_id] = target_counts.get(group_id, 0) + head_count
+                moved_head_count += head_count
+
+            if not source_counts:
+                counts_by_paddock.pop(source_id, None)
+
+            allocations = cls._count_allocations_from_map(counts_by_paddock)
+            destination_farm_id = cls._destination_farm_for_count_map(
+                session.mob,
+                target_paddock,
+                counts_by_paddock,
+            )
+            cls.move_mob(
+                mob=session.mob,
+                allocations=allocations,
+                destination_farm_id=destination_farm_id,
+                when=event_time,
+                allocation_mode="counts",
+                apply_open_gate_network=False,
+                allow_cross_farm_allocations=True,
+            )
+            moved_mob_count += 1
+
+        if moved_mob_count == 0:
+            raise ValueError("No active stock for that species was found in the source paddock")
+
+        return {
+            "moved_mob_count": moved_mob_count,
+            "moved_head_count": moved_head_count,
+            "species": species,
+            "source_paddock_id": source_id,
+            "target_paddock_id": target_id,
+        }
 
     @staticmethod
     def transfer_stock_between_mobs(

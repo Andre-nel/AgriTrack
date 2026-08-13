@@ -414,6 +414,9 @@ class GrazingHistoryService:
             allocation_values = allocation_values_by_id[str(allocation.id)]
             allocation_fraction = allocation_values["allocation_fraction"]
             allocated_lsu = allocation_values["allocated_lsu"]
+            allocation_farm_id = (
+                allocation.paddock.farm_id if allocation.paddock else active_session.farm_id
+            )
             existing_row = open_rows_by_allocation.get(str(allocation.id))
 
             if allocated_lsu <= 0:
@@ -425,11 +428,12 @@ class GrazingHistoryService:
                 mob_total_lsu=mob_total_lsu,
                 allocated_lsu=allocated_lsu,
             ):
-                pass
+                existing_row.farm_id = allocation_farm_id
             elif existing_row is not None:
                 existing_from = cls._normalize_datetime(existing_row.effective_from)
                 sync_from = cls._normalize_datetime(sync_at)
                 if existing_from is not None and sync_from is not None and existing_from == sync_from:
+                    existing_row.farm_id = allocation_farm_id
                     existing_row.allocation_fraction = allocation_fraction
                     existing_row.mob_total_lsu = mob_total_lsu
                     existing_row.allocated_lsu = allocated_lsu
@@ -438,7 +442,7 @@ class GrazingHistoryService:
                     cls._close_or_delete_open_row(existing_row, sync_at)
                     db.session.add(
                         GrazingAllocationLsuHistory(
-                            farm_id=active_session.farm_id,
+                            farm_id=allocation_farm_id,
                             mob_id=active_session.mob_id,
                             paddock_id=allocation.paddock_id,
                             grazing_session_id=active_session.id,
@@ -453,7 +457,7 @@ class GrazingHistoryService:
             else:
                 db.session.add(
                     GrazingAllocationLsuHistory(
-                        farm_id=active_session.farm_id,
+                        farm_id=allocation_farm_id,
                         mob_id=active_session.mob_id,
                         paddock_id=allocation.paddock_id,
                         grazing_session_id=active_session.id,
@@ -485,6 +489,7 @@ class GrazingHistoryService:
                     group_lsu=group_row["group_lsu"],
                     allocated_lsu=group_allocated_lsu,
                 ):
+                    existing_breakdown.farm_id = allocation_farm_id
                     continue
 
                 if existing_breakdown is not None:
@@ -495,6 +500,7 @@ class GrazingHistoryService:
                         and sync_from is not None
                         and existing_from == sync_from
                     ):
+                        existing_breakdown.farm_id = allocation_farm_id
                         existing_breakdown.allocation_fraction = group_row["allocation_fraction"]
                         existing_breakdown.head_count = group_row["head_count"]
                         existing_breakdown.allocated_head_count = group_row["allocated_head_count"]
@@ -506,7 +512,7 @@ class GrazingHistoryService:
 
                 db.session.add(
                     GrazingAllocationLsuBreakdownHistory(
-                        farm_id=active_session.farm_id,
+                        farm_id=allocation_farm_id,
                         mob_id=active_session.mob_id,
                         paddock_id=allocation.paddock_id,
                         grazing_session_id=active_session.id,
@@ -663,6 +669,7 @@ class GrazingHistoryService:
 
             for allocation in allocations_by_mob.get(str(mob.id), []):
                 session = allocation.grazing_session
+                allocation_farm_id = allocation.paddock.farm_id if allocation.paddock else session.farm_id
                 session_start = cls._normalize_datetime(session.start_at)
                 session_end = cls._normalize_datetime(session.end_at)
                 for interval in intervals:
@@ -683,7 +690,7 @@ class GrazingHistoryService:
 
                     db.session.add(
                         GrazingAllocationLsuHistory(
-                            farm_id=session.farm_id,
+                            farm_id=allocation_farm_id,
                             mob_id=session.mob_id,
                             paddock_id=allocation.paddock_id,
                             grazing_session_id=session.id,
@@ -704,7 +711,7 @@ class GrazingHistoryService:
                             continue
                         db.session.add(
                             GrazingAllocationLsuBreakdownHistory(
-                                farm_id=session.farm_id,
+                                farm_id=allocation_farm_id,
                                 mob_id=session.mob_id,
                                 paddock_id=allocation.paddock_id,
                                 grazing_session_id=session.id,

@@ -177,6 +177,18 @@ body {
   gap: 0.7rem;
   align-items: end;
 }
+.move-percentage-row {
+  grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.2fr) minmax(120px, 0.8fr) auto;
+}
+.move-count-row {
+  grid-template-columns:
+    minmax(140px, 1fr) minmax(170px, 1.1fr) minmax(220px, 1.3fr) minmax(100px, 0.7fr)
+    auto auto;
+}
+.count-group-available {
+  display: block;
+  margin-top: 0.25rem;
+}
 .split-row {
   display: grid;
   grid-template-columns: 1.3fr 1.8fr 0.8fr auto;
@@ -961,6 +973,12 @@ tr.is-selected-fence {
   font-weight: 800;
 }
 
+.map-stock-drop-target {
+  stroke: #facc15 !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.75));
+}
+
 .map-gate-add-mode,
 .map-gate-add-mode .leaflet-interactive {
   cursor: crosshair;
@@ -1123,8 +1141,15 @@ tr.is-selected-fence {
 }
 
 .stock-float-marker {
-  transform: translate(-50%, -92%);
+  transform: translate(
+    calc(-50% + var(--stock-offset-x, 0px)),
+    calc(-92% + var(--stock-offset-y, 0px))
+  );
   pointer-events: none;
+}
+
+.stock-float-marker-wrap-draggable .stock-float-marker {
+  pointer-events: auto;
 }
 
 .stock-float-badge {
@@ -1133,6 +1158,16 @@ tr.is-selected-fence {
   flex-direction: column;
   align-items: center;
   animation: stock-float 3.2s ease-in-out infinite;
+}
+
+.stock-float-marker-wrap-draggable .stock-float-badge {
+  cursor: grab;
+}
+
+.leaflet-marker-draggable .stock-float-badge:hover,
+.leaflet-drag-target .stock-float-badge {
+  cursor: grabbing;
+  opacity: 0.98;
 }
 
 .stock-float-chip-row {
@@ -2674,7 +2709,10 @@ tr.is-selected-fence {
   }
 
   .stock-float-marker {
-    transform: translate(-50%, -86%);
+    transform: translate(
+      calc(-50% + var(--stock-offset-x, 0px)),
+      calc(-86% + var(--stock-offset-y, 0px))
+    );
   }
 
   .map-paddock-label {

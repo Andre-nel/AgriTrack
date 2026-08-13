@@ -287,15 +287,6 @@
   <summary><strong>Move Mob</strong></summary>
   {% if has_move_paddocks %}
   <form method="post" action="{{ url_for('web.mob_move_form', mob_id=mob.id) }}" class="grid-form">
-    <label>Destination Farm
-      <select name="destination_farm_id" id="destinationFarm" required>
-        {% for farm in move_farms %}
-        <option value="{{ farm.id }}" {% if farm.id == default_move_farm_id %}selected{% endif %}>
-          {{ farm.name }}
-        </option>
-        {% endfor %}
-      </select>
-    </label>
     <label>Allocation Mode
       <select name="allocation_mode" id="allocationMode">
         <option value="percentage" selected>Percentage</option>
@@ -305,7 +296,16 @@
 
     <div id="percentageAllocationPanel" data-allocation-panel="percentage">
       <div id="allocationRows">
-        <div class="allocation-row">
+        <div class="allocation-row move-percentage-row">
+          <label>Farm
+            <select name="allocation_farm_id" class="allocation-farm-select" required>
+              {% for farm in move_farms %}
+              <option value="{{ farm.id }}" {% if farm.id == default_move_farm_id %}selected{% endif %}>
+                {{ farm.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
           <label>Paddock
             <select name="paddock_id" class="allocation-paddock-select" required>
               <option value="">Choose paddock</option>
@@ -327,7 +327,20 @@
       {% if split_group_options %}
       <div id="countAllocationRows">
         {% for initial_row in initial_count_allocation_rows %}
-        <div class="allocation-row count-allocation-row">
+        <div class="allocation-row count-allocation-row move-count-row">
+          <label>Farm
+            <select
+              name="count_farm_id"
+              class="count-allocation-farm-select"
+              required
+            >
+              {% for farm in move_farms %}
+              <option value="{{ farm.id }}" {% if farm.id == initial_row.farm_id %}selected{% endif %}>
+                {{ farm.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
           <label>Paddock
             <select
               name="count_paddock_id"
@@ -338,19 +351,32 @@
               <option value="">Choose paddock</option>
             </select>
           </label>
-          {% for option in split_group_options %}
-          <label>{{ option.species }} {{ option.breed }} {{ option.sex }} {{ option.age_class }}
+          <label>Animal Type
+            <select name="count_group_id" class="count-allocation-group-select" required>
+              <option value="">Choose type</option>
+              {% for option in split_group_options %}
+              <option
+                value="{{ option.id }}"
+                data-head-count="{{ option.head_count }}"
+                data-lsu-per-head="{{ option.lsu_per_head }}"
+                {% if option.id == initial_row.group_id %}selected{% endif %}
+              >
+                {{ option.species }} | {{ option.breed }} | {{ option.sex }} | {{ option.age_class }}
+              </option>
+              {% endfor %}
+            </select>
+            <span class="muted count-group-available">Available: 0</span>
+          </label>
+          <label>Count
             <input
               type="number"
-              min="0"
+              min="1"
               step="1"
-              name="count_group_count:{{ option.id }}"
-              value="{{ initial_row.group_counts.get(option.id, 0) }}"
-              data-group-id="{{ option.id }}"
+              name="count_head_count"
+              value="{{ initial_row.head_count }}"
+              required
             />
-            <span class="muted">Available: {{ option.head_count }}</span>
           </label>
-          {% endfor %}
           <p class="muted count-row-pct">Calculated: 0.00%</p>
           <button type="button" class="btn btn-secondary count-row-remove">Remove</button>
         </div>
@@ -367,7 +393,16 @@
     <button type="submit" class="btn">Move Mob</button>
   </form>
   <template id="allocationRowTemplate">
-    <div class="allocation-row">
+    <div class="allocation-row move-percentage-row">
+      <label>Farm
+        <select name="allocation_farm_id" class="allocation-farm-select" required>
+          {% for farm in move_farms %}
+          <option value="{{ farm.id }}" {% if farm.id == default_move_farm_id %}selected{% endif %}>
+            {{ farm.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
       <label>Paddock
         <select name="paddock_id" class="allocation-paddock-select" required>
           <option value="">Choose paddock</option>
@@ -380,25 +415,45 @@
     </div>
   </template>
   <template id="countAllocationRowTemplate">
-    <div class="allocation-row count-allocation-row">
+    <div class="allocation-row count-allocation-row move-count-row">
+      <label>Farm
+        <select name="count_farm_id" class="count-allocation-farm-select" required>
+          {% for farm in move_farms %}
+          <option value="{{ farm.id }}" {% if farm.id == default_move_farm_id %}selected{% endif %}>
+            {{ farm.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
       <label>Paddock
         <select name="count_paddock_id" class="count-allocation-paddock-select" required>
           <option value="">Choose paddock</option>
         </select>
       </label>
-      {% for option in split_group_options %}
-      <label>{{ option.species }} {{ option.breed }} {{ option.sex }} {{ option.age_class }}
+      <label>Animal Type
+        <select name="count_group_id" class="count-allocation-group-select" required>
+          <option value="">Choose type</option>
+          {% for option in split_group_options %}
+          <option
+            value="{{ option.id }}"
+            data-head-count="{{ option.head_count }}"
+            data-lsu-per-head="{{ option.lsu_per_head }}"
+          >
+            {{ option.species }} | {{ option.breed }} | {{ option.sex }} | {{ option.age_class }}
+          </option>
+          {% endfor %}
+        </select>
+        <span class="muted count-group-available">Available: 0</span>
+      </label>
+      <label>Count
         <input
           type="number"
-          min="0"
+          min="1"
           step="1"
-          name="count_group_count:{{ option.id }}"
-          value="0"
-          data-group-id="{{ option.id }}"
+          name="count_head_count"
+          required
         />
-        <span class="muted">Available: {{ option.head_count }}</span>
       </label>
-      {% endfor %}
       <p class="muted count-row-pct">Calculated: 0.00%</p>
       <button type="button" class="btn btn-secondary count-row-remove">Remove</button>
     </div>
@@ -761,7 +816,6 @@
     const addBtn = document.getElementById("addAllocationRow");
     const totalEl = document.getElementById("allocationTotal");
     const template = document.getElementById("allocationRowTemplate");
-    const destinationFarmSelect = document.getElementById("destinationFarm");
     const movePaddocksByFarmEl = document.getElementById("movePaddocksByFarm");
     let movePaddocksByFarm = {};
     if (movePaddocksByFarmEl) {
@@ -788,6 +842,10 @@
         moveGroupOptions = [];
       }
     }
+    const moveGroupOptionsById = {};
+    moveGroupOptions.forEach((group) => {
+      moveGroupOptionsById[group.id] = group;
+    });
 
     function updatePaddockSelectOptions(selectEl, farmId, selectedValue) {
       if (!selectEl) return;
@@ -823,22 +881,31 @@
       return selectedValue;
     }
 
+    function syncRowPaddockOptions(row, farmSelector, paddockSelector) {
+      const farmSelect = row.querySelector(farmSelector);
+      const paddockSelect = row.querySelector(paddockSelector);
+      if (!farmSelect || !paddockSelect) return;
+      updatePaddockSelectOptions(
+        paddockSelect,
+        farmSelect.value,
+        selectedPaddockValue(paddockSelect)
+      );
+    }
+
     function syncPaddockOptions() {
-      if (!destinationFarmSelect) return;
-      const farmId = destinationFarmSelect.value;
       if (rowsContainer) {
-        rowsContainer.querySelectorAll("select[name='paddock_id']").forEach((selectEl) => {
-          updatePaddockSelectOptions(selectEl, farmId, selectedPaddockValue(selectEl));
+        rowsContainer.querySelectorAll(".allocation-row").forEach((row) => {
+          syncRowPaddockOptions(row, "select[name='allocation_farm_id']", "select[name='paddock_id']");
         });
       }
       if (countRowsContainer) {
-        countRowsContainer.querySelectorAll("select[name='count_paddock_id']").forEach((selectEl) => {
-          updatePaddockSelectOptions(selectEl, farmId, selectedPaddockValue(selectEl));
+        countRowsContainer.querySelectorAll(".count-allocation-row").forEach((row) => {
+          syncRowPaddockOptions(row, "select[name='count_farm_id']", "select[name='count_paddock_id']");
         });
       }
     }
 
-    if (rowsContainer && addBtn && template && totalEl && destinationFarmSelect) {
+    if (rowsContainer && addBtn && template && totalEl) {
 
       function recalcTotal() {
         let total = 0;
@@ -852,14 +919,18 @@
 
       function bindRow(row) {
         const removeBtn = row.querySelector(".row-remove");
+        const farmSelect = row.querySelector("select[name='allocation_farm_id']");
         const pctInput = row.querySelector("input[name='allocation_pct']");
         const paddockSelect = row.querySelector("select[name='paddock_id']");
-        if (paddockSelect) {
+        if (farmSelect && paddockSelect) {
           updatePaddockSelectOptions(
             paddockSelect,
-            destinationFarmSelect.value,
+            farmSelect.value,
             selectedPaddockValue(paddockSelect)
           );
+          farmSelect.addEventListener("change", () => {
+            updatePaddockSelectOptions(paddockSelect, farmSelect.value, "");
+          });
         }
         if (removeBtn) {
           removeBtn.addEventListener("click", () => {
@@ -904,15 +975,15 @@
 
       countRowsContainer.querySelectorAll(".count-allocation-row").forEach((row) => {
         let rowLsu = 0;
-        row.querySelectorAll("input[data-group-id]").forEach((input) => {
-          const groupId = input.dataset.groupId || "";
-          const group = moveGroupOptions.find((item) => item.id === groupId);
-          const quantity = Math.max(0, Number(input.value || 0));
-          if (!Number.isNaN(quantity)) {
-            totals[groupId] = (totals[groupId] || 0) + quantity;
-            rowLsu += quantity * Number(group ? group.lsu_per_head || 0 : 0);
-          }
-        });
+        const groupSelect = row.querySelector("select[name='count_group_id']");
+        const countInput = row.querySelector("input[name='count_head_count']");
+        const groupId = groupSelect ? groupSelect.value || "" : "";
+        const group = moveGroupOptionsById[groupId];
+        const quantity = Math.max(0, Number(countInput ? countInput.value || 0 : 0));
+        if (group && !Number.isNaN(quantity)) {
+          totals[groupId] = (totals[groupId] || 0) + quantity;
+          rowLsu += quantity * Number(group.lsu_per_head || 0);
+        }
         const pctEl = row.querySelector(".count-row-pct");
         if (pctEl) {
           const pct = totalLsu > 0 ? (rowLsu / totalLsu) * 100 : 0;
@@ -935,19 +1006,39 @@
       countTotalEl.classList.toggle("error-text", !allCovered);
     }
 
+    function syncCountRowAvailable(row) {
+      const groupSelect = row.querySelector("select[name='count_group_id']");
+      const availableEl = row.querySelector(".count-group-available");
+      if (!groupSelect || !availableEl) return;
+      const group = moveGroupOptionsById[groupSelect.value || ""];
+      availableEl.textContent = `Available: ${group ? group.head_count : 0}`;
+    }
+
     function bindCountRow(row) {
       const removeBtn = row.querySelector(".count-row-remove");
+      const farmSelect = row.querySelector("select[name='count_farm_id']");
       const paddockSelect = row.querySelector("select[name='count_paddock_id']");
-      if (paddockSelect && destinationFarmSelect) {
+      const groupSelect = row.querySelector("select[name='count_group_id']");
+      const countInput = row.querySelector("input[name='count_head_count']");
+      if (farmSelect && paddockSelect) {
         updatePaddockSelectOptions(
           paddockSelect,
-          destinationFarmSelect.value,
+          farmSelect.value,
           selectedPaddockValue(paddockSelect)
         );
+        farmSelect.addEventListener("change", () => {
+          updatePaddockSelectOptions(paddockSelect, farmSelect.value, "");
+        });
       }
-      row.querySelectorAll("input[data-group-id]").forEach((input) => {
-        input.addEventListener("input", recalcCountTotals);
-      });
+      if (groupSelect) {
+        groupSelect.addEventListener("change", () => {
+          syncCountRowAvailable(row);
+          recalcCountTotals();
+        });
+      }
+      if (countInput) {
+        countInput.addEventListener("input", recalcCountTotals);
+      }
       if (removeBtn) {
         removeBtn.addEventListener("click", () => {
           if (countRowsContainer && countRowsContainer.children.length > 1) {
@@ -956,6 +1047,7 @@
           }
         });
       }
+      syncCountRowAvailable(row);
     }
 
     if (countRowsContainer && addCountBtn && countTemplate) {
@@ -974,15 +1066,17 @@
       const countsActive = mode === "counts";
       if (percentagePanel) percentagePanel.hidden = countsActive;
       if (countPanel) countPanel.hidden = !countsActive;
-      syncPaddockOptions();
       setPanelInputsEnabled(percentagePanel, !countsActive);
       setPanelInputsEnabled(countPanel, countsActive);
+      syncPaddockOptions();
+      if (countsActive) {
+        setPanelInputsEnabled(percentagePanel, false);
+      } else {
+        setPanelInputsEnabled(countPanel, false);
+      }
       recalcCountTotals();
     }
 
-    if (destinationFarmSelect) {
-      destinationFarmSelect.addEventListener("change", syncAllocationMode);
-    }
     if (allocationModeSelect) {
       allocationModeSelect.addEventListener("change", syncAllocationMode);
     }
