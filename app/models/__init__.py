@@ -57,6 +57,7 @@ from app.models.task import (
 from app.models.user import User, UserFarmRole
 from app.models.water import WaterAsset, WaterAssetServedPaddock, WaterAssetStateHistory, WaterConnection
 from app.models.water_asset_event import WaterAssetEvent
+from app.models.wiki import WikiArticle
 
 __all__ = [
     "AnimalGroupBalance",
@@ -119,4 +120,5 @@ __all__ = [
     "WaterAssetServedPaddock",
     "WaterAssetStateHistory",
     "WaterConnection",
+    "WikiArticle",
 ]

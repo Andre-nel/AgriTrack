@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Wiki | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Farm Wiki</h1>
+  <p>Knowledge, treatment notes, and operational tips for the farming operation.</p>
+</section>
+
+<div class="cards wiki-summary-grid">
+  <article class="card stat"><h2>Sections</h2><p>{{ summary.article_count }}</p></article>
+  <article class="card stat"><h2>Categories</h2><p>{{ summary.category_count }}</p></article>
+  <article class="card stat"><h2>Missing Info</h2><p>{{ summary.todo_count }}</p></article>
+</div>
+
+<section class="split">
+  <article class="card">
+    <h2>Search Wiki</h2>
+    <form method="get" action="{{ url_for('wiki.index') }}" class="grid-form">
+      <label>Search Text
+        <input name="q" value="{{ filters.q }}" placeholder="Lintex, ticks, Bloednier..." />
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn">Search</button>
+        <a class="btn btn-secondary" href="{{ url_for('wiki.index') }}">Clear</a>
+      </div>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Create Wiki Section</h2>
+    <form method="post" action="{{ url_for('wiki.create_article') }}" class="grid-form">
+      <div class="grid-two">
+        <label>Title
+          <input name="title" value="{{ form_values.title }}" placeholder="Dose schedule" required />
+        </label>
+        <label>Category
+          <input name="category" value="{{ form_values.category }}" placeholder="Sheep" />
+        </label>
+      </div>
+      <label>Summary
+        <textarea name="summary" rows="3" required>{{ form_values.summary }}</textarea>
+      </label>
+      <label>Known Info
+        <textarea name="content" rows="5" placeholder="One fact per line.">{{ form_values.content }}</textarea>
+      </label>
+      <label>Missing Info
+        <textarea name="todos" rows="4" placeholder="One todo per line.">{{ form_values.todos }}</textarea>
+      </label>
+      <button type="submit" class="btn">Save Section</button>
+    </form>
+  </article>
+</section>
+
+<section class="wiki-layout">
+  <aside class="card wiki-index" aria-label="Wiki index">
+    <h2>Index</h2>
+    {% for category in category_rows %}
+    <div class="wiki-index-group">
+      <h3>{{ category.name }}</h3>
+      <ul class="link-list">
+        {% for article in category.articles %}
+        <li><a href="#{{ article.slug }}">{{ article.title }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% else %}
+    <p class="muted">No matching wiki sections.</p>
+    {% endfor %}
+  </aside>
+
+  <div class="wiki-section-list">
+    {% for row in article_rows %}
+    {% set article = row.article %}
+    <article class="card wiki-entry" id="{{ article.slug }}">
+      <div class="task-section-heading">
+        <div>
+          <span class="space-key">{{ article.category }}</span>
+          <h2><a href="{{ url_for('wiki.detail', slug=article.slug) }}">{{ article.title }}</a></h2>
+        </div>
+        {% if row.todo_count %}
+        <span class="wiki-todo-count">{{ row.todo_count }} todo{{ "" if row.todo_count == 1 else "s" }}</span>
+        {% endif %}
+      </div>
+
+      <p class="text-body">{{ article.summary }}</p>
+
+      <h3>Known Info</h3>
+      <ul class="wiki-fact-list">
+        {% for fact in row.facts %}
+        <li>{{ fact }}</li>
+        {% else %}
+        <li class="muted">No known info recorded yet.</li>
+        {% endfor %}
+      </ul>
+
+      {% if row.todos %}
+      <div class="wiki-todo-panel">
+        <h3><span class="wiki-todo">todo</span> Missing Info</h3>
+        <ul class="wiki-todo-list">
+          {% for todo in row.todos %}
+          <li><span class="wiki-todo">todo</span> {{ todo }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <div class="row-actions wiki-entry-actions">
+        <a class="btn btn-secondary" href="{{ url_for('wiki.detail', slug=article.slug) }}">Open Section</a>
+      </div>
+    </article>
+    {% else %}
+    <article class="card">
+      <h2>No Wiki Sections Found</h2>
+      <p class="muted">Create a new section or clear the current search.</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

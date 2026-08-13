@@ -578,6 +578,96 @@ a { color: #1b5f49; }
   color: #b94b4b;
 }
 
+.wiki-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.wiki-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.wiki-index {
+  position: sticky;
+  top: 5.5rem;
+}
+
+.wiki-index h2 {
+  margin-top: 0;
+}
+
+.wiki-index-group + .wiki-index-group {
+  margin-top: 1rem;
+}
+
+.wiki-index-group h3 {
+  margin-bottom: 0.35rem;
+}
+
+.wiki-section-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.wiki-entry {
+  scroll-margin-top: 6rem;
+}
+
+.wiki-entry h2 {
+  margin: 0.35rem 0 0;
+}
+
+.wiki-entry h3 {
+  margin-bottom: 0.4rem;
+}
+
+.wiki-fact-list,
+.wiki-todo-list {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.wiki-fact-list li,
+.wiki-todo-list li {
+  margin: 0.42rem 0;
+}
+
+.wiki-todo,
+.wiki-todo-count {
+  color: #b30000;
+  font-weight: 800;
+}
+
+.wiki-todo-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: #fdecec;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.wiki-todo-panel {
+  margin-top: 0.9rem;
+  padding: 0.75rem;
+  border: 1px solid #f2b9b9;
+  border-radius: 8px;
+  background: #fff8f8;
+}
+
+.wiki-entry-actions,
+.wiki-delete-form {
+  margin-top: 0.9rem;
+}
+
+.wiki-delete-form {
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
 .flash-list {
   list-style: none;
   padding: 0;
@@ -3304,6 +3394,14 @@ tr.is-selected-fence {
   .grid-two,
   .grid-three {
     grid-template-columns: 1fr;
+  }
+
+  .wiki-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wiki-index {
+    position: static;
   }
 
   .simulator-farm-value-row {

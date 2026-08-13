@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ row.article.title }} | Wiki | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-actions">
+    <a class="btn btn-secondary" href="{{ url_for('wiki.index') }}">Back To Wiki</a>
+  </div>
+  <h1>{{ row.article.title }}</h1>
+  <p>{{ row.article.summary }}</p>
+</section>
+
+<section class="split">
+  <article class="card wiki-entry">
+    <div class="task-section-heading">
+      <div>
+        <span class="space-key">{{ row.article.category }}</span>
+        <h2>Knowledge</h2>
+      </div>
+      {% if row.todo_count %}
+      <span class="wiki-todo-count">{{ row.todo_count }} todo{{ "" if row.todo_count == 1 else "s" }}</span>
+      {% endif %}
+    </div>
+
+    <h3>Known Info</h3>
+    <ul class="wiki-fact-list">
+      {% for fact in row.facts %}
+      <li>{{ fact }}</li>
+      {% else %}
+      <li class="muted">No known info recorded yet.</li>
+      {% endfor %}
+    </ul>
+
+    {% if row.todos %}
+    <div class="wiki-todo-panel">
+      <h3><span class="wiki-todo">todo</span> Missing Info</h3>
+      <ul class="wiki-todo-list">
+        {% for todo in row.todos %}
+        <li><span class="wiki-todo">todo</span> {{ todo }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <h2>Edit Section</h2>
+    <form method="post" action="{{ url_for('wiki.edit_article', slug=row.article.slug) }}" class="grid-form">
+      <div class="grid-two">
+        <label>Title
+          <input name="title" value="{{ form_values.title }}" required />
+        </label>
+        <label>Category
+          <input name="category" value="{{ form_values.category }}" />
+        </label>
+      </div>
+      <label>Summary
+        <textarea name="summary" rows="3" required>{{ form_values.summary }}</textarea>
+      </label>
+      <label>Known Info
+        <textarea name="content" rows="7">{{ form_values.content }}</textarea>
+      </label>
+      <label>Missing Info
+        <textarea name="todos" rows="5">{{ form_values.todos }}</textarea>
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="btn">Save Changes</button>
+      </div>
+    </form>
+
+    <form method="post" action="{{ url_for('wiki.delete_article', slug=row.article.slug) }}" class="wiki-delete-form">
+      <button type="submit" class="btn btn-danger">Delete Section</button>
+    </form>
+  </article>
+</section>
+{% endblock %}
