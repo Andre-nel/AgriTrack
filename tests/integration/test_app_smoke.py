@@ -2250,6 +2250,9 @@ def test_mob_balance_edit_reclassifies_and_records_change(client, app):
 
         mob_event = MobEvent.query.filter_by(mob_id=mob_id).first()
         assert mob_event is not None
+        assert mob_event.tags_csv == (
+            "stock,balance edit,reclassification,adjustment out,adjustment in,stock adjustment"
+        )
         assert "ram" in mob_event.description
         assert "wether" in mob_event.description
         assert "lamb" in mob_event.description
@@ -2312,6 +2315,49 @@ def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
     assert 'name="allocation_paddock_id"' in body
     assert "All current paddocks" in body
     assert f'<option value="{paddock_id}">Default North Camp</option>' in body
+
+
+def test_adjust_stock_card_records_log_note_on_mob_detail(client, app):
+    with app.app_context():
+        farm = Farm(name="Adjust Log Farm", timezone="SAST")
+        db.session.add(farm)
+        db.session.flush()
+
+        mob = Mob(farm_id=farm.id, name="Adjust Log Mob", status="active")
+        group = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add_all([mob, group])
+        db.session.flush()
+        db.session.add(
+            AnimalGroupBalance(
+                mob_id=mob.id,
+                animal_group_type_id=group.id,
+                head_count=5,
+            )
+        )
+        db.session.commit()
+        mob_id = str(mob.id)
+
+    response = client.post(
+        f"/mobs/{mob_id}/adjust",
+        data={
+            "species": "Sheep",
+            "breed": "Merino",
+            "sex": "ewe",
+            "age_class": "adult",
+            "event_type": "death",
+            "quantity": "2",
+            "note": "Predator loss confirmed",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    body = response.data.decode("utf-8")
+    assert "Mob Comments / Log Notes" in body
+    assert "stock, death, stock adjustment" in body
+    assert "Stock death recorded for Sheep | Merino | ewe | adult: -2 head." in body
+    assert "Balance 5 -&gt; 3 head." in body
+    assert "Predator loss confirmed" in body
 
 
 def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):

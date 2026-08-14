@@ -47,6 +47,7 @@ def test_adjust_mob_stock_from_form_count_match_posts_no_ledger(app):
 
         assert message == "Count matches current balance. No stock adjustment posted."
         assert StockLedgerEntry.query.count() == 0
+        assert MobEvent.query.count() == 0
 
 
 def test_adjust_mob_stock_from_form_count_posts_delta_and_reports_resolution(app):
@@ -73,6 +74,7 @@ def test_adjust_mob_stock_from_form_count_posts_delta_and_reports_resolution(app
             mob_id=mob.id,
             animal_group_type_id=group_type.id,
         ).first()
+        event = MobEvent.query.filter_by(mob_id=mob.id).first()
 
         assert message == "Count set to 10. Posted adjustment_in of 8."
         assert balance is not None
@@ -80,6 +82,42 @@ def test_adjust_mob_stock_from_form_count_posts_delta_and_reports_resolution(app
         assert ledger is not None
         assert ledger.event_type.value == "adjustment_in"
         assert ledger.quantity == 8
+        assert event is not None
+        assert event.event_at == ledger.event_time
+        assert event.tags_csv == "stock,count,adjustment in,stock adjustment"
+        assert "Stock count recorded for Sheep | Merino | ewe | adult: 2 -> 10 head." in event.description
+        assert "Posted adjustment in of 8." in event.description
+
+
+def test_adjust_mob_stock_from_form_records_log_note_with_event_type_tags(app):
+    with app.app_context():
+        mob, group_type = _create_mob_with_balance(head_count=5)
+
+        message = adjust_mob_stock_from_form(
+            mob,
+            {
+                "species": "Sheep",
+                "breed": "Merino",
+                "sex": "ewe",
+                "age_class": "adult",
+                "event_type": "death",
+                "quantity": "2",
+                "note": "Predator loss confirmed",
+            },
+        )
+
+        balance = AnimalGroupBalance.query.filter_by(
+            mob_id=mob.id,
+            animal_group_type_id=group_type.id,
+        ).first()
+        event = MobEvent.query.filter_by(mob_id=mob.id).one()
+
+        assert message == "Stock updated"
+        assert balance.head_count == 3
+        assert event.tags_csv == "stock,death,stock adjustment"
+        assert "Stock death recorded for Sheep | Merino | ewe | adult: -2 head." in event.description
+        assert "Balance 5 -> 3 head." in event.description
+        assert "Predator loss confirmed" in event.description
 
 
 def test_update_mob_balance_line_from_form_updates_balance_and_records_event(app):
@@ -107,6 +145,7 @@ def test_update_mob_balance_line_from_form_updates_balance_and_records_event(app
         assert balance.head_count == 7
         assert StockLedgerEntry.query.count() == 1
         assert event is not None
+        assert event.tags_csv == "stock,balance edit,head adjustment,adjustment in,stock adjustment"
         assert "body condition improved" in event.description
 
 
