@@ -51,7 +51,7 @@ Extracted from `legacy_web` so far:
 - `grazing.routes`: grazing management analytics page and chart payload helpers.
 - `mobs.routes`: mob detail, stock adjustment, movement, transfer, split, and archive forms.
 - `paddocks.routes`: paddock detail, carrying capacity, rename, and bulk mob movement forms.
-- `wiki.routes`: private farm knowledge wiki page.
+- `wiki.routes`: Markdown-backed private farm knowledge wiki pages.
 
 Second-pass decomposition now started:
 

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title }} | Wiki | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-actions">
+    <a class="btn btn-secondary" href="{{ url_for('wiki.index') }}">Back To Wiki</a>
+  </div>
+  <h1>{{ page.title }}</h1>
+  <p>{{ page.excerpt }}</p>
+</section>
+
+<nav class="wiki-breadcrumbs" aria-label="Breadcrumbs">
+  {% for crumb in breadcrumbs %}
+  {% if crumb.url %}
+  <a href="{{ crumb.url }}">{{ crumb.label }}</a>
+  {% else %}
+  <span>{{ crumb.label }}</span>
+  {% endif %}
+  {% if not loop.last %}<span>/</span>{% endif %}
+  {% endfor %}
+</nav>
+
+<section class="wiki-page-layout">
+  <aside class="card wiki-index">
+    <h2>Metadata</h2>
+    <dl class="task-detail-grid wiki-metadata-grid">
+      <div><dt>ID</dt><dd>{{ page.id }}</dd></div>
+      <div><dt>Status</dt><dd><span class="wiki-status wiki-status-{{ page.status }}">{{ page.status }}</span></dd></div>
+      <div><dt>Risk</dt><dd>{{ page.risk_level }}</dd></div>
+      <div><dt>Type</dt><dd>{{ page.page_type }}</dd></div>
+      <div><dt>Source</dt><dd>docs/wiki/{{ page.relative_path }}</dd></div>
+      <div><dt>Updated</dt><dd>{{ page.updated_at }}</dd></div>
+    </dl>
+
+    <h2>Tags</h2>
+    <div class="task-chip-row">
+      {% for tag in page.tags %}
+      <span class="tag-pill">{{ tag }}</span>
+      {% else %}
+      <span class="tag-pill">untagged</span>
+      {% endfor %}
+    </div>
+
+    {% if page.toc %}
+    <h2>Contents</h2>
+    <ul class="link-list">
+      {% for heading in page.toc %}
+      <li><a href="#{{ heading.anchor }}">{{ heading.text }}</a></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if backlinks %}
+    <h2>Backlinks</h2>
+    <ul class="link-list">
+      {% for backlink in backlinks %}
+      <li><a href="{{ url_for('wiki.detail', page_id=backlink.id) }}">{{ backlink.title }}</a></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </aside>
+
+  <article class="card wiki-document">
+    <div class="wiki-badge-row">
+      <span class="wiki-status wiki-status-{{ page.status }}">{{ page.status }}</span>
+      <span class="wiki-risk">{{ page.risk_level }}</span>
+      <span class="wiki-risk">{{ page.page_type }}</span>
+    </div>
+    {{ page.html | safe }}
+
+    {% if validation_errors %}
+    <div class="wiki-todo-panel">
+      <h2><span class="wiki-todo">todo</span> Validation</h2>
+      <ul class="wiki-todo-list">
+        {% for error in validation_errors %}
+        <li><span class="wiki-todo">todo</span> {{ error }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

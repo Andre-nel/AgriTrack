@@ -3,13 +3,14 @@
 {% block content %}
 <section class="hero">
   <h1>Farm Wiki</h1>
-  <p>Knowledge, treatment notes, and operational tips for the farming operation.</p>
+  <p>Git-backed farm knowledge pages, draft protocols, observations, and unresolved todo notes.</p>
 </section>
 
 <div class="cards wiki-summary-grid">
-  <article class="card stat"><h2>Sections</h2><p>{{ summary.article_count }}</p></article>
-  <article class="card stat"><h2>Categories</h2><p>{{ summary.category_count }}</p></article>
-  <article class="card stat"><h2>Missing Info</h2><p>{{ summary.todo_count }}</p></article>
+  <article class="card stat"><h2>Pages</h2><p>{{ summary.page_count }}</p></article>
+  <article class="card stat"><h2>Tags</h2><p>{{ summary.tag_count }}</p></article>
+  <article class="card stat"><h2>Drafts</h2><p>{{ summary.draft_count }}</p></article>
+  <article class="card stat"><h2>Checks</h2><p>{{ summary.validation_error_count }}</p></article>
 </div>
 
 <section class="split">
@@ -27,91 +28,70 @@
   </article>
 
   <article class="card">
-    <h2>Create Wiki Section</h2>
-    <form method="post" action="{{ url_for('wiki.create_article') }}" class="grid-form">
-      <div class="grid-two">
-        <label>Title
-          <input name="title" value="{{ form_values.title }}" placeholder="Dose schedule" required />
-        </label>
-        <label>Category
-          <input name="category" value="{{ form_values.category }}" placeholder="Sheep" />
-        </label>
-      </div>
-      <label>Summary
-        <textarea name="summary" rows="3" required>{{ form_values.summary }}</textarea>
-      </label>
-      <label>Known Info
-        <textarea name="content" rows="5" placeholder="One fact per line.">{{ form_values.content }}</textarea>
-      </label>
-      <label>Missing Info
-        <textarea name="todos" rows="4" placeholder="One todo per line.">{{ form_values.todos }}</textarea>
-      </label>
-      <button type="submit" class="btn">Save Section</button>
-    </form>
+    <h2>Tags</h2>
+    <div class="task-chip-row">
+      {% for row in tag_rows %}
+      <span class="tag-pill">{{ row.tag }} {{ row.count }}</span>
+      {% else %}
+      <span class="tag-pill">untagged</span>
+      {% endfor %}
+    </div>
   </article>
 </section>
 
 <section class="wiki-layout">
   <aside class="card wiki-index" aria-label="Wiki index">
-    <h2>Index</h2>
-    {% for category in category_rows %}
+    <h2>Page Tree</h2>
+    {% for group in tree_rows %}
     <div class="wiki-index-group">
-      <h3>{{ category.name }}</h3>
+      <h3>{{ group.group }}</h3>
       <ul class="link-list">
-        {% for article in category.articles %}
-        <li><a href="#{{ article.slug }}">{{ article.title }}</a></li>
+        {% for page in group.pages %}
+        <li><a href="#{{ page.id }}">{{ page.title }}</a></li>
         {% endfor %}
       </ul>
     </div>
     {% else %}
-    <p class="muted">No matching wiki sections.</p>
+    <p class="muted">No matching wiki pages.</p>
     {% endfor %}
+
+    <h2>Recently Updated</h2>
+    <ul class="link-list">
+      {% for page in recent_pages %}
+      <li><a href="{{ url_for('wiki.detail', page_id=page.id) }}">{{ page.title }}</a></li>
+      {% endfor %}
+    </ul>
   </aside>
 
   <div class="wiki-section-list">
-    {% for row in article_rows %}
-    {% set article = row.article %}
-    <article class="card wiki-entry" id="{{ article.slug }}">
+    {% for page in page_rows %}
+    <article class="card wiki-entry" id="{{ page.id }}">
       <div class="task-section-heading">
         <div>
-          <span class="space-key">{{ article.category }}</span>
-          <h2><a href="{{ url_for('wiki.detail', slug=article.slug) }}">{{ article.title }}</a></h2>
+          <span class="space-key">{{ page.page_type }}</span>
+          <h2><a href="{{ url_for('wiki.detail', page_id=page.id) }}">{{ page.title }}</a></h2>
         </div>
-        {% if row.todo_count %}
-        <span class="wiki-todo-count">{{ row.todo_count }} todo{{ "" if row.todo_count == 1 else "s" }}</span>
-        {% endif %}
+        <div class="wiki-badge-row">
+          <span class="wiki-status wiki-status-{{ page.status }}">{{ page.status }}</span>
+          <span class="wiki-risk">{{ page.risk_level }}</span>
+        </div>
       </div>
 
-      <p class="text-body">{{ article.summary }}</p>
-
-      <h3>Known Info</h3>
-      <ul class="wiki-fact-list">
-        {% for fact in row.facts %}
-        <li>{{ fact }}</li>
-        {% else %}
-        <li class="muted">No known info recorded yet.</li>
+      <p class="text-body">{{ page.excerpt }}</p>
+      <div class="task-chip-row">
+        {% for tag in page.tags %}
+        <span class="tag-pill">{{ tag }}</span>
         {% endfor %}
-      </ul>
-
-      {% if row.todos %}
-      <div class="wiki-todo-panel">
-        <h3><span class="wiki-todo">todo</span> Missing Info</h3>
-        <ul class="wiki-todo-list">
-          {% for todo in row.todos %}
-          <li><span class="wiki-todo">todo</span> {{ todo }}</li>
-          {% endfor %}
-        </ul>
       </div>
-      {% endif %}
-
+      <p class="muted">Updated {{ page.updated_at }} | docs/wiki/{{ page.relative_path }}</p>
       <div class="row-actions wiki-entry-actions">
-        <a class="btn btn-secondary" href="{{ url_for('wiki.detail', slug=article.slug) }}">Open Section</a>
+        <a class="btn btn-secondary" href="{{ url_for('wiki.detail', page_id=page.id) }}">Open Page</a>
       </div>
     </article>
     {% else %}
     <article class="card">
-      <h2>No Wiki Sections Found</h2>
-      <p class="muted">Create a new section or clear the current search.</p>
+      <h2>No Wiki Pages Found</h2>
+      <p class="muted">Clear the search or add a Markdown page under docs/wiki.</p>
     </article>
     {% endfor %}
   </div>
