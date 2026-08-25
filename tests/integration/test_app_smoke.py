@@ -2417,6 +2417,7 @@ def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):
     assert body.index('class="mob-species-totals"') < body.index(
         "Select a balance line, then edit its sex, age class, and head count."
     )
+    assert "Its animal type is also loaded into Adjust Stock." in body
     assert "<span>Sheep</span><strong>12</strong> head" in body
     assert "Animal Groups" in body
     assert "Sheep | Merino | ewe | adult:" in body
