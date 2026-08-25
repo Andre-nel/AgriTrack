@@ -9,7 +9,7 @@
   <div>
     <p class="space-key">{{ space.key }}</p>
     <h1>{{ space.name }}</h1>
-    <p class="muted">Farm: {{ space.farm.name }} ({{ space.farm.timezone }})</p>
+    <p class="muted">Farms: {{ space.farm_label }} (primary timezone: {{ space.farm.timezone if space.farm else "SAST" }})</p>
     <p class="text-body">{{ space.description }}</p>
   </div>
   <div class="task-summary-grid">
@@ -26,10 +26,10 @@
   <article class="card">
     <h2>Edit Space</h2>
     <form method="post" action="{{ url_for('tasks.edit_space', space_id=space.id) }}" class="grid-form">
-      <label>Farm
-        <select name="farm_id" required>
+      <label>Farms
+        <select name="farm_ids" multiple size="5" required>
           {% for farm in farms %}
-          <option value="{{ farm.id }}" {% if farm.id == space.farm_id %}selected{% endif %}>{{ farm.name }}</option>
+          <option value="{{ farm.id }}" {% if farm.id|string in space.farm_ids %}selected{% endif %}>{{ farm.name }}</option>
           {% endfor %}
         </select>
       </label>

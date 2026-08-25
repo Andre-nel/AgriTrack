@@ -36,9 +36,8 @@
   <article class="card">
     <h2>Create Space</h2>
     <form method="post" action="{{ url_for('tasks.create_space') }}" class="grid-form">
-      <label>Farm
-        <select name="farm_id" required>
-          <option value="">Select a farm</option>
+      <label>Farms
+        <select name="farm_ids" multiple size="5" required>
           {% for farm in farms %}
           <option value="{{ farm.id }}" {% if selected_farm_id == farm.id %}selected{% endif %}>{{ farm.name }}</option>
           {% endfor %}
@@ -73,6 +72,7 @@
       <article class="card task-space-card">
         <p class="space-key">{{ space.key }}</p>
         <h3><a href="{{ url_for('tasks.space_detail', space_id=space.id) }}">{{ space.name }}</a></h3>
+        <p class="muted">{{ space.farm_label }}</p>
         <p class="muted text-body">{{ space.description }}</p>
         <div class="task-mini-metrics">
           <div><strong>{{ space.summary.todo_count }}</strong><span>TO DO</span></div>

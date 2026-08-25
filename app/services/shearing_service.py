@@ -1096,6 +1096,8 @@ class ShearingService:
             return {"labels": [], "panels": []}
 
         labels = [row["code"] for row in rows]
+        age_revenue_rows = cls.bale_revenue_by_age_group(session)
+        stain_revenue_rows = cls.bale_revenue_by_stain_class(session)
 
         def average_kg(row: dict) -> float | None:
             if not row["bale_count"]:
@@ -1133,6 +1135,48 @@ class ShearingService:
                 "datasets": [{"label": "Revenue", "values": [row["total_price"] for row in rows]}],
             },
             {
+                "id": "bale-revenue-age-group",
+                "title": "Revenue By Age Group",
+                "chart_type": "bar",
+                "value_format": "money",
+                "labels": [row["label"] for row in age_revenue_rows],
+                "y_axis_label": "Revenue",
+                "datasets": [
+                    {
+                        "label": "Revenue",
+                        "values": [row["total_price"] for row in age_revenue_rows],
+                    }
+                ],
+            },
+            {
+                "id": "bale-price-age-group",
+                "title": "R/kg By Age Group",
+                "chart_type": "bar",
+                "value_format": "price",
+                "labels": [row["label"] for row in age_revenue_rows],
+                "y_axis_label": "R/kg",
+                "datasets": [
+                    {
+                        "label": "R/kg",
+                        "values": [row["average_price_per_kg"] for row in age_revenue_rows],
+                    }
+                ],
+            },
+            {
+                "id": "bale-revenue-stain-class",
+                "title": "Revenue By LOX/Stain Class",
+                "chart_type": "bar",
+                "value_format": "money",
+                "labels": [row["label"] for row in stain_revenue_rows],
+                "y_axis_label": "Revenue",
+                "datasets": [
+                    {
+                        "label": "Revenue",
+                        "values": [row["total_price"] for row in stain_revenue_rows],
+                    }
+                ],
+            },
+            {
                 "id": "bale-average-kg",
                 "title": "Average Kg Per Bale",
                 "chart_type": "bar",
@@ -1163,6 +1207,124 @@ class ShearingService:
             },
         ]
         return {"labels": labels, "panels": panels}
+
+    @classmethod
+    def bale_revenue_by_age_group(cls, session: ShearingSession) -> list[dict]:
+        revenue_by_group = {
+            "kids": Decimal("0.00"),
+            "young": Decimal("0.00"),
+            "adult": Decimal("0.00"),
+        }
+        priced_weight_by_group = {
+            "kids": Decimal("0.000"),
+            "young": Decimal("0.000"),
+            "adult": Decimal("0.000"),
+        }
+        ratio_weight_by_group = {
+            "young": Decimal("0.000"),
+            "adult": Decimal("0.000"),
+        }
+        shared_lox_stn_revenue = Decimal("0.00")
+        shared_lox_stn_priced_weight = Decimal("0.000")
+
+        for bale in cls.sorted_bales(session.bales):
+            code_key = cls._bale_code_analysis_key(bale)
+            amount = Decimal(bale.total_price or 0) if bale.total_price is not None else Decimal("0.00")
+            weight = Decimal(bale.weight_kg or 0)
+            age_group = cls._bale_age_revenue_group(code_key)
+            if age_group is not None:
+                revenue_by_group[age_group] += amount
+                if bale.total_price is not None:
+                    priced_weight_by_group[age_group] += weight
+                if age_group in ratio_weight_by_group:
+                    ratio_weight_by_group[age_group] += weight
+            elif cls._bale_stain_revenue_class(cls._bale_stain_analysis_key(bale)) in {
+                "lox",
+                "stn",
+            }:
+                shared_lox_stn_revenue += amount
+                if bale.total_price is not None:
+                    shared_lox_stn_priced_weight += weight
+
+        ratio_weight = ratio_weight_by_group["young"] + ratio_weight_by_group["adult"]
+        if (shared_lox_stn_revenue > 0 or shared_lox_stn_priced_weight > 0) and ratio_weight > 0:
+            young_share = (
+                shared_lox_stn_revenue * ratio_weight_by_group["young"] / ratio_weight
+            ).quantize(cls.MONEY_QUANT, rounding=ROUND_HALF_UP)
+            adult_share = (shared_lox_stn_revenue - young_share).quantize(
+                cls.MONEY_QUANT,
+                rounding=ROUND_HALF_UP,
+            )
+            revenue_by_group["young"] += young_share
+            revenue_by_group["adult"] += adult_share
+            young_weight_share = (
+                shared_lox_stn_priced_weight * ratio_weight_by_group["young"] / ratio_weight
+            )
+            adult_weight_share = shared_lox_stn_priced_weight - young_weight_share
+            priced_weight_by_group["young"] += young_weight_share
+            priced_weight_by_group["adult"] += adult_weight_share
+
+        return [
+            {
+                "key": "kids",
+                "label": "Kids",
+                "total_price": cls._money_float(revenue_by_group["kids"]),
+                "priced_kg": cls._weight_float(priced_weight_by_group["kids"]),
+                "average_price_per_kg": cls._rate_float(
+                    revenue_by_group["kids"],
+                    priced_weight_by_group["kids"],
+                ),
+            },
+            {
+                "key": "young",
+                "label": "Young",
+                "total_price": cls._money_float(revenue_by_group["young"]),
+                "priced_kg": cls._weight_float(priced_weight_by_group["young"]),
+                "average_price_per_kg": cls._rate_float(
+                    revenue_by_group["young"],
+                    priced_weight_by_group["young"],
+                ),
+            },
+            {
+                "key": "adult",
+                "label": "Adult",
+                "total_price": cls._money_float(revenue_by_group["adult"]),
+                "priced_kg": cls._weight_float(priced_weight_by_group["adult"]),
+                "average_price_per_kg": cls._rate_float(
+                    revenue_by_group["adult"],
+                    priced_weight_by_group["adult"],
+                ),
+            },
+        ]
+
+    @classmethod
+    def bale_revenue_by_stain_class(cls, session: ShearingSession) -> list[dict]:
+        revenue_by_class = {
+            "non_lox_stain": Decimal("0.00"),
+            "stn": Decimal("0.00"),
+            "lox": Decimal("0.00"),
+        }
+        for bale in cls.sorted_bales(session.bales):
+            amount = Decimal(bale.total_price or 0) if bale.total_price is not None else Decimal("0.00")
+            revenue_by_class[cls._bale_stain_revenue_class(cls._bale_stain_analysis_key(bale))] += amount
+
+        return [
+            {
+                "key": "non_lox_stain",
+                "label": "Non LOX/Stain",
+                "total_price": cls._money_float(revenue_by_class["non_lox_stain"]),
+            },
+            {
+                "key": "stn",
+                "label": "STN",
+                "total_price": cls._money_float(revenue_by_class["stn"]),
+            },
+            {
+                "key": "lox",
+                "label": "LOX",
+                "total_price": cls._money_float(revenue_by_class["lox"]),
+            },
+        ]
 
     @classmethod
     def entry_amount(cls, session: ShearingSession, entry: ShearingEntry) -> Decimal:
@@ -1226,6 +1388,52 @@ class ShearingService:
                 bale.created_at,
             ),
         )
+
+    @staticmethod
+    def _bale_code_analysis_key(bale: ShearingBale) -> str:
+        code = bale.bale_code.code if bale.bale_code else bale.code_text
+        return str(code or "").casefold()
+
+    @staticmethod
+    def _bale_stain_analysis_key(bale: ShearingBale) -> str:
+        code = bale.bale_code.code if bale.bale_code else bale.code_text
+        fault = bale.bale_code.fault if bale.bale_code else ""
+        return f"{code or ''} {fault or ''}".casefold()
+
+    @staticmethod
+    def _bale_age_revenue_group(code_key: str) -> str | None:
+        compact_code = "".join(char for char in code_key if char.isalnum())
+        if compact_code == "adhoc":
+            return None
+        if "k" in code_key:
+            return "kids"
+        if "yg" in code_key:
+            return "young"
+        if "h" in code_key:
+            return "adult"
+        return None
+
+    @staticmethod
+    def _bale_stain_revenue_class(code_key: str) -> str:
+        if "stn" in code_key:
+            return "stn"
+        if "lox" in code_key:
+            return "lox"
+        return "non_lox_stain"
+
+    @classmethod
+    def _money_float(cls, value: Decimal) -> float:
+        return float(value.quantize(cls.MONEY_QUANT, rounding=ROUND_HALF_UP))
+
+    @classmethod
+    def _weight_float(cls, value: Decimal) -> float:
+        return float(value.quantize(cls.WEIGHT_QUANT, rounding=ROUND_HALF_UP))
+
+    @classmethod
+    def _rate_float(cls, total_price: Decimal, priced_weight: Decimal) -> float | None:
+        if priced_weight <= 0:
+            return None
+        return float((total_price / priced_weight).quantize(cls.RATE_QUANT, rounding=ROUND_HALF_UP))
 
     @classmethod
     def bale_codes_for_species(cls, species: str | None = None, *, active_only: bool = False) -> list[ShearingBaleCode]:

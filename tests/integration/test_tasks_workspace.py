@@ -13,6 +13,7 @@ from app.models import (
     TaskLink,
     TaskSpace,
     TaskSpaceComment,
+    TaskSpaceFarm,
     TaskStatusTransition,
     WaterAsset,
 )
@@ -28,6 +29,7 @@ def _create_farm(name: str) -> Farm:
 
 def _create_space(farm: Farm, key: str, name: str) -> TaskSpace:
     space = TaskSpace(farm_id=farm.id, key=key, name=name, description=f"{name} description")
+    space.farm_links = [TaskSpaceFarm(farm=farm, sort_order=0)]
     db.session.add(space)
     db.session.flush()
     return space
@@ -211,6 +213,79 @@ def test_tasks_landing_can_create_space(client, app):
         space = TaskSpace.query.filter_by(key="OPS").first()
         assert space is not None
         assert space.name == "Operations"
+
+
+def test_tasks_landing_can_create_space_for_multiple_farms(client, app):
+    with app.app_context():
+        primary_farm = _create_farm("Primary Task Farm")
+        secondary_farm = _create_farm("Secondary Task Farm")
+        secondary_paddock = Paddock(
+            farm_id=secondary_farm.id,
+            name="Secondary Task Camp",
+            area_ha=14,
+            grazeable_area_ha=12,
+        )
+        db.session.add(secondary_paddock)
+        db.session.commit()
+        primary_farm_id = str(primary_farm.id)
+        secondary_farm_id = str(secondary_farm.id)
+        secondary_paddock_id = str(secondary_paddock.id)
+
+    landing = client.get("/tasks")
+    assert landing.status_code == 200
+    assert b'name="farm_ids" multiple' in landing.data
+
+    response = client.post(
+        "/tasks/spaces",
+        data={
+            "farm_ids": [primary_farm_id, secondary_farm_id],
+            "key": "multi",
+            "name": "Shared Operations",
+            "description": "Shared operational work across selected farms.",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "Shared Operations" in body
+    assert "Primary Task Farm, Secondary Task Farm" in body
+    assert "Secondary Task Camp" in body
+
+    with app.app_context():
+        space = TaskSpace.query.filter_by(key="MULTI").first()
+        assert space is not None
+        space_id = str(space.id)
+        assert str(space.farm_id) == primary_farm_id
+        links = TaskSpaceFarm.query.filter_by(space_id=space_id).order_by(TaskSpaceFarm.sort_order).all()
+        assert [str(link.farm_id) for link in links] == [primary_farm_id, secondary_farm_id]
+
+    filtered = client.get(f"/tasks?farm_id={secondary_farm_id}")
+    assert filtered.status_code == 200
+    assert b"Shared Operations" in filtered.data
+
+    task_response = client.post(
+        f"/tasks/spaces/{space_id}/tasks",
+        data={
+            "heading": "Inspect secondary camp",
+            "description": "Check the camp from the secondary farm.",
+            "tags": "field",
+            "reporter_name": "Ava",
+            "assignee_name": "",
+            "status": "todo",
+            "priority": "low",
+            "original_estimate_days": "",
+            "due_date": "",
+            "paddock_ids": [secondary_paddock_id],
+        },
+        follow_redirects=True,
+    )
+    assert task_response.status_code == 200
+    assert b"Inspect secondary camp" in task_response.data
+
+    with app.app_context():
+        task = Task.query.filter_by(heading="Inspect secondary camp").first()
+        assert task is not None
+        assert TaskEntityLink.query.filter_by(task_id=task.id, paddock_id=secondary_paddock_id).count() == 1
 
 
 def test_space_page_can_create_task_and_show_board(client, app):

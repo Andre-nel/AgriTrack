@@ -52,6 +52,7 @@ from app.models.task import (
     TaskLink,
     TaskSpace,
     TaskSpaceComment,
+    TaskSpaceFarm,
     TaskStatusTransition,
 )
 from app.models.user import User, UserFarmRole
@@ -111,6 +112,7 @@ __all__ = [
     "TaskLink",
     "TaskSpace",
     "TaskSpaceComment",
+    "TaskSpaceFarm",
     "TaskStatusTransition",
     "User",
     "UserFarmRole",

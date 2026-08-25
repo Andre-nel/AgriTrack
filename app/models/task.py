@@ -13,6 +13,12 @@ class TaskSpace(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     description = db.Column(db.Text, nullable=False)
 
     farm = db.relationship("Farm")
+    farm_links = db.relationship(
+        "TaskSpaceFarm",
+        back_populates="space",
+        cascade="all, delete-orphan",
+        order_by="TaskSpaceFarm.sort_order",
+    )
     tasks = db.relationship("Task", back_populates="space", cascade="all, delete-orphan")
     comments = db.relationship("TaskSpaceComment", back_populates="space", cascade="all, delete-orphan")
     outgoing_links = db.relationship(
@@ -25,6 +31,55 @@ class TaskSpace(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         "TaskLink",
         foreign_keys="TaskLink.target_space_id",
         back_populates="target_space",
+    )
+
+    @property
+    def farms(self) -> list:
+        farms = []
+        seen = set()
+        if self.farm is not None:
+            farms.append(self.farm)
+            seen.add(str(self.farm.id))
+        for link in self.farm_links:
+            if link.farm is None:
+                continue
+            farm_id = str(link.farm.id)
+            if farm_id in seen:
+                continue
+            farms.append(link.farm)
+            seen.add(farm_id)
+        return farms
+
+    @property
+    def farm_ids(self) -> list[str]:
+        farm_ids = []
+        if self.farm_id:
+            farm_ids.append(str(self.farm_id))
+        for link in self.farm_links:
+            farm_id = str(link.farm_id) if link.farm_id else ""
+            if farm_id and farm_id not in farm_ids:
+                farm_ids.append(farm_id)
+        return farm_ids
+
+    @property
+    def farm_label(self) -> str:
+        names = [farm.name for farm in self.farms]
+        return ", ".join(names) if names else "Unassigned"
+
+
+class TaskSpaceFarm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "task_space_farms"
+
+    space_id = db.Column(db.String(36), db.ForeignKey("task_spaces.id"), nullable=False, index=True)
+    farm_id = db.Column(db.String(36), db.ForeignKey("farms.id"), nullable=False, index=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    space = db.relationship("TaskSpace", back_populates="farm_links")
+    farm = db.relationship("Farm")
+
+    __table_args__ = (
+        db.CheckConstraint("sort_order >= 0", name="ck_task_space_farm_sort_non_negative"),
+        db.UniqueConstraint("space_id", "farm_id", name="uq_task_space_farm"),
     )
 
 

@@ -386,6 +386,62 @@ def test_shearing_service_calculates_goat_revenue_per_animal_split(app):
         }
 
 
+def test_shearing_bale_chart_payload_splits_age_price_revenue_and_stain(app):
+    with app.app_context():
+        farm = Farm(name="Age Revenue Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        session = ShearingService.create_session(
+            farm_id=farm.id,
+            name="August mohair",
+            species="Goat",
+            start_date="2026-08-01",
+            lootjie_rate="10.00",
+        )
+
+        def record_bale(code: str, weight_kg: str, total_price: str) -> None:
+            bale_code = ShearingService.upsert_bale_code(species="Goat", code=code)
+            ShearingService.record_bale(
+                session=session,
+                bale_code=bale_code,
+                weight_kg=weight_kg,
+                total_price=total_price,
+            )
+
+        record_bale("K", "10", "100")
+        record_bale("KLOX", "5", "50")
+        record_bale("KSTN", "4", "40")
+        record_bale("YG-A", "30", "450")
+        record_bale("H-A", "70", "560")
+        record_bale("LOX", "10", "120")
+        record_bale("STN", "20", "180")
+        record_bale("AAX", "7", "70")
+
+        payload = ShearingService.bale_chart_payload(session)
+        age_panel = next(
+            panel for panel in payload["panels"] if panel["id"] == "bale-revenue-age-group"
+        )
+        age_price_panel = next(
+            panel for panel in payload["panels"] if panel["id"] == "bale-price-age-group"
+        )
+        stain_panel = next(
+            panel for panel in payload["panels"] if panel["id"] == "bale-revenue-stain-class"
+        )
+
+        assert age_panel["labels"] == ["Kids", "Young", "Adult"]
+        assert age_panel["datasets"] == [
+            {"label": "Revenue", "values": [190.0, 540.0, 770.0]}
+        ]
+        assert age_price_panel["labels"] == ["Kids", "Young", "Adult"]
+        assert age_price_panel["datasets"] == [
+            {"label": "R/kg", "values": [10.0, 13.8462, 8.4615]}
+        ]
+        assert stain_panel["labels"] == ["Non LOX/Stain", "STN", "LOX"]
+        assert stain_panel["datasets"] == [
+            {"label": "Revenue", "values": [1180.0, 220.0, 170.0]}
+        ]
+
+
 def test_shearing_analytics_report_summarizes_bales_codes_and_costs(app):
     with app.app_context():
         first_farm = Farm(name="Analytics Shearing Farm A", timezone="SAST", active=True)
@@ -738,6 +794,9 @@ def test_shearing_web_routes_create_session_shearer_and_entry(client, app):
     assert "Shearing Counts" in analytics_text
     assert "Bale Analytics" in analytics_text
     assert "Bales By Code" in analytics_text
+    assert "Revenue By Age Group" in analytics_text
+    assert "R/kg By Age Group" in analytics_text
+    assert "Revenue By LOX/Stain Class" in analytics_text
     assert 'class="shearing-chart-grid"' in analytics_text
 
 

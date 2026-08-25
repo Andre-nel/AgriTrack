@@ -298,6 +298,28 @@ class TaskService:
             raise ValueError(f"Selected {label} must belong to the task farm")
 
     @staticmethod
+    def farm_ids_for_space(space: TaskSpace | None) -> list[str]:
+        if space is None:
+            return []
+        farm_ids = []
+        if space.farm_id:
+            farm_ids.append(str(space.farm_id))
+        for link in getattr(space, "farm_links", []):
+            farm_id = str(link.farm_id) if link.farm_id else ""
+            if farm_id and farm_id not in farm_ids:
+                farm_ids.append(farm_id)
+        return farm_ids
+
+    @classmethod
+    def _require_space_farms(cls, rows: list, farm_ids: list[str], label: str) -> None:
+        if len(farm_ids) == 1:
+            cls._require_same_farm(rows, farm_ids[0], label)
+            return
+        allowed_farm_ids = set(farm_ids)
+        if any(str(row.farm_id) not in allowed_farm_ids for row in rows):
+            raise ValueError(f"Selected {label} must belong to one of the task space farms")
+
+    @staticmethod
     def _require_active_mobs(mobs: list[Mob]) -> None:
         if any(mob.status != "active" for mob in mobs):
             raise ValueError("Selected mobs must be active")
@@ -313,7 +335,7 @@ class TaskService:
         fence_section_ids=None,
     ) -> list[TaskEntityLink]:
         space = task.space or db.session.get(TaskSpace, task.space_id)
-        farm_id = space.farm_id
+        farm_ids = cls.farm_ids_for_space(space)
         normalized_paddock_ids = cls.normalize_entity_ids(paddock_ids)
         normalized_water_asset_ids = cls.normalize_entity_ids(water_asset_ids)
         normalized_mob_ids = cls.normalize_entity_ids(mob_ids)
@@ -323,10 +345,10 @@ class TaskService:
         water_assets = cls._rows_by_id(WaterAsset, normalized_water_asset_ids, "water assets")
         mobs = cls._rows_by_id(Mob, normalized_mob_ids, "mobs")
         fence_sections = cls._rows_by_id(FenceSection, normalized_fence_section_ids, "fence sections")
-        cls._require_same_farm(paddocks, farm_id, "paddocks")
-        cls._require_same_farm(water_assets, farm_id, "water assets")
-        cls._require_same_farm(mobs, farm_id, "mobs")
-        cls._require_same_farm(fence_sections, farm_id, "fence sections")
+        cls._require_space_farms(paddocks, farm_ids, "paddocks")
+        cls._require_space_farms(water_assets, farm_ids, "water assets")
+        cls._require_space_farms(mobs, farm_ids, "mobs")
+        cls._require_space_farms(fence_sections, farm_ids, "fence sections")
         cls._require_active_mobs(mobs)
 
         existing = {

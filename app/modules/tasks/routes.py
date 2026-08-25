@@ -22,6 +22,7 @@ from app.models import (
     TaskLink,
     TaskSpace,
     TaskSpaceComment,
+    TaskSpaceFarm,
     TaskStatusTransition,
     WaterAsset,
 )
@@ -105,9 +106,47 @@ def _source_list(source, *names: str) -> list[str]:
     return TaskService.normalize_entity_ids(values)
 
 
-def _farm_entity_options(farm_id: str | None) -> dict:
+def _farm_ids_from_source(source, *names: str) -> list[str]:
+    return _source_list(source, *names)
+
+
+def _space_filter_for_farm(query, farm_id: str):
+    return (
+        query.outerjoin(TaskSpaceFarm, TaskSpaceFarm.space_id == TaskSpace.id)
+        .filter(or_(TaskSpace.farm_id == farm_id, TaskSpaceFarm.farm_id == farm_id))
+        .distinct()
+    )
+
+
+def _load_task_space_farms(source) -> list[Farm]:
+    farm_ids = _farm_ids_from_source(source, "farm_ids", "farm_id")
+    if not farm_ids:
+        raise ValueError("Task space farm is required")
+    farms = Farm.query.filter(Farm.id.in_(farm_ids)).all()
+    farms_by_id = {str(farm.id): farm for farm in farms}
+    missing_farm_ids = [farm_id for farm_id in farm_ids if farm_id not in farms_by_id]
+    if missing_farm_ids:
+        raise ValueError("One or more selected task space farms were not found")
+    return [farms_by_id[farm_id] for farm_id in farm_ids]
+
+
+def _sync_space_farms(space: TaskSpace, farms: list[Farm]) -> None:
+    primary_farm = farms[0]
+    space.farm_id = primary_farm.id
+    space.farm_links = [
+        TaskSpaceFarm(farm=farm, sort_order=index)
+        for index, farm in enumerate(farms)
+    ]
+
+
+def _space_farm_ids(space: TaskSpace | None) -> list[str]:
+    return TaskService.farm_ids_for_space(space)
+
+
+def _farm_entity_options(farm_ids: str | list[str] | tuple[str, ...] | None) -> dict:
     if not _entity_tables_available():
         return {"paddocks": [], "water_assets": [], "mobs": [], "fence_sections": []}
+    normalized_farm_ids = TaskService.normalize_entity_ids(farm_ids)
     paddock_query = Paddock.query.order_by(Paddock.name.asc())
     water_asset_query = WaterAsset.query.order_by(WaterAsset.asset_type.asc(), WaterAsset.name.asc())
     mob_query = Mob.query.filter(Mob.status == "active").order_by(Mob.name.asc())
@@ -115,11 +154,11 @@ def _farm_entity_options(farm_id: str | None) -> dict:
         FenceSection.section_type.asc(),
         FenceSection.name.asc(),
     )
-    if farm_id:
-        paddock_query = paddock_query.filter(Paddock.farm_id == farm_id)
-        water_asset_query = water_asset_query.filter(WaterAsset.farm_id == farm_id)
-        mob_query = mob_query.filter(Mob.farm_id == farm_id)
-        fence_query = fence_query.filter(FenceSection.farm_id == farm_id, FenceSection.active.is_(True))
+    if normalized_farm_ids:
+        paddock_query = paddock_query.filter(Paddock.farm_id.in_(normalized_farm_ids))
+        water_asset_query = water_asset_query.filter(WaterAsset.farm_id.in_(normalized_farm_ids))
+        mob_query = mob_query.filter(Mob.farm_id.in_(normalized_farm_ids))
+        fence_query = fence_query.filter(FenceSection.farm_id.in_(normalized_farm_ids), FenceSection.active.is_(True))
     return {
         "paddocks": paddock_query.all(),
         "water_assets": water_asset_query.all(),
@@ -350,6 +389,7 @@ def _build_todo_task_rows(
     task_query = (
         Task.query.options(
             selectinload(Task.space).selectinload(TaskSpace.farm),
+            selectinload(Task.space).selectinload(TaskSpace.farm_links).selectinload(TaskSpaceFarm.farm),
             selectinload(Task.comments),
             selectinload(Task.attachments),
             selectinload(Task.entity_links).selectinload(TaskEntityLink.paddock),
@@ -362,7 +402,7 @@ def _build_todo_task_rows(
         .filter(or_(Task.due_date.is_(None), Task.due_date <= horizon_end))
     )
     if selected_farm_id:
-        task_query = task_query.filter(TaskSpace.farm_id == selected_farm_id)
+        task_query = _space_filter_for_farm(task_query, selected_farm_id)
 
     rows = []
     for task in task_query.all():
@@ -465,6 +505,7 @@ def _build_space_card(space: TaskSpace) -> dict:
         "id": space.id,
         "key": space.key,
         "name": space.name,
+        "farm_label": space.farm_label,
         "description": space.description,
         "summary": _build_space_summary(list(space.tasks), tz_name),
     }
@@ -472,7 +513,10 @@ def _build_space_card(space: TaskSpace) -> dict:
 
 def _load_space(space_id: str) -> TaskSpace:
     return (
-        TaskSpace.query.options(selectinload(TaskSpace.farm))
+        TaskSpace.query.options(
+            selectinload(TaskSpace.farm),
+            selectinload(TaskSpace.farm_links).selectinload(TaskSpaceFarm.farm),
+        )
         .filter_by(id=space_id)
         .first_or_404()
     )
@@ -480,7 +524,10 @@ def _load_space(space_id: str) -> TaskSpace:
 
 def _load_task(task_id: str) -> Task:
     return (
-        Task.query.options(selectinload(Task.space).selectinload(TaskSpace.farm))
+        Task.query.options(
+            selectinload(Task.space).selectinload(TaskSpace.farm),
+            selectinload(Task.space).selectinload(TaskSpace.farm_links).selectinload(TaskSpaceFarm.farm),
+        )
         .filter_by(id=task_id)
         .first_or_404()
     )
@@ -516,7 +563,14 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
 
     selected_space = None
     if selected_space_id:
-        selected_space = TaskSpace.query.options(selectinload(TaskSpace.farm)).filter_by(id=selected_space_id).first()
+        selected_space = (
+            TaskSpace.query.options(
+                selectinload(TaskSpace.farm),
+                selectinload(TaskSpace.farm_links).selectinload(TaskSpaceFarm.farm),
+            )
+            .filter_by(id=selected_space_id)
+            .first()
+        )
 
     selected_entity_farm_ids = []
     if _entity_tables_available():
@@ -575,12 +629,26 @@ def _build_new_task_form_values(source) -> tuple[dict, CalendarActivity | None]:
 
 def _render_new_task_form(*, form_values: dict, source_activity: CalendarActivity | None, status_code: int = 200):
     farms = Farm.query.order_by(Farm.name).all()
-    space_query = TaskSpace.query.options(selectinload(TaskSpace.farm)).order_by(TaskSpace.key)
+    selected_space = None
+    if form_values["space_id"]:
+        selected_space = (
+            TaskSpace.query.options(
+                selectinload(TaskSpace.farm),
+                selectinload(TaskSpace.farm_links).selectinload(TaskSpaceFarm.farm),
+            )
+            .filter_by(id=form_values["space_id"])
+            .first()
+        )
+    space_query = TaskSpace.query.options(
+        selectinload(TaskSpace.farm),
+        selectinload(TaskSpace.farm_links).selectinload(TaskSpaceFarm.farm),
+    ).order_by(TaskSpace.key)
     if form_values["farm_id"]:
-        space_query = space_query.filter(TaskSpace.farm_id == form_values["farm_id"])
+        space_query = _space_filter_for_farm(space_query, form_values["farm_id"])
     spaces = space_query.all()
     entity_linking_available = _entity_tables_available()
-    entity_options = _farm_entity_options(form_values["farm_id"])
+    entity_farm_ids = [form_values["farm_id"]] if form_values["farm_id"] else _space_farm_ids(selected_space)
+    entity_options = _farm_entity_options(entity_farm_ids)
     return (
         render_template(
             "tasks/new.html",
@@ -621,11 +689,13 @@ def _resolve_link_target(raw_space_id: str | None, raw_task_key: str | None):
 def index():
     selected_farm_id = (request.args.get("farm_id") or "").strip()
     farms = Farm.query.order_by(Farm.name).all()
-    space_query = TaskSpace.query.options(selectinload(TaskSpace.farm), selectinload(TaskSpace.tasks)).order_by(
-        TaskSpace.key
-    )
+    space_query = TaskSpace.query.options(
+        selectinload(TaskSpace.farm),
+        selectinload(TaskSpace.farm_links).selectinload(TaskSpaceFarm.farm),
+        selectinload(TaskSpace.tasks),
+    ).order_by(TaskSpace.key)
     if selected_farm_id:
-        space_query = space_query.filter(TaskSpace.farm_id == selected_farm_id)
+        space_query = _space_filter_for_farm(space_query, selected_farm_id)
     spaces = space_query.all()
 
     grouped = defaultdict(list)
@@ -639,7 +709,7 @@ def index():
     }
     for space in spaces:
         card = _build_space_card(space)
-        grouped[space.farm.name if space.farm else "Unassigned"].append(card)
+        grouped[space.farm_label].append(card)
         summary["space_count"] += 1
         summary["todo_count"] += card["summary"]["todo_count"]
         summary["active_open_count"] += card["summary"]["active_open_count"]
@@ -718,10 +788,17 @@ def create_task_from_page():
     form_values, source_activity = _build_new_task_form_values(request.form)
     try:
         space_id = form_values["space_id"]
-        selected_space = TaskSpace.query.options(selectinload(TaskSpace.farm)).filter_by(id=space_id).first()
+        selected_space = (
+            TaskSpace.query.options(
+                selectinload(TaskSpace.farm),
+                selectinload(TaskSpace.farm_links).selectinload(TaskSpaceFarm.farm),
+            )
+            .filter_by(id=space_id)
+            .first()
+        )
         if selected_space is None:
             raise ValueError("Task space is required")
-        if form_values["farm_id"] and selected_space.farm_id != form_values["farm_id"]:
+        if form_values["farm_id"] and form_values["farm_id"] not in _space_farm_ids(selected_space):
             raise ValueError("Task space must belong to the selected farm")
 
         task = TaskService.create_task(
@@ -755,17 +832,15 @@ def create_task_from_page():
 
 @bp.post("/tasks/spaces")
 def create_space():
-    farm_id = (request.form.get("farm_id") or "").strip()
-    redirect_kwargs = {"farm_id": farm_id} if farm_id else {}
+    farm_ids = _farm_ids_from_source(request.form, "farm_ids", "farm_id")
+    redirect_kwargs = {"farm_id": farm_ids[0]} if farm_ids else {}
     try:
-        farm = Farm.query.filter_by(id=farm_id).first()
-        if not farm:
-            raise ValueError("Task space farm is required")
+        farms = _load_task_space_farms(request.form)
         key = TaskService.normalize_space_key(request.form.get("key"))
         if TaskSpace.query.filter_by(key=key).first():
             raise ValueError("Task space key already exists")
         space = TaskSpace(
-            farm_id=farm.id,
+            farm_id=farms[0].id,
             key=key,
             name=TaskService.require_text(request.form.get("name"), "Task space name", 120),
             description=TaskService.require_text(
@@ -774,6 +849,7 @@ def create_space():
                 TaskService.MAX_DESCRIPTION_LENGTH,
             ),
         )
+        _sync_space_farms(space, farms)
         db.session.add(space)
         db.session.commit()
         flash("Task space created", "success")
@@ -823,7 +899,7 @@ def space_detail(space_id: str):
         comment_rows=_build_comment_rows(comments, tz_name),
         link_rows=_build_link_rows(links, current_space=space),
         entity_linking_available=_entity_tables_available(),
-        entity_options=_farm_entity_options(space.farm_id),
+        entity_options=_farm_entity_options(_space_farm_ids(space)),
         available_spaces=TaskSpace.query.filter(TaskSpace.id != space.id).order_by(TaskSpace.key).all(),
     )
 
@@ -832,14 +908,11 @@ def space_detail(space_id: str):
 def edit_space(space_id: str):
     space = _load_space(space_id)
     try:
-        farm_id = (request.form.get("farm_id") or "").strip()
-        farm = Farm.query.filter_by(id=farm_id).first()
-        if not farm:
-            raise ValueError("Task space farm is required")
+        farms = _load_task_space_farms(request.form)
         key = TaskService.normalize_space_key(request.form.get("key"))
         if TaskSpace.query.filter(TaskSpace.key == key, TaskSpace.id != space.id).first():
             raise ValueError("Task space key already exists")
-        space.farm_id = farm.id
+        _sync_space_farms(space, farms)
         space.key = key
         space.name = TaskService.require_text(request.form.get("name"), "Task space name", 120)
         space.description = TaskService.require_text(
@@ -983,7 +1056,7 @@ def task_detail(task_id: str):
         link_rows=_build_link_rows(links, current_task=task),
         entity_link_rows=_build_entity_link_rows(entity_links),
         entity_linking_available=_entity_tables_available(),
-        entity_options=_farm_entity_options(task.space.farm_id),
+        entity_options=_farm_entity_options(_space_farm_ids(task.space)),
         priority_options=TASK_PRIORITIES,
         priority_labels=TASK_PRIORITY_LABELS,
         status_options=[status for status in TASK_STATUSES if status != task.status],

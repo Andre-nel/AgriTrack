@@ -80,7 +80,7 @@
           </div>
         </div>
         <p class="muted">
-          {{ item.task.space.farm.name }} | {{ item.task.space.key }} {{ item.task.space.name }} |
+          {{ item.task.space.farm_label }} | {{ item.task.space.key }} {{ item.task.space.name }} |
           Due {{ item.task_card.due_date or "unscheduled" }}
           {% if item.task_card.assignee_name %}| Assignee {{ item.task_card.assignee_name }}{% endif %}
         </p>
