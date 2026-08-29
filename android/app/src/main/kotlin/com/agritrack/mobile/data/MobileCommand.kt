@@ -256,11 +256,15 @@ data class MobileCommand(
             animalGroupTypeId: String,
             quantity: Int,
             note: String,
+            cohortId: String? = null,
         ): MobileCommand {
             val payload = JSONObject()
                 .put("mob_id", mobId)
                 .put("animal_group_type_id", animalGroupTypeId)
                 .put("quantity", quantity)
+            if (!cohortId.isNullOrBlank()) {
+                payload.put("cohort_id", cohortId)
+            }
             if (note.isNotBlank()) {
                 payload.put("note", note.trim())
             }
@@ -482,20 +486,22 @@ data class MobileCommand(
             sourceMobId: String,
             destinationMobId: String,
             animalGroupTypeId: String,
+            cohortId: String?,
             quantity: Int,
             note: String,
         ): MobileCommand {
+            val transfer = JSONObject()
+                .put("animal_group_type_id", animalGroupTypeId)
+                .put("quantity", quantity)
+            if (!cohortId.isNullOrBlank()) {
+                transfer.put("cohort_id", cohortId)
+            }
             val payload = JSONObject()
                 .put("source_mob_id", sourceMobId)
                 .put("destination_mob_id", destinationMobId)
                 .put(
                     "transfers",
-                    JSONArray()
-                        .put(
-                            JSONObject()
-                                .put("animal_group_type_id", animalGroupTypeId)
-                                .put("quantity", quantity)
-                        )
+                    JSONArray().put(transfer)
                 )
             if (note.isNotBlank()) {
                 payload.put("note", note.trim())

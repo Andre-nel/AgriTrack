@@ -260,6 +260,7 @@ class OfflineCommandQueueTest {
             animalGroupTypeId = "group-1",
             quantity = 42,
             note = "Counted at crush",
+            cohortId = "cohort-1",
         )
 
         val json = command.toJson()
@@ -268,6 +269,7 @@ class OfflineCommandQueueTest {
         assertEquals("stock_count.record", json.getString("type"))
         assertEquals("mob-1", payload.getString("mob_id"))
         assertEquals("group-1", payload.getString("animal_group_type_id"))
+        assertEquals("cohort-1", payload.getString("cohort_id"))
         assertEquals(42, payload.getInt("quantity"))
         assertEquals("Counted at crush", payload.getString("note"))
     }
@@ -485,6 +487,7 @@ class OfflineCommandQueueTest {
             sourceMobId = "mob-1",
             destinationMobId = "mob-2",
             animalGroupTypeId = "group-1",
+            cohortId = "cohort-1",
             quantity = 8,
             note = "Even up mobs",
         )
@@ -496,6 +499,7 @@ class OfflineCommandQueueTest {
         assertEquals("mob-1", payload.getString("source_mob_id"))
         assertEquals("mob-2", payload.getString("destination_mob_id"))
         assertEquals("group-1", transfer.getString("animal_group_type_id"))
+        assertEquals("cohort-1", transfer.getString("cohort_id"))
         assertEquals(8, transfer.getInt("quantity"))
     }
 

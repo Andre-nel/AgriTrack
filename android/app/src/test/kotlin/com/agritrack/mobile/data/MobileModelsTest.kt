@@ -43,6 +43,11 @@ class MobileModelsTest {
                                             JSONObject()
                                                 .put("id", "balance-1")
                                                 .put("animal_group_type_id", "group-1")
+                                                .put("cohort_id", "cohort-1")
+                                                .put("reproductive_state", "pregnant")
+                                                .put("expected_litter_size", "twins")
+                                                .put("lactation_state", "dry")
+                                                .put("offspring_at_foot", "none")
                                                 .put("head_count", 37)
                                                 .put(
                                                     "animal_group_type",
@@ -413,6 +418,13 @@ class MobileModelsTest {
         assertEquals(37, snapshot.mobs.first().balances.first().headCount)
         assertEquals(37.0, snapshot.mobs.first().totalLsu, 0.0)
         assertEquals("Cattle Bonsmara cow adult", snapshot.mobs.first().balances.first().animalGroupType.label)
+        assertEquals("cohort-1", snapshot.mobs.first().balances.first().cohortId)
+        assertEquals("pregnant", snapshot.mobs.first().balances.first().reproductiveState)
+        assertEquals("dry", snapshot.mobs.first().balances.first().lactationState)
+        assertEquals(
+            "Cattle Bonsmara cow adult | pregnant | expected twins | dry | offspring at foot: none",
+            snapshot.mobs.first().balances.first().displayLabel,
+        )
         assertEquals("Cattle Bonsmara cow adult", snapshot.grazingByPaddock.first().groupHeads.first().animalGroupType.label)
         assertEquals(37.0, snapshot.grazingByPaddock.first().groupHeads.first().head, 0.0)
         assertEquals("2026-05-24T12:00:00+00:00", snapshot.grazingByPaddock.first().mobs.first().startAt)

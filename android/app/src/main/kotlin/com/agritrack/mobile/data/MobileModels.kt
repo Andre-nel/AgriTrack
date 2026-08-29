@@ -97,7 +97,31 @@ data class MobBalanceSummary(
     val animalGroupTypeId: String,
     val animalGroupType: AnimalGroupTypeSummary,
     val headCount: Int,
-)
+    val cohortId: String? = null,
+    val reproductiveState: String = "not_recorded",
+    val expectedLitterSize: String = "not_recorded",
+    val lactationState: String = "not_recorded",
+    val offspringAtFoot: String = "not_recorded",
+) {
+    val displayLabel: String
+        get() {
+            val details = buildList {
+                if (reproductiveState != "not_recorded") {
+                    add(reproductiveState.replace('_', ' '))
+                }
+                if (expectedLitterSize != "not_recorded") {
+                    add("expected ${expectedLitterSize.replace('_', ' ')}")
+                }
+                if (lactationState != "not_recorded") {
+                    add(lactationState.replace('_', ' '))
+                }
+                if (offspringAtFoot != "not_recorded") {
+                    add("offspring at foot: ${offspringAtFoot.replace('_', ' ')}")
+                }
+            }
+            return listOf(animalGroupType.label, *details.toTypedArray()).joinToString(" | ")
+        }
+}
 
 data class MobSummary(
     val id: String,
@@ -718,6 +742,11 @@ data class FarmSnapshot(
                         animalGroupTypeId = groupId,
                         animalGroupType = parseAnimalGroupType(groupJson, groupId),
                         headCount = balance.optInt("head_count", 0),
+                        cohortId = balance.optString("cohort_id").takeIf { it.isNotBlank() },
+                        reproductiveState = balance.optString("reproductive_state", "not_recorded"),
+                        expectedLitterSize = balance.optString("expected_litter_size", "not_recorded"),
+                        lactationState = balance.optString("lactation_state", "not_recorded"),
+                        offspringAtFoot = balance.optString("offspring_at_foot", "not_recorded"),
                     )
                 )
             }

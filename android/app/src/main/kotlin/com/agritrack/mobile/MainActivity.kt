@@ -94,6 +94,7 @@ import com.agritrack.mobile.data.MapFeatureSummary
 import com.agritrack.mobile.data.MobileFormOptions
 import com.agritrack.mobile.data.MobileOption
 import com.agritrack.mobile.data.MobFilterState
+import com.agritrack.mobile.data.MobBalanceSummary
 import com.agritrack.mobile.data.MobMoveCountAllocation
 import com.agritrack.mobile.data.MobMoveGroupCount
 import com.agritrack.mobile.data.MobSummary
@@ -487,6 +488,7 @@ class MainActivity : ComponentActivity() {
                     onWaterAssetSelected = { uiState = selectWaterAsset(uiState, it) },
                     onFenceSectionSelected = { uiState = selectFenceSection(uiState, it) },
                     onAnimalGroupSelected = { uiState = selectAnimalGroup(uiState, it) },
+                    onTransferBalanceSelected = { uiState = selectTransferBalance(uiState, it) },
                     onMoveNoteChange = { uiState = uiState.copy(moveNote = it) },
                     onStockQuantityChange = { uiState = uiState.copy(stockQuantity = it) },
                     onStockNoteChange = { uiState = uiState.copy(stockNote = it) },
@@ -762,6 +764,7 @@ private data class FieldUiState(
     val editingShearingEntryId: String = "",
     val selectedShearerId: String = "",
     val selectedAnimalGroupTypeId: String = "",
+    val selectedTransferBalanceId: String = "",
     val selectedShearingBaleCodeId: String = "",
     val moveNote: String = "",
     val stockQuantity: String = "",
@@ -861,6 +864,7 @@ private data class FieldUiState(
                 selectedShearingSessionId = firstShearingSession?.id.orEmpty(),
                 selectedShearerId = firstShearer?.id.orEmpty(),
                 selectedAnimalGroupTypeId = firstBalance?.animalGroupTypeId.orEmpty(),
+                selectedTransferBalanceId = firstBalance?.id.orEmpty(),
                 selectedShearingBaleCodeId = firstBaleCode?.id.orEmpty(),
                 baleCodeSpecies = firstShearingSession?.species ?: firstBaleCode?.species ?: "Sheep",
                 stockQuantity = firstBalance?.headCount?.toString().orEmpty(),
@@ -932,6 +936,7 @@ private data class StockCountRowDraft(
     val label: String,
     val originalQuantity: Int,
     val quantity: String,
+    val cohortId: String? = null,
 )
 
 private data class NewStockGroupDraft(
@@ -1027,6 +1032,7 @@ private fun AgriTrackApp(
     onWaterAssetSelected: (String) -> Unit,
     onFenceSectionSelected: (String) -> Unit,
     onAnimalGroupSelected: (String) -> Unit,
+    onTransferBalanceSelected: (String) -> Unit,
     onMoveNoteChange: (String) -> Unit,
     onStockQuantityChange: (String) -> Unit,
     onStockNoteChange: (String) -> Unit,
@@ -1389,7 +1395,7 @@ private fun AgriTrackApp(
                     onBackHome,
                     onMobSelected,
                     onTransferDestinationChange,
-                    onAnimalGroupSelected,
+                    onTransferBalanceSelected,
                     onTransferQuantityChange,
                     onTransferNoteChange,
                     onQueueMobTransfer,
@@ -1951,7 +1957,8 @@ private fun mobPaddockAllocationCountLines(
     paddockId: String,
     allocationPct: Double,
 ): List<String> {
-    val balancesById = mob.balances.associateBy { it.animalGroupTypeId }
+    val balances = aggregateMobBalances(mob)
+    val balancesById = balances.associateBy { it.animalGroupTypeId }
     val allocation = snapshot.activeGrazing
         .firstOrNull { it.mobId == mob.id }
         ?.allocations
@@ -1966,7 +1973,7 @@ private fun mobPaddockAllocationCountLines(
     }
 
     val fraction = allocation?.allocationFraction ?: allocationPct / 100.0
-    return mob.balances.mapNotNull { balance ->
+    return balances.mapNotNull { balance ->
         val head = balance.headCount * fraction
         if (head <= 0.0) return@mapNotNull null
         "${balance.animalGroupType.label}: ${formatHeadCount(head)} head (percentage-derived)"
@@ -4400,7 +4407,8 @@ private fun MoveMobScreen(
         val snapshot = state.snapshot
         val paddocks = snapshot?.paddocks.orEmpty()
         val mob = selectedMob(state)
-        val balanceKey = mob?.balances?.joinToString("|") { "${it.animalGroupTypeId}:${it.headCount}" }.orEmpty()
+        val allocationBalances = aggregateMobBalances(mob)
+        val balanceKey = allocationBalances.joinToString("|") { "${it.animalGroupTypeId}:${it.headCount}" }
         var allocations by remember(state.selectedMobId, snapshot?.farm?.id) {
             mutableStateOf(initialMoveAllocations(snapshot, state.selectedMobId, state.selectedPaddockId))
         }
@@ -4501,7 +4509,7 @@ private fun MoveMobScreen(
                             rows[index] = rows[index].copy(paddockId = paddockId)
                         }
                     })
-                    mob?.balances.orEmpty().forEach { balance ->
+                    allocationBalances.forEach { balance ->
                         OutlinedTextField(
                             allocation.groupCounts[balance.animalGroupTypeId].orEmpty(),
                             { value ->
@@ -4540,7 +4548,7 @@ private fun MoveMobScreen(
                             val nextPaddock = paddocks.firstOrNull { it.id !in used }?.id.orEmpty()
                             countAllocations = countAllocations + CountMoveAllocationDraft(
                                 paddockId = nextPaddock,
-                                groupCounts = mob?.balances.orEmpty().associate { it.animalGroupTypeId to "0" },
+                                groupCounts = allocationBalances.associate { it.animalGroupTypeId to "0" },
                             )
                         },
                         enabled = paddocks.isNotEmpty() && mob?.balances.orEmpty().isNotEmpty(),
@@ -4664,7 +4672,7 @@ private fun TransferMobScreen(
     onBackHome: () -> Unit,
     onMobSelected: (String) -> Unit,
     onTransferDestinationChange: (String) -> Unit,
-    onAnimalGroupSelected: (String) -> Unit,
+    onTransferBalanceSelected: (String) -> Unit,
     onTransferQuantityChange: (String) -> Unit,
     onTransferNoteChange: (String) -> Unit,
     onQueueMobTransfer: () -> Unit,
@@ -4677,7 +4685,11 @@ private fun TransferMobScreen(
             onTransferDestinationChange,
             label = "Destination mob",
         )
-        AnimalGroupPicker(state.animalGroupTypes, state.selectedAnimalGroupTypeId, onAnimalGroupSelected)
+        CohortBalancePicker(
+            selectedMob(state)?.balances.orEmpty(),
+            state.selectedTransferBalanceId,
+            onTransferBalanceSelected,
+        )
         OutlinedTextField(
             state.transferQuantity,
             onTransferQuantityChange,
@@ -4906,6 +4918,33 @@ private fun AnimalGroupPicker(
     Picker("Animal group", selected?.label ?: "No animal groups", animalGroupTypes.isNotEmpty(), expanded, { expanded = it }) {
         animalGroupTypes.forEach { group ->
             DropdownMenuItem(text = { Text(group.label) }, onClick = { expanded = false; onAnimalGroupSelected(group.id) })
+        }
+    }
+}
+
+@Composable
+private fun CohortBalancePicker(
+    balances: List<MobBalanceSummary>,
+    selectedBalanceId: String,
+    onBalanceSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = balances.firstOrNull { it.id == selectedBalanceId } ?: balances.firstOrNull()
+    Picker(
+        "Animal cohort",
+        selected?.let { "${it.displayLabel} | ${it.headCount} head" } ?: "No animal cohorts",
+        balances.isNotEmpty(),
+        expanded,
+        { expanded = it },
+    ) {
+        balances.forEach { balance ->
+            DropdownMenuItem(
+                text = { Text("${balance.displayLabel} | ${balance.headCount} head") },
+                onClick = {
+                    expanded = false
+                    onBalanceSelected(balance.id)
+                },
+            )
         }
     }
 }
@@ -5409,6 +5448,7 @@ private fun selectMob(state: FieldUiState, mobId: String): FieldUiState {
     return state.copy(
         selectedMobId = mobId,
         transferDestinationMobId = destination,
+        selectedTransferBalanceId = balance?.id.orEmpty(),
         selectedAnimalGroupTypeId = balance?.animalGroupTypeId
             ?: state.selectedAnimalGroupTypeId.ifBlank { state.animalGroupTypes.firstOrNull()?.id.orEmpty() },
         stockQuantity = balance?.headCount?.toString() ?: state.stockQuantity,
@@ -5456,6 +5496,16 @@ private fun selectFenceSection(state: FieldUiState, fenceSectionId: String): Fie
 private fun selectAnimalGroup(state: FieldUiState, groupTypeId: String): FieldUiState {
     val currentBalance = selectedMob(state)?.balances?.firstOrNull { it.animalGroupTypeId == groupTypeId }
     return state.copy(selectedAnimalGroupTypeId = groupTypeId, stockQuantity = currentBalance?.headCount?.toString() ?: state.stockQuantity)
+}
+
+private fun selectTransferBalance(state: FieldUiState, balanceId: String): FieldUiState {
+    val balance = selectedMob(state)?.balances?.firstOrNull { it.id == balanceId }
+    return state.copy(
+        selectedTransferBalanceId = balanceId,
+        selectedAnimalGroupTypeId = balance?.animalGroupTypeId
+            ?: state.selectedAnimalGroupTypeId,
+        transferQuantity = balance?.headCount?.toString() ?: state.transferQuantity,
+    )
 }
 
 private fun selectCalendarItem(state: FieldUiState, item: CalendarItemSummary): FieldUiState =
@@ -5586,6 +5636,21 @@ private fun initialMoveAllocations(
     return listOf(MoveAllocationDraft(paddockId = paddockId, allocationPct = "100"))
 }
 
+private fun aggregateMobBalances(mob: MobSummary?): List<MobBalanceSummary> =
+    mob?.balances.orEmpty()
+        .groupBy { it.animalGroupTypeId }
+        .values
+        .map { rows ->
+            rows.first().copy(
+                headCount = rows.sumOf { it.headCount },
+                cohortId = null,
+                reproductiveState = "not_recorded",
+                expectedLitterSize = "not_recorded",
+                lactationState = "not_recorded",
+                offspringAtFoot = "not_recorded",
+            )
+        }
+
 private fun initialCountMoveAllocations(
     snapshot: FarmSnapshot?,
     fallbackPaddockId: String,
@@ -5595,6 +5660,7 @@ private fun initialCountMoveAllocations(
     if (selectedMob == null) {
         return listOf(CountMoveAllocationDraft(fallbackPaddockId))
     }
+    val balances = aggregateMobBalances(selectedMob)
     val active = snapshot?.activeGrazing?.firstOrNull { it.mobId == selectedMob.id }
     val countAllocations = active?.allocations.orEmpty().filter { it.groupCounts.isNotEmpty() }
     if (countAllocations.isNotEmpty()) {
@@ -5609,7 +5675,7 @@ private fun initialCountMoveAllocations(
     return listOf(
         CountMoveAllocationDraft(
             paddockId = paddockId,
-            groupCounts = selectedMob.balances.associate { it.animalGroupTypeId to it.headCount.toString() },
+            groupCounts = balances.associate { it.animalGroupTypeId to it.headCount.toString() },
         )
     )
 }
@@ -5617,7 +5683,7 @@ private fun initialCountMoveAllocations(
 private fun countAllocationPct(draft: CountMoveAllocationDraft, mob: MobSummary?): Double {
     val totalLsu = mob?.totalLsu ?: 0.0
     if (totalLsu <= 0.0 || mob == null) return 0.0
-    val assignedLsu = mob.balances.sumOf { balance ->
+    val assignedLsu = aggregateMobBalances(mob).sumOf { balance ->
         val quantity = draft.groupCounts[balance.animalGroupTypeId]?.trim()?.toDoubleOrNull() ?: 0.0
         quantity * balance.animalGroupType.lsuPerHead
     }
@@ -5626,7 +5692,7 @@ private fun countAllocationPct(draft: CountMoveAllocationDraft, mob: MobSummary?
 
 private fun countRemainingLabel(mob: MobSummary?, drafts: List<CountMoveAllocationDraft>): String {
     if (mob == null || mob.balances.isEmpty()) return "No stock"
-    val remaining = mob.balances.map { balance ->
+    val remaining = aggregateMobBalances(mob).map { balance ->
         val assigned = drafts.sumOf { draft ->
             draft.groupCounts[balance.animalGroupTypeId]?.trim()?.toIntOrNull() ?: 0
         }
@@ -5682,9 +5748,10 @@ internal fun normalizeCountMoveAllocations(
     if (mob.totalLsu <= 0.0) {
         return Result.failure(IllegalArgumentException("Count allocation requires the mob to have positive LSU."))
     }
+    val balances = aggregateMobBalances(mob)
 
     val allocationsByPaddock = linkedMapOf<String, MutableMap<String, Int>>()
-    val totals = mob.balances.associate { it.animalGroupTypeId to 0 }.toMutableMap()
+    val totals = balances.associate { it.animalGroupTypeId to 0 }.toMutableMap()
 
     drafts.forEach { draft ->
         val paddockId = draft.paddockId.trim()
@@ -5697,7 +5764,7 @@ internal fun normalizeCountMoveAllocations(
         }
 
         val groupCounts = mutableListOf<MobMoveGroupCount>()
-        mob.balances.forEach { balance ->
+        balances.forEach { balance ->
             val text = draft.groupCounts[balance.animalGroupTypeId]?.trim().orEmpty()
             val quantity = if (text.isBlank()) 0 else text.toIntOrNull()
                 ?: return Result.failure(IllegalArgumentException("Count allocations must be whole numbers."))
@@ -5722,7 +5789,7 @@ internal fun normalizeCountMoveAllocations(
     if (allocationsByPaddock.isEmpty()) {
         return Result.failure(IllegalArgumentException("Add at least one count allocation."))
     }
-    mob.balances.forEach { balance ->
+    balances.forEach { balance ->
         val assigned = totals[balance.animalGroupTypeId] ?: 0
         if (assigned != balance.headCount) {
             return Result.failure(
@@ -5836,7 +5903,14 @@ private fun queueStockCount(
             ?: return state.copy(statusMessage = "Head count for ${row.label} must be a whole number.")
         if (quantity < 0) return state.copy(statusMessage = "Head count for ${row.label} must be zero or more.")
         if (quantity != row.originalQuantity) {
-            repo.queueStockCount(farm.id, mobId, row.animalGroupTypeId, quantity, state.stockNote)
+            repo.queueStockCount(
+                farm.id,
+                mobId,
+                row.animalGroupTypeId,
+                quantity,
+                state.stockNote,
+                row.cohortId,
+            )
             queued += 1
         }
     }
@@ -5886,14 +5960,21 @@ private fun queueMobTransfer(state: FieldUiState, repo: MobileRepository): Field
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a transfer.")
     val quantity = state.transferQuantity.toIntOrNull() ?: return state.copy(statusMessage = "Transfer quantity must be a whole number.")
     if (quantity <= 0) return state.copy(statusMessage = "Transfer quantity must be greater than zero.")
-    if (state.selectedMobId.isBlank() || state.transferDestinationMobId.isBlank() || state.selectedAnimalGroupTypeId.isBlank()) {
-        return state.copy(statusMessage = "Choose source, destination, and animal group.")
+    val balance = selectedMob(state)?.balances?.firstOrNull {
+        it.id == state.selectedTransferBalanceId
+    } ?: return state.copy(statusMessage = "Choose a source animal cohort.")
+    if (state.selectedMobId.isBlank() || state.transferDestinationMobId.isBlank()) {
+        return state.copy(statusMessage = "Choose source and destination mobs.")
+    }
+    if (quantity > balance.headCount) {
+        return state.copy(statusMessage = "Transfer quantity cannot exceed ${balance.headCount} head in the selected cohort.")
     }
     repo.queueMobTransfer(
         farm.id,
         state.selectedMobId,
         state.transferDestinationMobId,
-        state.selectedAnimalGroupTypeId,
+        balance.animalGroupTypeId,
+        balance.cohortId,
         quantity,
         state.transferNote,
     )
@@ -6332,9 +6413,10 @@ private fun initialStockCountRows(mob: MobSummary?): List<StockCountRowDraft> =
     mob?.balances.orEmpty().map { balance ->
         StockCountRowDraft(
             animalGroupTypeId = balance.animalGroupTypeId,
-            label = balance.animalGroupType.label,
+            label = balance.displayLabel,
             originalQuantity = balance.headCount,
             quantity = balance.headCount.toString(),
+            cohortId = balance.cohortId,
         )
     }
 

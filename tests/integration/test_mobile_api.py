@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.extensions import db
 from app.models import (
+    AnimalCohort,
     AnimalGroupBalance,
     AnimalGroupType,
     CalendarActivity,
@@ -1589,6 +1590,133 @@ def test_mobile_stock_count_can_create_animal_group_from_payload(client, app):
         ).one()
         assert ledger.event_type.value == "adjustment_in"
         assert ledger.quantity == 17
+
+
+def test_mobile_snapshot_and_stock_count_keep_same_type_cohorts_distinct(client, app):
+    with app.app_context():
+        farm = Farm(name="Cohort Mobile Farm", timezone="SAST", active=True)
+        db.session.add(farm)
+        db.session.flush()
+        _create_user("mobile@example.com", "correct-password", farm)
+        mob = Mob(farm_id=farm.id, name="Cohort Mob", status="active")
+        destination_mob = Mob(farm_id=farm.id, name="Cohort Destination", status="active")
+        group = AnimalGroupType(
+            species="Sheep", breed="Merino", sex="ewe", age_class="adult"
+        )
+        db.session.add_all([mob, destination_mob, group])
+        db.session.flush()
+        pregnant = AnimalCohort(
+            animal_group_type_id=group.id,
+            origin_farm_id=farm.id,
+            origin="manual",
+            reproductive_state="pregnant",
+            expected_litter_size="twins",
+            lactation_state="dry",
+            offspring_at_foot="none",
+        )
+        parturated = AnimalCohort(
+            animal_group_type_id=group.id,
+            origin_farm_id=farm.id,
+            origin="manual",
+            reproductive_state="parturated",
+            lactation_state="lactating",
+            offspring_at_foot="single",
+        )
+        db.session.add_all([pregnant, parturated])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(
+                    mob_id=mob.id,
+                    animal_group_type_id=group.id,
+                    cohort_id=pregnant.id,
+                    head_count=8,
+                ),
+                AnimalGroupBalance(
+                    mob_id=mob.id,
+                    animal_group_type_id=group.id,
+                    cohort_id=parturated.id,
+                    head_count=5,
+                ),
+            ]
+        )
+        farm_id = str(farm.id)
+        mob_id = str(mob.id)
+        destination_mob_id = str(destination_mob.id)
+        pregnant_id = str(pregnant.id)
+        parturated_id = str(parturated.id)
+        group_id = str(group.id)
+        db.session.commit()
+
+    token = _login(client)
+    snapshot = client.get(
+        f"/api/mobile/v1/farms/{farm_id}/snapshot", headers=_auth(token)
+    ).get_json()
+    source_snapshot = next(row for row in snapshot["mobs"] if row["id"] == mob_id)
+    balances = {row["cohort_id"]: row for row in source_snapshot["balances"]}
+    assert balances[pregnant_id]["reproductive_state"] == "pregnant"
+    assert balances[pregnant_id]["expected_litter_size"] == "twins"
+    assert balances[pregnant_id]["lactation_state"] == "dry"
+    assert balances[parturated_id]["offspring_at_foot"] == "single"
+
+    response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={
+            "commands": [
+                {
+                    "client_command_id": "cohort-count-1",
+                    "type": "stock_count.record",
+                    "farm_id": farm_id,
+                    "payload": {
+                        "mob_id": mob_id,
+                        "animal_group_type_id": group_id,
+                        "cohort_id": pregnant_id,
+                        "quantity": 7,
+                    },
+                }
+            ]
+        },
+        headers=_auth(token),
+    )
+    assert response.get_json()["results"][0]["status"] == "applied"
+
+    with app.app_context():
+        assert AnimalGroupBalance.query.filter_by(cohort_id=pregnant_id).one().head_count == 7
+        assert AnimalGroupBalance.query.filter_by(cohort_id=parturated_id).one().head_count == 5
+
+    response = client.post(
+        "/api/mobile/v1/sync/commands",
+        json={
+            "commands": [
+                {
+                    "client_command_id": "cohort-transfer-1",
+                    "type": "mob.transfer",
+                    "farm_id": farm_id,
+                    "payload": {
+                        "source_mob_id": mob_id,
+                        "destination_mob_id": destination_mob_id,
+                        "transfers": [
+                            {
+                                "animal_group_type_id": group_id,
+                                "cohort_id": pregnant_id,
+                                "quantity": 2,
+                            }
+                        ],
+                    },
+                }
+            ]
+        },
+        headers=_auth(token),
+    )
+    assert response.get_json()["results"][0]["status"] == "applied"
+
+    with app.app_context():
+        assert AnimalGroupBalance.query.filter_by(cohort_id=pregnant_id).one().head_count == 5
+        assert AnimalGroupBalance.query.filter_by(cohort_id=parturated_id).one().head_count == 5
+        moved = AnimalGroupBalance.query.filter_by(mob_id=destination_mob_id).one()
+        assert moved.head_count == 2
+        assert moved.cohort.reproductive_state == "pregnant"
+        assert moved.cohort.expected_litter_size == "twins"
 
 
 def test_mobile_stock_count_new_group_validation_failures(client, app):

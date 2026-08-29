@@ -40,6 +40,9 @@ class Farm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         back_populates="farm",
         cascade="all, delete-orphan",
     )
+    breeding_cycle_links = db.relationship(
+        "BreedingCycleFarm", back_populates="farm", cascade="all, delete-orphan"
+    )
     incidents = db.relationship("Incident", back_populates="farm", cascade="all, delete-orphan")
 
     __table_args__ = (

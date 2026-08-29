@@ -7,6 +7,8 @@ Flask app for livestock, grazing, and rainfall management across multiple farms.
 - Multi-farm CRUD (API + UI)
 - Paddock and mob CRUD (API + UI)
 - Ledger-backed stock adjustments by animal group type
+- Persistent animal cohorts with female reproductive, lactation, and offspring-at-foot state
+- Multi-farm breeding-cycle observations and reproductive outcome analytics
 - Grazing movement workflow with allocation fractions
 - Paddock current weighted stock and grazing history
 - Rainfall logging per farm

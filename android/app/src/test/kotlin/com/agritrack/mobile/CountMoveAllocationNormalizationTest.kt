@@ -15,7 +15,7 @@ class CountMoveAllocationNormalizationTest {
             status = "active",
             balances = listOf(
                 MobBalanceSummary(
-                    id = "balance-sheep",
+                    id = "balance-sheep-pregnant",
                     animalGroupTypeId = "group-sheep",
                     animalGroupType = AnimalGroupTypeSummary(
                         id = "group-sheep",
@@ -24,7 +24,24 @@ class CountMoveAllocationNormalizationTest {
                         sex = "ewe",
                         ageClass = "adult",
                     ),
-                    headCount = 12,
+                    headCount = 5,
+                    cohortId = "cohort-pregnant",
+                    reproductiveState = "pregnant",
+                ),
+                MobBalanceSummary(
+                    id = "balance-sheep-dry",
+                    animalGroupTypeId = "group-sheep",
+                    animalGroupType = AnimalGroupTypeSummary(
+                        id = "group-sheep",
+                        species = "Sheep",
+                        breed = "Merino",
+                        sex = "ewe",
+                        ageClass = "adult",
+                    ),
+                    headCount = 7,
+                    cohortId = "cohort-dry",
+                    reproductiveState = "not_pregnant",
+                    lactationState = "dry",
                 ),
                 MobBalanceSummary(
                     id = "balance-cattle",

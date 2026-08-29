@@ -2297,6 +2297,9 @@ def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
     assert response.status_code == 200
 
     body = response.data.decode("utf-8")
+    assert '<article class="card mob-balances-card">' in body
+    assert 'class="table-wrap mob-balances-table-wrap"' in body
+    assert '<table id="balanceTable" class="mob-balances-table">' in body
     assert body.index("Current Paddock Allocation") < body.index("Mob Comments / Log Notes")
     assert "<th>Days</th>" in body
     assert f'href="/paddocks/{paddock_id}"' in body

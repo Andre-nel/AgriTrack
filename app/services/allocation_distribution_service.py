@@ -47,11 +47,15 @@ class AllocationDistributionService:
             if head_count <= 0:
                 continue
             group = balance.animal_group_type
-            context[str(balance.animal_group_type_id)] = {
-                "head_count": head_count,
-                "group": group,
-                "lsu_per_head": cls._group_lsu_per_head(group),
-            }
+            group_id = str(balance.animal_group_type_id)
+            if group_id in context:
+                context[group_id]["head_count"] += head_count
+            else:
+                context[group_id] = {
+                    "head_count": head_count,
+                    "group": group,
+                    "lsu_per_head": cls._group_lsu_per_head(group),
+                }
 
         for group_id, head_count in (overrides or {}).items():
             group_key = str(group_id)
