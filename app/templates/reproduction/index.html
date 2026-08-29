@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Reproduction | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-section-heading">
+  <div>
+    <h1>Reproduction</h1>
+    <p class="muted">Track counted female cohorts from sire exposure through later offspring assessments.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('reproduction.analytics') }}">Open Analytics</a>
+</div>
+
+<section class="card">
+  <h2>New Breeding Cycle</h2>
+  <form method="post" action="{{ url_for('reproduction.create_cycle') }}" class="grid-form">
+    <div class="grid-three">
+      <label>Farms <span class="muted">(select one or more)</span>
+        <select name="farm_ids" multiple required size="6">
+          {% for farm in farms %}<option value="{{ farm.id }}">{{ farm.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Cycle name<input name="name" placeholder="2026 main breeding season" required /></label>
+      <label>Species
+        <select name="species" required>
+          <option value="Sheep">Sheep</option>
+          <option value="Goat">Goat</option>
+          <option value="Cattle">Cattle</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label>Exposure start<input type="date" name="exposure_start_date" value="{{ today }}" required /></label>
+      <label>Exposure end<input type="date" name="exposure_end_date" /></label>
+    </div>
+    <div class="grid-two">
+      <label>Expected parturition start<input type="date" name="expected_parturition_start_date" /></label>
+      <label>Expected parturition end<input type="date" name="expected_parturition_end_date" /></label>
+    </div>
+    <label>Procedure notes<textarea name="notes" rows="3" placeholder="Optional farm procedure or cycle context"></textarea></label>
+    <button type="submit" class="btn">Create Cycle</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Breeding Cycles</h2>
+  <table>
+    <thead><tr><th>Cycle</th><th>Farms</th><th>Species</th><th>Exposure</th><th>Status</th><th>Cohorts</th></tr></thead>
+    <tbody>
+      {% for cycle in cycles %}
+      <tr>
+        <td><a href="{{ url_for('reproduction.detail', cycle_id=cycle.id) }}">{{ cycle.name }}</a></td>
+        <td>{{ cycle.farm_names }}</td>
+        <td>{{ cycle.species }}</td>
+        <td>{{ cycle.exposure_start_date }}{% if cycle.exposure_end_date %} to {{ cycle.exposure_end_date }}{% endif %}</td>
+        <td>{{ cycle.status }}</td>
+        <td>{{ cycle.enrollments | length }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">No breeding cycles recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

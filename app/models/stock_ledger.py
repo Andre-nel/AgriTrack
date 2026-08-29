@@ -25,11 +25,15 @@ class StockLedgerEntry(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     animal_group_type_id = db.Column(
         db.String(36), db.ForeignKey("animal_group_types.id"), nullable=False, index=True
     )
+    cohort_id = db.Column(
+        db.String(36), db.ForeignKey("animal_cohorts.id"), nullable=True, index=True
+    )
     event_time = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
     event_type = db.Column(db.Enum(StockEventType), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
     note = db.Column(db.Text)
 
     mob = db.relationship("Mob", back_populates="ledger_entries")
+    cohort = db.relationship("AnimalCohort", back_populates="ledger_entries")
 
     __table_args__ = (db.CheckConstraint("quantity > 0", name="ck_stock_quantity_positive"),)

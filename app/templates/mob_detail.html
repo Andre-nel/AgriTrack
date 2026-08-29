@@ -63,7 +63,7 @@
 </section>
 
 <section class="split">
-  <article class="card">
+  <article class="card mob-balances-card">
     <h2>Balances</h2>
     {% if mob_species_totals %}
     <ul class="mob-species-totals" aria-label="Species totals">
@@ -73,33 +73,40 @@
     </ul>
     {% endif %}
     <p class="muted">Select a balance line, then edit its sex, age class, and head count. Its animal type is also loaded into Adjust Stock.</p>
-    <table id="balanceTable">
-      <thead><tr><th>Select</th><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
-      <tbody>
-        {% for b in mob.balances if b.head_count > 0 %}
-        <tr
-          class="balance-row"
-          data-group-id="{{ b.animal_group_type_id }}"
-          data-species="{{ b.animal_group_type.species }}"
-          data-breed="{{ b.animal_group_type.breed }}"
-          data-sex="{{ b.animal_group_type.sex }}"
-          data-age-class="{{ b.animal_group_type.age_class }}"
-          data-head-count="{{ b.head_count }}"
-        >
-          <td><input type="radio" name="selectedBalanceRow" value="{{ b.animal_group_type_id }}" aria-label="Select balance row for editing" /></td>
-          <td>{{ b.animal_group_type.species }}</td>
-          <td>{{ b.animal_group_type.breed }}</td>
-          <td>{{ b.animal_group_type.sex }}</td>
-          <td>{{ b.animal_group_type.age_class }}</td>
-          <td>{{ b.head_count }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6">No stock balances yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrap mob-balances-table-wrap" role="region" aria-label="Mob balances" tabindex="0">
+      <table id="balanceTable" class="mob-balances-table">
+        <thead><tr><th>Select</th><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Reproductive State</th><th>Lactation</th><th>Offspring At Foot</th><th>Head</th></tr></thead>
+        <tbody>
+          {% for b in mob.balances if b.head_count > 0 %}
+          <tr
+            class="balance-row"
+            data-group-id="{{ b.animal_group_type_id }}"
+            data-cohort-id="{{ b.cohort_id or '' }}"
+            data-species="{{ b.animal_group_type.species }}"
+            data-breed="{{ b.animal_group_type.breed }}"
+            data-sex="{{ b.animal_group_type.sex }}"
+            data-age-class="{{ b.animal_group_type.age_class }}"
+            data-head-count="{{ b.head_count }}"
+          >
+            <td><input type="radio" name="selectedBalanceRow" value="{{ b.animal_group_type_id }}" aria-label="Select balance row for editing" /></td>
+            <td>{{ b.animal_group_type.species }}</td>
+            <td>{{ b.animal_group_type.breed }}</td>
+            <td>{{ b.animal_group_type.sex }}</td>
+            <td>{{ b.animal_group_type.age_class }}</td>
+            <td>{{ (b.cohort.reproductive_state if b.cohort else "not_recorded") | replace("_", " ") }}</td>
+            <td>{{ (b.cohort.lactation_state if b.cohort else "not_recorded") | replace("_", " ") }}</td>
+            <td>{{ (b.cohort.offspring_at_foot if b.cohort else "not_recorded") | replace("_", " ") }}</td>
+            <td>{{ b.head_count }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9">No stock balances yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     <form method="post" action="{{ url_for('web.mob_edit_balance_form', mob_id=mob.id) }}" class="grid-form" id="editBalanceForm">
       <input type="hidden" name="source_animal_group_type_id" id="editSourceGroupTypeId" />
+      <input type="hidden" name="source_cohort_id" id="editSourceCohortId" />
       <div class="grid-two">
         <label>Species
           <input id="editSpecies" disabled />
@@ -129,11 +136,58 @@
       </label>
       <button type="submit" class="btn" id="editBalanceSubmit" disabled>Save Balance Edit</button>
     </form>
+
+    {% if female_balance_options %}
+    <details>
+      <summary><strong>Record Female Cohort State</strong></summary>
+      <p class="muted">This is a dated observation. Choose a count smaller than the balance to split only those females into the selected state.</p>
+      <form method="post" action="{{ url_for('web.mob_female_status_form', mob_id=mob.id) }}" class="grid-form">
+        <label>Female cohort
+          <select name="balance_id" required>
+            <option value="">Choose female cohort</option>
+            {% for row in female_balance_options %}<option value="{{ row.id }}">{{ row.label }} (available: {{ row.head_count }})</option>{% endfor %}
+          </select>
+        </label>
+        <div class="grid-two">
+          <label>Observed on<input type="date" name="observed_on" value="{{ today }}" required /></label>
+          <label>Observed females<input type="number" name="quantity" min="1" step="1" required /></label>
+          <label>Reproductive state
+            <select name="reproductive_state" required>
+              <option value="not_recorded">Not recorded</option>
+              <option value="with_sire">With sire / mated</option>
+              <option value="awaiting_scan">Awaiting pregnancy assessment</option>
+              <option value="pregnant">Pregnant</option>
+              <option value="not_pregnant">Not pregnant</option>
+              <option value="parturated">Parturated</option>
+            </select>
+          </label>
+          <label>Expected litter size
+            <select name="expected_litter_size" required>
+              <option value="not_recorded">Not recorded</option><option value="unknown">Unknown</option><option value="single">Single</option><option value="twins">Twins</option><option value="multiple">Multiple</option>
+            </select>
+          </label>
+          <label>Lactation state
+            <select name="lactation_state" required>
+              <option value="not_recorded">Not recorded</option><option value="lactating">Lactating</option><option value="dry">Dry</option>
+            </select>
+          </label>
+          <label>Offspring at foot
+            <select name="offspring_at_foot" required>
+              <option value="not_recorded">Not recorded</option><option value="none">None</option><option value="single">Single</option><option value="twins">Twins</option><option value="multiple">Multiple</option>
+            </select>
+          </label>
+        </div>
+        <label>Observation notes<input name="notes" placeholder="Optional field observation" /></label>
+        <button type="submit" class="btn btn-secondary">Record Female State</button>
+      </form>
+    </details>
+    {% endif %}
   </article>
 
   <article class="card">
     <h2>Adjust Stock</h2>
     <form method="post" action="{{ url_for('web.mob_adjust_form', mob_id=mob.id) }}" class="grid-form">
+      <input type="hidden" name="cohort_id" id="adjustCohortId" />
       <div class="grid-two">
         <label>Species
           <select name="species" id="adjustSpecies" required>
@@ -472,7 +526,7 @@
 
 <details class="card">
   <summary><strong>Transfer Stock To Existing Mob</strong></summary>
-  {% if split_group_options and has_transfer_destination_mobs %}
+  {% if stock_line_options and has_transfer_destination_mobs %}
   <form method="post" action="{{ url_for('web.mob_transfer_form', mob_id=mob.id) }}" class="grid-form">
     <label>Destination Farm
       <select name="transfer_destination_farm_id" id="transferDestinationFarm" required>
@@ -493,7 +547,7 @@
         <label>Group
           <select name="transfer_group_id" required>
             <option value="">Choose group</option>
-            {% for option in split_group_options %}
+            {% for option in stock_line_options %}
             <option value="{{ option.id }}">{{ option.label }}</option>
             {% endfor %}
           </select>
@@ -517,7 +571,7 @@
       <label>Group
         <select name="transfer_group_id" required>
           <option value="">Choose group</option>
-          {% for option in split_group_options %}
+          {% for option in stock_line_options %}
           <option value="{{ option.id }}">{{ option.label }}</option>
           {% endfor %}
         </select>
@@ -529,7 +583,7 @@
     </div>
   </template>
   <script id="transferMobsByFarm" type="application/json">{{ transfer_mobs_by_farm | tojson }}</script>
-  {% elif not split_group_options %}
+  {% elif not stock_line_options %}
   <p>No positive stock balances are available to transfer from this mob.</p>
   {% else %}
   <p>No destination mobs are available yet. Create another active mob first.</p>
@@ -546,7 +600,7 @@
 
 <details class="card">
   <summary><strong>Split Mob</strong></summary>
-  {% if split_group_options %}
+  {% if stock_line_options %}
   <p class="muted">Move selected stock into one or more new mobs. Any unallocated stock stays in this mob.</p>
   <form method="post" action="{{ url_for('web.mob_split_form', mob_id=mob.id) }}" class="grid-form">
     <div id="splitRows">
@@ -557,7 +611,7 @@
         <label>Group
           <select name="split_group_id" required>
             <option value="">Choose group</option>
-            {% for option in split_group_options %}
+            {% for option in stock_line_options %}
             <option value="{{ option.id }}">{{ option.label }}</option>
             {% endfor %}
           </select>
@@ -581,7 +635,7 @@
       <label>Group
         <select name="split_group_id" required>
           <option value="">Choose group</option>
-          {% for option in split_group_options %}
+          {% for option in stock_line_options %}
           <option value="{{ option.id }}">{{ option.label }}</option>
           {% endfor %}
         </select>
@@ -597,7 +651,7 @@
     <table>
       <thead><tr><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Available</th></tr></thead>
       <tbody>
-        {% for option in split_group_options %}
+        {% for option in stock_line_options %}
         <tr>
           <td>{{ option.species }}</td>
           <td>{{ option.breed }}</td>
@@ -749,6 +803,8 @@
 
     const balanceTable = document.getElementById("balanceTable");
     const editSourceGroupTypeIdInput = document.getElementById("editSourceGroupTypeId");
+    const editSourceCohortIdInput = document.getElementById("editSourceCohortId");
+    const adjustCohortIdInput = document.getElementById("adjustCohortId");
     const editSpeciesInput = document.getElementById("editSpecies");
     const editBreedInput = document.getElementById("editBreed");
     const editSexSelect = document.getElementById("editSex");
@@ -789,6 +845,7 @@
       }
 
       const groupId = row.dataset.groupId || "";
+      const cohortId = row.dataset.cohortId || "";
       const species = row.dataset.species || "";
       const breed = row.dataset.breed || "";
       const sex = row.dataset.sex || "";
@@ -797,6 +854,8 @@
       const defaults = speciesDefaults[species];
 
       editSourceGroupTypeIdInput.value = groupId;
+      if (editSourceCohortIdInput) editSourceCohortIdInput.value = cohortId;
+      if (adjustCohortIdInput) adjustCohortIdInput.value = cohortId;
       editSpeciesInput.value = species;
       editBreedInput.value = breed;
       editHeadInput.value = headCount;

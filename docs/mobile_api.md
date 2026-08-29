@@ -262,6 +262,12 @@ includes recent structured water asset state history. The migration that adds
 history creates one `baseline` row per existing water asset using the state at
 upgrade time; the server does not synthesize older state rows.
 
+Each positive mob balance includes `cohort_id`, `reproductive_state`,
+`expected_litter_size`, `lactation_state`, and `offspring_at_foot`. Older rows
+without cohort data serialize these fields as `null` / `not_recorded`. Android
+uses the cohort ID when posting a count so multiple cohorts with the same animal
+group type are not combined accidentally.
+
 `active_grazing_by_paddock` groups current grazing allocations for paddock
 detail views. Each mob row includes `mob_id`, `mob_name`, `allocation_pct`, and
 `start_at`; Android uses `start_at` to show how many days the mob has been
@@ -406,7 +412,7 @@ Supported command types:
 - `water_asset_event.create`: `water_asset_id`, `description`, optional `tags`, optional `event_at`.
 - `fence_event.create`: `fence_section_id`, `description`, optional `event_type`, optional `tags`, optional `condition_after`, optional `materials`, optional `event_at`.
 - `incident.create`: `occurred_on`, `category`, `note`, optional `tags`, optional `reported_by`.
-- `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group.
+- `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group. Existing cohort-aware balances should also send `cohort_id`; omitting it is accepted only when the mob has at most one matching cohort.
 - `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
 - `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.
 - `shearer.create`: client-generated `id`, `name`, optional `active`.

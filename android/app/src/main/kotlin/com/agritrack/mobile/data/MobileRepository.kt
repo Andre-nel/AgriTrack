@@ -160,6 +160,7 @@ class MobileRepository(
         animalGroupTypeId: String,
         quantity: Int,
         note: String,
+        cohortId: String? = null,
     ) {
         fieldStore.enqueue(
             MobileCommand.stockCount(
@@ -168,6 +169,7 @@ class MobileRepository(
                 animalGroupTypeId = animalGroupTypeId,
                 quantity = quantity,
                 note = note,
+                cohortId = cohortId,
             )
         )
     }
@@ -256,6 +258,7 @@ class MobileRepository(
         sourceMobId: String,
         destinationMobId: String,
         animalGroupTypeId: String,
+        cohortId: String?,
         quantity: Int,
         note: String,
     ) {
@@ -265,6 +268,7 @@ class MobileRepository(
                 sourceMobId = sourceMobId,
                 destinationMobId = destinationMobId,
                 animalGroupTypeId = animalGroupTypeId,
+                cohortId = cohortId,
                 quantity = quantity,
                 note = note,
             )

@@ -533,6 +533,18 @@ th, td {
   color: var(--text);
 }
 
+.mob-balances-card {
+  min-width: 0;
+}
+
+.mob-balances-table-wrap {
+  -webkit-overflow-scrolling: touch;
+}
+
+.mob-balances-table {
+  min-width: 58rem;
+}
+
 a { color: #1b5f49; }
 
 .link-list {
@@ -3445,6 +3457,26 @@ tr.is-selected-fence {
 .simulator-table td:nth-child(2),
 .simulator-table th:nth-child(2) {
   min-width: 90px;
+}
+
+.reproduction-enrollment-card {
+  margin-top: 1rem;
+}
+
+.reproduction-enrollment-card > details {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.reproduction-enrollment-card > details > summary {
+  cursor: pointer;
+  margin-bottom: 0.8rem;
+}
+
+.reproduction-summary-grid .card,
+.reproduction-metric-grid .card {
+  box-shadow: none;
 }
 
 @media (max-width: 840px) {

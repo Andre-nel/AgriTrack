@@ -5,6 +5,7 @@ from app.extensions import db
 from app.models import AnimalGroupBalance, Mob
 from app.models.stock_ledger import StockEventType
 from app.services.allocation_distribution_service import AllocationDistributionService
+from app.services.cohort_service import CohortService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.mob_event_service import MobEventService
 from app.services.stock_service import StockService
@@ -111,11 +112,11 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
         event_type = selected_event_type
         event_quantity = quantity
         success_message = "Stock updated"
-        current_balance = (
-            AnimalGroupBalance.query.filter_by(
-                mob_id=mob.id,
-                animal_group_type_id=group_type.id,
-            ).first()
+        selected_cohort_id = (form.get("cohort_id") or "").strip() or None
+        current_balance = CohortService.balance_for_selector(
+            mob_id=str(mob.id),
+            animal_group_type_id=str(group_type.id),
+            cohort_id=selected_cohort_id,
         )
         current_head_count = current_balance.head_count if current_balance else 0
         if selected_event_type == StockEventType.count:
@@ -142,6 +143,7 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
             mob_id=mob.id,
             farm_id=mob.farm_id,
             animal_group_type_id=group_type.id,
+            cohort_id=selected_cohort_id,
             event_type=event_type,
             quantity=event_quantity,
             note=form.get("note"),
@@ -175,13 +177,16 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
 
 def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
     source_group_type_id = (form.get("source_animal_group_type_id") or "").strip()
+    source_cohort_id = (form.get("source_cohort_id") or "").strip() or None
     if not source_group_type_id:
         raise ValueError("Select a balance line to edit")
 
-    source_balance = AnimalGroupBalance.query.filter_by(
-        mob_id=mob.id,
+    source_balance = CohortService.balance_for_selector(
+        mob_id=str(mob.id),
         animal_group_type_id=source_group_type_id,
-    ).first()
+        cohort_id=source_cohort_id,
+        require_positive=True,
+    )
     if not source_balance or int(source_balance.head_count) <= 0:
         raise ValueError("Selected balance line is no longer available. Refresh and try again.")
 
@@ -230,12 +235,14 @@ def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
                 mob_id=mob.id,
                 farm_id=mob.farm_id,
                 animal_group_type_id=source_group.id,
+                cohort_id=source_balance.cohort_id,
                 event_type=event_type,
                 quantity=quantity,
                 note=f"{description} Note: {note_text}" if note_text else description,
                 event_time=change_time,
             )
         else:
+            source_cohort = CohortService.ensure_balance_cohort(source_balance)
             description = (
                 f"Balance reclassified from {source_label} (head: {source_head}) "
                 f"to {target_label} (head: {target_head})."
@@ -262,6 +269,7 @@ def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
                 mob_id=mob.id,
                 farm_id=mob.farm_id,
                 animal_group_type_id=source_group.id,
+                cohort_id=source_cohort.id,
                 event_type=StockEventType.adjustment_out,
                 quantity=source_head,
                 note=ledger_note,
@@ -269,10 +277,13 @@ def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
                 sync_grazing_history=False,
                 sync_allocation_distribution=False,
             )
+            source_cohort.animal_group_type_id = target_group.id
+            db.session.flush()
             StockService.adjust_stock(
                 mob_id=mob.id,
                 farm_id=mob.farm_id,
                 animal_group_type_id=target_group.id,
+                cohort_id=source_cohort.id,
                 event_type=StockEventType.adjustment_in,
                 quantity=target_head,
                 note=ledger_note,

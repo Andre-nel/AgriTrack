@@ -50,6 +50,8 @@ Extracted from `legacy_web` so far:
 - `analytics.routes`: analytics landing, journal, and stock tracking pages.
 - `grazing.routes`: grazing management analytics page and chart payload helpers.
 - `mobs.routes`: mob detail, stock adjustment, movement, transfer, split, and archive forms.
+- `reproduction.routes`: breeding cycles, female exposure, pregnancy and parturition
+  observations, offspring checkpoints, and reproductive analytics.
 - `paddocks.routes`: paddock detail, carrying capacity, rename, and bulk mob movement forms.
 - `wiki.routes`: Markdown-backed private farm knowledge wiki pages.
 
@@ -63,6 +65,66 @@ Second-pass decomposition now started:
 - `mobs.forms`: mob movement, transfer, and split form parsing.
 - `mobs.presenters`: mob detail template payload assembly.
 - `mobs.services`: stock adjustment and balance-line edit business rules and transactions.
+
+## Animal Cohort Identity
+
+`AnimalGroupType` remains taxonomy: species, breed, sex, and age class.
+`AnimalCohort` is the persistent identity of a counted population. A mob balance
+therefore points to both a type and, after migration/backfill, a cohort. This
+allows two groups with identical taxonomy to retain different reproductive
+histories in the same mob.
+
+Partial transfers and reproductive partitions create child cohorts and an
+`AnimalCohortLineage` edge. Full transfers keep the cohort ID. Stock ledger
+entries also carry the cohort ID, so identity and current state follow stock
+through mob transfers, splits, and merges.
+
+Breeding-cycle scope uses `BreedingCycleFarm` memberships rather than a single
+farm foreign key. A cycle can therefore enroll eligible cohorts and receive
+offspring into mobs from any of its one or more selected farms.
+
+The migration establishes a legacy baseline by creating one cohort per current
+mob/type balance and attaching historical ledger rows for that same mob/type to
+the baseline cohort. This is a compatibility backfill, not a claim that all
+historical animals were one biological population; precise lineage begins with
+cohort-aware events recorded after the migration.
+
+Female state is deliberately multi-dimensional:
+
+- reproductive state (`with_sire`, `pregnant`, `not_pregnant`, or `parturated`);
+- expected litter size;
+- lactation state (`lactating` or `dry`); and
+- offspring at foot (`none`, `single`, `twins`, or `multiple`).
+
+These fields are independent. For example, `not_pregnant` is not treated as a
+synonym for `dry`, and a parturition litter is not assumed to equal the current
+offspring-at-foot count. Dated `FemaleStatusObservation` records preserve the
+observation behind changes to the cohort's cached current state.
+
+## Animal Cohort Identity
+
+`AnimalGroupType` remains taxonomy: species, breed, sex, and age class.
+`AnimalCohort` is the persistent identity of a counted population. A mob balance
+therefore points to both a type and, after migration/backfill, a cohort. This
+allows two groups with identical taxonomy to retain different reproductive
+histories in the same mob.
+
+Partial transfers and reproductive partitions create child cohorts and an
+`AnimalCohortLineage` edge. Full transfers keep the cohort ID. Stock ledger
+entries also carry the cohort ID, so identity and current state follow stock
+through mob transfers, splits, and merges.
+
+Female state is deliberately multi-dimensional:
+
+- reproductive state (`with_sire`, `pregnant`, `not_pregnant`, or `parturated`);
+- expected litter size;
+- lactation state (`lactating` or `dry`); and
+- offspring at foot (`none`, `single`, `twins`, or `multiple`).
+
+These fields are independent. For example, `not_pregnant` is not treated as a
+synonym for `dry`, and a parturition litter is not assumed to equal the current
+offspring-at-foot count. Dated `FemaleStatusObservation` records preserve the
+observation behind changes to the cohort's cached current state.
 
 Compatibility follow-up:
 

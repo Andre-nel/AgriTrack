@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% block title %}{{ cycle.name }} | Reproduction | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-page-actions row-actions">
+  <a class="btn btn-secondary" href="{{ url_for('reproduction.index') }}">Back To Reproduction</a>
+  <a class="btn btn-secondary" href="{{ url_for('reproduction.analytics', species=cycle.species) }}">View Analytics</a>
+</div>
+<div class="task-section-heading">
+  <div>
+    <h1>{{ cycle.name }}</h1>
+    <p class="muted">{{ cycle.farm_names }} &middot; {{ cycle.species }} &middot; {{ cycle.exposure_start_date }}{% if cycle.exposure_end_date %} to {{ cycle.exposure_end_date }}{% endif %} &middot; {{ cycle.status }}</p>
+  </div>
+  {% if cycle.status == "open" %}
+  <form method="post" action="{{ url_for('reproduction.close_cycle', cycle_id=cycle.id) }}">
+    <button type="submit" class="btn btn-secondary">Close Cycle</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if cycle.notes %}<section class="card"><h2>Cycle Notes</h2><p>{{ cycle.notes }}</p></section>{% endif %}
+
+{% if cycle.status == "open" %}
+<section class="card">
+  <h2>Enrol Female Cohort / Record Sire Exposure</h2>
+  {% if female_balances %}
+  <form method="post" action="{{ url_for('reproduction.enroll', cycle_id=cycle.id) }}" class="grid-form">
+    <label>Female balance line
+      <select name="balance_id" required>
+        <option value="">Choose female cohort</option>
+        {% for row in female_balances %}
+        <option value="{{ row.id }}">{{ row.mob_name }} | {{ row.label }} | {{ row.head_count }} head</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="grid-three">
+      <label>Females exposed<input type="number" name="exposed_count" min="1" step="1" required /></label>
+      <label>Exposure start<input type="date" name="exposure_start_date" value="{{ cycle.exposure_start_date }}" required /></label>
+      <label>Exposure end<input type="date" name="exposure_end_date" value="{{ cycle.exposure_end_date or '' }}" /></label>
+    </div>
+    <label>Sire cohort
+      <select name="sire_cohort_id">
+        <option value="">Not recorded</option>
+        {% for row in sire_cohorts %}<option value="{{ row.id }}">{{ row.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Procedure notes<input name="notes" placeholder="Optional exposure procedure details" /></label>
+    <button type="submit" class="btn">Record Exposure</button>
+  </form>
+  {% else %}
+  <p>No positive female {{ cycle.species }} balance lines are available on this farm.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% for row in enrollment_rows %}
+{% set enrollment = row.enrollment %}
+<section class="card reproduction-enrollment-card">
+  <div class="task-section-heading">
+    <div>
+      <h2>{{ enrollment.source_mob.name }}</h2>
+      <p class="muted">{{ row.group_label }} &middot; {{ enrollment.exposed_count }} females exposed</p>
+    </div>
+    <span class="status-pill status-{{ enrollment.status }}">{{ enrollment.status }}</span>
+  </div>
+
+  <div class="cards farm-grid reproduction-summary-grid">
+    <article class="card">
+      <h3>Current Cohort State</h3>
+      {% for state in row.current_states %}
+      <p><strong>{{ state.count }}</strong> {{ state.state }}{% if state.lactation != "Not Recorded" %}; {{ state.lactation }}{% endif %}{% if state.offspring != "Not Recorded" %}; offspring at foot: {{ state.offspring }}{% endif %}</p>
+      {% else %}<p class="muted">No current balance descendants.</p>{% endfor %}
+    </article>
+    <article class="card">
+      <h3>Pregnancy Observation</h3>
+      {% if row.scan %}
+      <p>{{ row.scan.assessed_on }}: <strong>{{ row.scan.pregnant_count }}</strong> pregnant, <strong>{{ row.scan.not_pregnant_count }}</strong> not pregnant, {{ row.scan.unassessed_count }} unassessed.</p>
+      <p>Expected: {{ row.scan.expected_single_count }} single, {{ row.scan.expected_twin_count }} twins, {{ row.scan.expected_multiple_count }} multiple, {{ row.scan.expected_unknown_litter_count }} unknown. Total offspring: {{ row.scan.expected_offspring_total if row.scan.expected_offspring_total is not none else "N/A" }}.</p>
+      {% else %}<p class="muted">Not recorded.</p>{% endif %}
+    </article>
+    <article class="card">
+      <h3>Parturition Observation</h3>
+      {% if row.birth %}
+      <p>{{ row.birth.period_start_date }}: <strong>{{ row.birth.females_parturated_count }}</strong> females parturated; <strong>{{ row.birth.offspring_born_total }}</strong> total births.</p>
+      <p>{{ row.birth.offspring_born_alive }} born alive, {{ row.birth.offspring_stillborn }} stillborn, {{ row.birth.strong_at_birth_count }} strong at birth.</p>
+      {% else %}<p class="muted">Not recorded.</p>{% endif %}
+    </article>
+  </div>
+
+  {% if not row.scan %}
+  <details>
+    <summary><strong>Record Pregnancy Assessment</strong></summary>
+    <form method="post" action="{{ url_for('reproduction.record_pregnancy', cycle_id=cycle.id, enrollment_id=enrollment.id) }}" class="grid-form">
+      <label>Assessment date<input type="date" name="assessed_on" value="{{ today }}" required /></label>
+      <div class="grid-three">
+        <label>Pregnant<input type="number" name="pregnant_count" min="0" value="0" required /></label>
+        <label>Not pregnant<input type="number" name="not_pregnant_count" min="0" value="0" required /></label>
+        <label>Unassessed<input type="number" name="unassessed_count" min="0" value="{{ enrollment.exposed_count }}" required /></label>
+      </div>
+      <div class="grid-two">
+        <label>Expected singleton females<input type="number" name="expected_single_count" min="0" value="0" required /></label>
+        <label>Expected twin females<input type="number" name="expected_twin_count" min="0" value="0" required /></label>
+        <label>Expected multiple-bearing females<input type="number" name="expected_multiple_count" min="0" value="0" required /></label>
+        <label>Pregnant, litter unknown<input type="number" name="expected_unknown_litter_count" min="0" value="0" required /></label>
+      </div>
+      <label>Expected offspring total<input type="number" name="expected_offspring_total" min="0" placeholder="Calculated when all litter sizes are known" /></label>
+      <label>Observation notes<input name="notes" /></label>
+      <button type="submit" class="btn">Record Pregnancy Observation</button>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if row.scan %}
+  <details>
+    <summary><strong>Correct Pregnancy Observation</strong></summary>
+    <p class="muted">The original observation remains in the audit trail. Correcting it does not rewrite later cohort movements or current-state observations.</p>
+    <form method="post" action="{{ url_for('reproduction.record_pregnancy', cycle_id=cycle.id, enrollment_id=enrollment.id) }}" class="grid-form">
+      <input type="hidden" name="supersedes_id" value="{{ row.scan.id }}" />
+      <label>Assessment date<input type="date" name="assessed_on" value="{{ row.scan.assessed_on }}" required /></label>
+      <div class="grid-three">
+        <label>Pregnant<input type="number" name="pregnant_count" min="0" value="{{ row.scan.pregnant_count }}" required /></label>
+        <label>Not pregnant<input type="number" name="not_pregnant_count" min="0" value="{{ row.scan.not_pregnant_count }}" required /></label>
+        <label>Unassessed<input type="number" name="unassessed_count" min="0" value="{{ row.scan.unassessed_count }}" required /></label>
+      </div>
+      <div class="grid-two">
+        <label>Expected singleton females<input type="number" name="expected_single_count" min="0" value="{{ row.scan.expected_single_count }}" required /></label>
+        <label>Expected twin females<input type="number" name="expected_twin_count" min="0" value="{{ row.scan.expected_twin_count }}" required /></label>
+        <label>Expected multiple-bearing females<input type="number" name="expected_multiple_count" min="0" value="{{ row.scan.expected_multiple_count }}" required /></label>
+        <label>Pregnant, litter unknown<input type="number" name="expected_unknown_litter_count" min="0" value="{{ row.scan.expected_unknown_litter_count }}" required /></label>
+      </div>
+      <label>Expected offspring total<input type="number" name="expected_offspring_total" min="0" value="{{ row.scan.expected_offspring_total if row.scan.expected_offspring_total is not none else '' }}" /></label>
+      <label>Correction notes<input name="notes" required /></label>
+      <button type="submit" class="btn btn-secondary">Record Pregnancy Correction</button>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if row.scan %}
+  <details>
+    <summary><strong>Correct Pregnancy Observation</strong></summary>
+    <p class="muted">The original observation remains in the audit trail. Correcting it does not rewrite later cohort movements or current-state observations.</p>
+    <form method="post" action="{{ url_for('reproduction.record_pregnancy', cycle_id=cycle.id, enrollment_id=enrollment.id) }}" class="grid-form">
+      <input type="hidden" name="supersedes_id" value="{{ row.scan.id }}" />
+      <label>Assessment date<input type="date" name="assessed_on" value="{{ row.scan.assessed_on }}" required /></label>
+      <div class="grid-three">
+        <label>Pregnant<input type="number" name="pregnant_count" min="0" value="{{ row.scan.pregnant_count }}" required /></label>
+        <label>Not pregnant<input type="number" name="not_pregnant_count" min="0" value="{{ row.scan.not_pregnant_count }}" required /></label>
+        <label>Unassessed<input type="number" name="unassessed_count" min="0" value="{{ row.scan.unassessed_count }}" required /></label>
+      </div>
+      <div class="grid-two">
+        <label>Expected singleton females<input type="number" name="expected_single_count" min="0" value="{{ row.scan.expected_single_count }}" required /></label>
+        <label>Expected twin females<input type="number" name="expected_twin_count" min="0" value="{{ row.scan.expected_twin_count }}" required /></label>
+        <label>Expected multiple-bearing females<input type="number" name="expected_multiple_count" min="0" value="{{ row.scan.expected_multiple_count }}" required /></label>
+        <label>Pregnant, litter unknown<input type="number" name="expected_unknown_litter_count" min="0" value="{{ row.scan.expected_unknown_litter_count }}" required /></label>
+      </div>
+      <label>Expected offspring total<input type="number" name="expected_offspring_total" min="0" value="{{ row.scan.expected_offspring_total if row.scan.expected_offspring_total is not none else '' }}" /></label>
+      <label>Correction notes<input name="notes" required /></label>
+      <button type="submit" class="btn btn-secondary">Record Pregnancy Correction</button>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if row.scan and not row.birth %}
+  <details>
+    <summary><strong>Record Parturition Outcome</strong></summary>
+    <form method="post" action="{{ url_for('reproduction.record_parturition', cycle_id=cycle.id, enrollment_id=enrollment.id) }}" class="grid-form">
+      <div class="grid-two">
+        <label>Parturition start<input type="date" name="period_start_date" value="{{ today }}" required /></label>
+        <label>Parturition end<input type="date" name="period_end_date" /></label>
+      </div>
+      <label>Females parturated<input type="number" name="females_parturated_count" min="0" value="0" required /></label>
+      <div class="grid-two">
+        <label>Single parturitions<input type="number" name="single_parturition_count" min="0" value="0" required /></label>
+        <label>Twin parturitions<input type="number" name="twin_parturition_count" min="0" value="0" required /></label>
+        <label>Multiple parturitions<input type="number" name="multiple_parturition_count" min="0" value="0" required /></label>
+        <label>Unknown litter size<input type="number" name="unknown_litter_parturition_count" min="0" value="0" required /></label>
+      </div>
+      <div class="grid-two">
+        <label>Total births<input type="number" name="offspring_born_total" min="0" value="0" required /></label>
+        <label>Born alive<input type="number" name="offspring_born_alive" min="0" value="0" required /></label>
+        <label>Stillborn<input type="number" name="offspring_stillborn" min="0" value="0" required /></label>
+        <label>Strong at birth<input type="number" name="strong_at_birth_count" min="0" value="0" required /></label>
+        <label>Unassessed at birth<input type="number" name="unassessed_at_birth_count" min="0" value="0" required /></label>
+      </div>
+      <div class="grid-three">
+        <label>Live-offspring mob
+          <select name="offspring_mob_id">
+            <option value="">Required when born alive is above zero</option>
+            {% for mob in offspring_mobs %}<option value="{{ mob.id }}">{{ mob.farm.name }} / {{ mob.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Offspring breed<input name="offspring_breed" value="{{ enrollment.cohort.animal_group_type.breed }}" /></label>
+        <label>Offspring sex
+          <select name="offspring_sex"><option value="mixed">Mixed</option></select>
+        </label>
+      </div>
+      <label>Observation notes<input name="notes" /></label>
+      <button type="submit" class="btn">Record Outcome And Live Births</button>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if row.birth %}
+  <details>
+    <summary><strong>Correct Parturition Observation</strong></summary>
+    <p class="muted">Live-born count cannot be changed here after stock has been posted. Use a ledger-backed stock adjustment first when that count was wrong.</p>
+    <form method="post" action="{{ url_for('reproduction.record_parturition', cycle_id=cycle.id, enrollment_id=enrollment.id) }}" class="grid-form">
+      <input type="hidden" name="supersedes_id" value="{{ row.birth.id }}" />
+      <div class="grid-two">
+        <label>Parturition start<input type="date" name="period_start_date" value="{{ row.birth.period_start_date }}" required /></label>
+        <label>Parturition end<input type="date" name="period_end_date" value="{{ row.birth.period_end_date or '' }}" /></label>
+      </div>
+      <label>Females parturated<input type="number" name="females_parturated_count" min="0" value="{{ row.birth.females_parturated_count }}" required /></label>
+      <div class="grid-two">
+        <label>Single parturitions<input type="number" name="single_parturition_count" min="0" value="{{ row.birth.single_parturition_count }}" required /></label>
+        <label>Twin parturitions<input type="number" name="twin_parturition_count" min="0" value="{{ row.birth.twin_parturition_count }}" required /></label>
+        <label>Multiple parturitions<input type="number" name="multiple_parturition_count" min="0" value="{{ row.birth.multiple_parturition_count }}" required /></label>
+        <label>Unknown litter size<input type="number" name="unknown_litter_parturition_count" min="0" value="{{ row.birth.unknown_litter_parturition_count }}" required /></label>
+      </div>
+      <div class="grid-two">
+        <label>Total births<input type="number" name="offspring_born_total" min="0" value="{{ row.birth.offspring_born_total }}" required /></label>
+        <label>Born alive<input type="number" name="offspring_born_alive" min="0" value="{{ row.birth.offspring_born_alive }}" required /></label>
+        <label>Stillborn<input type="number" name="offspring_stillborn" min="0" value="{{ row.birth.offspring_stillborn }}" required /></label>
+        <label>Strong at birth<input type="number" name="strong_at_birth_count" min="0" value="{{ row.birth.strong_at_birth_count }}" required /></label>
+        <label>Unassessed at birth<input type="number" name="unassessed_at_birth_count" min="0" value="{{ row.birth.unassessed_at_birth_count }}" required /></label>
+      </div>
+      <label>Correction notes<input name="notes" required /></label>
+      <button type="submit" class="btn btn-secondary">Record Parturition Correction</button>
+    </form>
+  </details>
+
+  <details>
+    <summary><strong>Correct Parturition Observation</strong></summary>
+    <p class="muted">Live-born count cannot be changed here after stock has been posted. Use a ledger-backed stock adjustment first when that count was wrong.</p>
+    <form method="post" action="{{ url_for('reproduction.record_parturition', cycle_id=cycle.id, enrollment_id=enrollment.id) }}" class="grid-form">
+      <input type="hidden" name="supersedes_id" value="{{ row.birth.id }}" />
+      <div class="grid-two">
+        <label>Parturition start<input type="date" name="period_start_date" value="{{ row.birth.period_start_date }}" required /></label>
+        <label>Parturition end<input type="date" name="period_end_date" value="{{ row.birth.period_end_date or '' }}" /></label>
+      </div>
+      <label>Females parturated<input type="number" name="females_parturated_count" min="0" value="{{ row.birth.females_parturated_count }}" required /></label>
+      <div class="grid-two">
+        <label>Single parturitions<input type="number" name="single_parturition_count" min="0" value="{{ row.birth.single_parturition_count }}" required /></label>
+        <label>Twin parturitions<input type="number" name="twin_parturition_count" min="0" value="{{ row.birth.twin_parturition_count }}" required /></label>
+        <label>Multiple parturitions<input type="number" name="multiple_parturition_count" min="0" value="{{ row.birth.multiple_parturition_count }}" required /></label>
+        <label>Unknown litter size<input type="number" name="unknown_litter_parturition_count" min="0" value="{{ row.birth.unknown_litter_parturition_count }}" required /></label>
+      </div>
+      <div class="grid-two">
+        <label>Total births<input type="number" name="offspring_born_total" min="0" value="{{ row.birth.offspring_born_total }}" required /></label>
+        <label>Born alive<input type="number" name="offspring_born_alive" min="0" value="{{ row.birth.offspring_born_alive }}" required /></label>
+        <label>Stillborn<input type="number" name="offspring_stillborn" min="0" value="{{ row.birth.offspring_stillborn }}" required /></label>
+        <label>Strong at birth<input type="number" name="strong_at_birth_count" min="0" value="{{ row.birth.strong_at_birth_count }}" required /></label>
+        <label>Unassessed at birth<input type="number" name="unassessed_at_birth_count" min="0" value="{{ row.birth.unassessed_at_birth_count }}" required /></label>
+      </div>
+      <label>Correction notes<input name="notes" required /></label>
+      <button type="submit" class="btn btn-secondary">Record Parturition Correction</button>
+    </form>
+  </details>
+
+  <details>
+    <summary><strong>Record Later Offspring Assessment</strong></summary>
+    <form method="post" action="{{ url_for('reproduction.record_assessment', cycle_id=cycle.id, enrollment_id=enrollment.id) }}" class="grid-form">
+      <div class="grid-two">
+        <label>Date<input type="date" name="assessed_on" value="{{ today }}" required /></label>
+        <label>Checkpoint
+          <select name="stage"><option value="marking">Marking</option><option value="weaning">Weaning</option><option value="other">Other</option></select>
+        </label>
+      </div>
+      <div class="grid-three">
+        <label>Present<input type="number" name="present_count" min="0" required /></label>
+        <label>Assessed<input type="number" name="assessed_count" min="0" required /></label>
+        <label>Strong<input type="number" name="strong_count" min="0" required /></label>
+      </div>
+      <label>Observation notes<input name="notes" /></label>
+      <button type="submit" class="btn">Record Assessment</button>
+    </form>
+    {% if row.assessments %}
+    <table><thead><tr><th>Date</th><th>Stage</th><th>Present</th><th>Assessed</th><th>Strong</th><th>Notes</th></tr></thead><tbody>
+      {% for assessment in row.assessments %}<tr><td>{{ assessment.assessed_on }}</td><td>{{ assessment.stage }}</td><td>{{ assessment.present_count }}</td><td>{{ assessment.assessed_count }}</td><td>{{ assessment.strong_count }}</td><td>{{ assessment.notes or "" }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% endif %}
+  </details>
+  {% endif %}
+
+  <details>
+    <summary><strong>Record Exception / Additional Observation</strong></summary>
+    <form method="post" action="{{ url_for('reproduction.record_exception', cycle_id=cycle.id, enrollment_id=enrollment.id) }}" class="grid-form">
+      <div class="grid-three">
+        <label>Date<input type="date" name="observed_on" value="{{ today }}" required /></label>
+        <label>Type<select name="event_type"><option value="pregnancy_loss">Pregnancy loss</option><option value="offspring_reassignment">Offspring reassignment</option><option value="other">Other</option></select></label>
+        <label>Count<input type="number" name="quantity" min="1" required /></label>
+      </div>
+      <label>Observation notes<input name="notes" required /></label>
+      <button type="submit" class="btn btn-secondary">Record Exception</button>
+    </form>
+    {% for exception in row.exceptions %}<p>{{ exception.observed_on }} &middot; {{ exception.event_type | replace("_", " ") }} &middot; {{ exception.quantity }} &middot; {{ exception.notes or "" }}</p>{% endfor %}
+  </details>
+</section>
+{% else %}
+<section class="card"><p>No female cohorts have been enrolled in this cycle.</p></section>
+{% endfor %}
+{% endblock %}

@@ -1,5 +1,6 @@
 from app.models.animal_group import AnimalGroupBalance, AnimalGroupType
 from app.models.calendar import CalendarActivity, CalendarActivityException
+from app.models.cohort import AnimalCohort, AnimalCohortLineage
 from app.models.farm import Farm
 from app.models.fence import FenceEvent, FenceEventMaterial, FenceSection
 from app.models.finance import (
@@ -27,6 +28,17 @@ from app.models.note_attachment import NoteAttachment
 from app.models.paddock import Paddock
 from app.models.paddock_event import PaddockEvent
 from app.models.rainfall import RainfallRecord
+from app.models.reproduction import (
+    BreedingCycle,
+    BreedingCycleFarm,
+    BreedingEnrollment,
+    FemaleStatusObservation,
+    OffspringAssessment,
+    ParturitionOutcome,
+    ParturitionStockEntry,
+    PregnancyAssessment,
+    ReproductiveException,
+)
 from app.models.shearing import (
     Shearer,
     ShearingBale,
@@ -62,12 +74,18 @@ from app.models.water_asset_event import WaterAssetEvent
 __all__ = [
     "AnimalGroupBalance",
     "AnimalGroupType",
+    "AnimalCohort",
+    "AnimalCohortLineage",
     "CalendarActivity",
     "CalendarActivityException",
     "CashTransaction",
     "CashTransactionLine",
+    "BreedingCycle",
+    "BreedingCycleFarm",
+    "BreedingEnrollment",
     "DailyStockSnapshot",
     "Farm",
+    "FemaleStatusObservation",
     "FenceEvent",
     "FenceEventMaterial",
     "FenceSection",
@@ -89,10 +107,15 @@ __all__ = [
     "MovementEvent",
     "MovementEventMob",
     "NoteAttachment",
+    "OffspringAssessment",
     "Paddock",
     "PaddockGate",
     "PaddockEvent",
+    "ParturitionOutcome",
+    "ParturitionStockEntry",
+    "PregnancyAssessment",
     "RainfallRecord",
+    "ReproductiveException",
     "Shearer",
     "ShearingBale",
     "ShearingBaleCode",

@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
 from collections import defaultdict
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.extensions import db
@@ -17,6 +17,7 @@ from app.models.animal_group import AnimalGroupBalance
 from app.models.movement import MobLineage, MovementEventKind, MovementRole
 from app.models.stock_ledger import StockEventType
 from app.services.allocation_distribution_service import AllocationDistributionService
+from app.services.cohort_service import CohortService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.grazing_service import GrazingService
 from app.services.mob_event_service import MobEventService
@@ -29,6 +30,38 @@ from app.services.validation_service import ValidationService
 class MovementService:
     FRACTION_QUANT = Decimal("0.0001")
     GROUP_FRACTION_QUANT = Decimal("0.000001")
+
+    @staticmethod
+    def _positive_balance_rows(mob: Mob) -> list[AnimalGroupBalance]:
+        return [row for row in mob.balances if int(row.head_count or 0) > 0]
+
+    @classmethod
+    def _resolve_balance_selector(
+        cls,
+        mob: Mob,
+        *,
+        selector: str | None = None,
+        cohort_id: str | None = None,
+        animal_group_type_id: str | None = None,
+    ) -> AnimalGroupBalance:
+        rows = cls._positive_balance_rows(mob)
+        cohort_key = str(cohort_id or "").strip()
+        selector_key = str(selector or "").strip()
+        group_key = str(animal_group_type_id or "").strip()
+        if selector_key.startswith("cohort:"):
+            cohort_key = selector_key.split(":", 1)[1]
+        elif selector_key:
+            group_key = selector_key
+
+        if cohort_key:
+            matches = [row for row in rows if str(row.cohort_id or "") == cohort_key]
+        else:
+            matches = [row for row in rows if str(row.animal_group_type_id) == group_key]
+        if not matches:
+            raise ValueError("Transfer contains an invalid animal cohort for this source mob")
+        if len(matches) > 1:
+            raise ValueError("This animal type contains multiple cohorts; select a specific cohort")
+        return matches[0]
 
     @staticmethod
     def _normalize_species_key(value: str | None) -> str:
@@ -138,16 +171,13 @@ class MovementService:
         if not splits:
             raise ValueError("At least one split mob is required")
 
-        source_balances = {
-            str(balance.animal_group_type_id): int(balance.head_count)
-            for balance in source_mob.balances
-            if int(balance.head_count) > 0
-        }
+        source_rows = MovementService._positive_balance_rows(source_mob)
+        source_balances = {str(balance.id): int(balance.head_count) for balance in source_rows}
         if not source_balances:
             raise ValueError("Source mob has no stock to split")
 
         by_mob: dict[str, dict[str, int]] = defaultdict(dict)
-        allocated_totals = {group_id: 0 for group_id in source_balances}
+        allocated_totals = {balance_id: 0 for balance_id in source_balances}
 
         for split in splits:
             name = (split.get("name") or "").strip()
@@ -162,9 +192,13 @@ class MovementService:
 
             mob_group_totals = by_mob[name]
             for group in groups:
-                group_id = str(group.get("animal_group_type_id") or "").strip()
-                if group_id not in source_balances:
-                    raise ValueError("Split contains an invalid animal group for this source mob")
+                balance = MovementService._resolve_balance_selector(
+                    source_mob,
+                    selector=group.get("stock_selector") or group.get("animal_group_type_id"),
+                    cohort_id=group.get("cohort_id"),
+                    animal_group_type_id=group.get("animal_group_type_id"),
+                )
+                balance_id = str(balance.id)
 
                 try:
                     qty = int(group.get("quantity", 0))
@@ -173,27 +207,34 @@ class MovementService:
                 if qty <= 0:
                     raise ValueError("Split quantities must be greater than 0")
 
-                mob_group_totals[group_id] = mob_group_totals.get(group_id, 0) + qty
-                allocated_totals[group_id] += qty
+                mob_group_totals[balance_id] = mob_group_totals.get(balance_id, 0) + qty
+                allocated_totals[balance_id] += qty
 
         normalized = []
         for name, groups in by_mob.items():
-            normalized_groups = [
-                {"animal_group_type_id": group_id, "quantity": qty}
-                for group_id, qty in groups.items()
-            ]
+            normalized_groups = []
+            for balance_id, qty in groups.items():
+                balance = next(row for row in source_rows if str(row.id) == balance_id)
+                normalized_groups.append(
+                    {
+                        "balance_id": balance_id,
+                        "animal_group_type_id": str(balance.animal_group_type_id),
+                        "cohort_id": str(balance.cohort_id) if balance.cohort_id else None,
+                        "quantity": qty,
+                    }
+                )
             normalized.append({"name": name, "groups": normalized_groups})
 
         if len(normalized) < 1:
             raise ValueError("Split must create at least one mob")
 
         has_allocated_stock = False
-        for group_id, source_qty in source_balances.items():
-            allocated_qty = allocated_totals.get(group_id, 0)
+        for balance_id, source_qty in source_balances.items():
+            allocated_qty = allocated_totals.get(balance_id, 0)
             if allocated_qty > source_qty:
                 raise ValueError(
                     "Split allocations cannot exceed source stock "
-                    f"(group {group_id}: allocated {allocated_qty}, available {source_qty})"
+                    f"(balance {balance_id}: allocated {allocated_qty}, available {source_qty})"
                 )
             if allocated_qty > 0:
                 has_allocated_stock = True
@@ -223,11 +264,15 @@ class MovementService:
             lsu_per_head = Decimal(
                 str(ReportingService.group_lsu_per_head(group.species, group.sex, group.age_class))
             )
-            context[str(balance.animal_group_type_id)] = {
-                "head_count": head_count,
-                "lsu_per_head": lsu_per_head,
-                "label": f"{group.species} {group.breed} {group.sex} {group.age_class}",
-            }
+            group_id = str(balance.animal_group_type_id)
+            if group_id in context:
+                context[group_id]["head_count"] += head_count
+            else:
+                context[group_id] = {
+                    "head_count": head_count,
+                    "lsu_per_head": lsu_per_head,
+                    "label": f"{group.species} {group.breed} {group.sex} {group.age_class}",
+                }
         return context
 
     @staticmethod
@@ -570,52 +615,61 @@ class MovementService:
         if str(destination_mob.farm_id) != selected_destination_farm_id:
             raise ValueError("Destination mob is invalid for the selected destination farm")
 
-        source_balance_rows = {
-            str(balance.animal_group_type_id): balance
-            for balance in source_mob.balances
-            if int(balance.head_count) > 0
-        }
-        source_balances = {
-            group_id: int(balance.head_count) for group_id, balance in source_balance_rows.items()
-        }
-        group_labels = {
-            group_id: MovementService._animal_group_log_label(balance.animal_group_type)
-            for group_id, balance in source_balance_rows.items()
-        }
-        if not source_balances:
+        source_balance_rows = MovementService._positive_balance_rows(source_mob)
+        if not source_balance_rows:
             raise ValueError("Source mob has no stock to transfer")
 
-        normalized: dict[str, int] = {}
+        normalized: dict[str, dict] = {}
         for item in transfers:
-            group_id = str(item.get("animal_group_type_id") or "").strip()
-            if not group_id:
-                raise ValueError("Each transfer row requires a group")
-            if group_id not in source_balances:
-                raise ValueError("Transfer contains an invalid animal group for this source mob")
+            balance = MovementService._resolve_balance_selector(
+                source_mob,
+                selector=item.get("stock_selector") or item.get("animal_group_type_id"),
+                cohort_id=item.get("cohort_id"),
+                animal_group_type_id=item.get("animal_group_type_id"),
+            )
             try:
                 quantity = int(item.get("quantity", 0))
             except (TypeError, ValueError):
                 raise ValueError("Transfer quantities must be whole numbers")
             if quantity <= 0:
                 raise ValueError("Transfer quantities must be greater than 0")
-            normalized[group_id] = normalized.get(group_id, 0) + quantity
+            balance_key = str(balance.id)
+            normalized.setdefault(balance_key, {"balance": balance, "quantity": 0})
+            normalized[balance_key]["quantity"] += quantity
 
-        for group_id, quantity in normalized.items():
-            available = source_balances[group_id]
+        for item in normalized.values():
+            balance = item["balance"]
+            quantity = item["quantity"]
+            available = int(balance.head_count)
             if quantity > available:
                 raise ValueError(
                     "Transfer quantities cannot exceed source stock "
-                    f"(group {group_id}: transfer {quantity}, available {available})"
+                    f"(cohort {balance.cohort_id or balance.id}: transfer {quantity}, available {available})"
                 )
 
         note_text = " ".join((note or "").strip().split())
         source_note = note or f"transfer to {destination_mob.name}"
         destination_note = note or f"transfer from {source_mob.name}"
-        for group_id, quantity in normalized.items():
+        summary_labels = {}
+        summary_quantities = {}
+        for balance_key, item in normalized.items():
+            balance = item["balance"]
+            quantity = item["quantity"]
+            group_id = str(balance.animal_group_type_id)
+            transfer_cohort = CohortService.cohort_for_partial_transfer(
+                balance,
+                quantity=quantity,
+                destination_farm_id=selected_destination_farm_id,
+            )
+            summary_labels[balance_key] = CohortService.display_label(
+                transfer_cohort, balance.animal_group_type
+            )
+            summary_quantities[balance_key] = quantity
             StockService.adjust_stock(
                 mob_id=source_mob.id,
                 farm_id=source_mob.farm_id,
                 animal_group_type_id=group_id,
+                cohort_id=balance.cohort_id,
                 event_type=StockEventType.transfer_out,
                 quantity=quantity,
                 note=source_note,
@@ -626,6 +680,7 @@ class MovementService:
                 mob_id=destination_mob.id,
                 farm_id=destination_mob.farm_id,
                 animal_group_type_id=group_id,
+                cohort_id=transfer_cohort.id,
                 event_type=StockEventType.transfer_in,
                 quantity=quantity,
                 note=destination_note,
@@ -633,7 +688,7 @@ class MovementService:
                 sync_grazing_history=False,
             )
 
-        transfer_summary = MovementService._transfer_summary(group_labels, normalized)
+        transfer_summary = MovementService._transfer_summary(summary_labels, summary_quantities)
         source_description = f"Stock transfer out to {destination_mob.name}: {transfer_summary}."
         destination_description = f"Stock transfer in from {source_mob.name}: {transfer_summary}."
         if note_text:
@@ -706,10 +761,20 @@ class MovementService:
             for group in split.get("groups", []):
                 qty = int(group["quantity"])
                 group_id = group["animal_group_type_id"]
+                balance = db.session.get(AnimalGroupBalance, group["balance_id"])
+                if balance is None:
+                    raise ValueError("Split source balance is no longer available")
+                transfer_cohort = CohortService.cohort_for_partial_transfer(
+                    balance,
+                    quantity=qty,
+                    movement_event_id=str(event.id),
+                    destination_farm_id=str(source_mob.farm_id),
+                )
                 StockService.adjust_stock(
                     mob_id=source_mob.id,
                     farm_id=source_mob.farm_id,
                     animal_group_type_id=group_id,
+                    cohort_id=balance.cohort_id,
                     event_type=StockEventType.transfer_out,
                     quantity=qty,
                     note="split out",
@@ -720,6 +785,7 @@ class MovementService:
                     mob_id=new_mob.id,
                     farm_id=source_mob.farm_id,
                     animal_group_type_id=group_id,
+                    cohort_id=transfer_cohort.id,
                     event_type=StockEventType.transfer_in,
                     quantity=qty,
                     note="split in",
@@ -773,6 +839,7 @@ class MovementService:
                     mob_id=source.id,
                     farm_id=farm_id,
                     animal_group_type_id=balance.animal_group_type_id,
+                    cohort_id=balance.cohort_id,
                     event_type=StockEventType.transfer_out,
                     quantity=balance.head_count,
                     note="merge out",
@@ -783,6 +850,7 @@ class MovementService:
                     mob_id=result_mob.id,
                     farm_id=farm_id,
                     animal_group_type_id=balance.animal_group_type_id,
+                    cohort_id=balance.cohort_id,
                     event_type=StockEventType.transfer_in,
                     quantity=balance.head_count,
                     note="merge in",

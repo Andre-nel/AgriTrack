@@ -44,6 +44,7 @@ from app.models import (
 from app.models.stock_ledger import StockEventType
 from app.modules.farms.map_routes import _build_farm_map_feature_collection
 from app.services.calendar_service import CalendarService
+from app.services.cohort_service import CohortService
 from app.services.fence_service import FenceService
 from app.services.gate_service import GateService
 from app.services.incident_service import IncidentService
@@ -252,11 +253,17 @@ def _serialize_animal_group_type(group_type: AnimalGroupType) -> dict:
 
 
 def _serialize_balance(balance: AnimalGroupBalance) -> dict:
+    cohort = balance.cohort
     return {
         "id": str(balance.id),
         "mob_id": str(balance.mob_id),
         "animal_group_type_id": str(balance.animal_group_type_id),
         "animal_group_type": _serialize_animal_group_type(balance.animal_group_type),
+        "cohort_id": str(balance.cohort_id) if balance.cohort_id else None,
+        "reproductive_state": cohort.reproductive_state if cohort else "not_recorded",
+        "expected_litter_size": cohort.expected_litter_size if cohort else "not_recorded",
+        "lactation_state": cohort.lactation_state if cohort else "not_recorded",
+        "offspring_at_foot": cohort.offspring_at_foot if cohort else "not_recorded",
         "head_count": int(balance.head_count),
         "updated_at": _iso_datetime(balance.updated_at),
     }
@@ -1821,16 +1828,19 @@ def _handle_stock_count_record(farm: Farm, payload: dict) -> dict:
     if uses_group_payload and counted_quantity <= 0:
         raise ValueError("quantity must be greater than 0 for a new animal group")
 
-    current_balance = AnimalGroupBalance.query.filter_by(
-        mob_id=mob.id,
+    cohort_id = str(payload.get("cohort_id") or "").strip() or None
+    current_balance = CohortService.balance_for_selector(
+        mob_id=str(mob.id),
         animal_group_type_id=group_id,
-    ).first()
+        cohort_id=cohort_id,
+    )
     current_head_count = int(current_balance.head_count) if current_balance else 0
     delta = counted_quantity - current_head_count
     if delta == 0:
         return {
             "mob_id": str(mob.id),
             "animal_group_type_id": group_id,
+            "cohort_id": str(current_balance.cohort_id) if current_balance and current_balance.cohort_id else None,
             "head_count": counted_quantity,
             "message": "Count matches current balance. No stock adjustment posted.",
         }
@@ -1840,6 +1850,7 @@ def _handle_stock_count_record(farm: Farm, payload: dict) -> dict:
         mob_id=mob.id,
         farm_id=farm.id,
         animal_group_type_id=group_id,
+        cohort_id=cohort_id,
         event_type=event_type,
         quantity=abs(delta),
         note=payload.get("note") or "mobile stock count",
@@ -1850,6 +1861,7 @@ def _handle_stock_count_record(farm: Farm, payload: dict) -> dict:
     return {
         "ledger_id": str(ledger.id),
         "animal_group_type_id": group_id,
+        "cohort_id": str(ledger.cohort_id) if ledger.cohort_id else None,
         "event_type": event_type.value,
         "quantity": abs(delta),
         "head_count": counted_quantity,

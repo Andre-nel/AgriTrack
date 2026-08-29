@@ -17,6 +17,7 @@ from app.services.mob_event_service import MobEventService
 from app.services.mob_service import MobService
 from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
+from app.services.reproduction_service import ReproductionService
 
 
 def _get_active_mob_or_404(mob_id: str) -> Mob:
@@ -51,6 +52,17 @@ def register_legacy_routes(bp) -> None:
         except ValueError as exc:
             flash(str(exc), "error")
 
+        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+    @bp.post("/mobs/<mob_id>/female-status")
+    def mob_female_status_form(mob_id):
+        mob = _get_active_mob_or_404(mob_id)
+        try:
+            ReproductionService.record_female_status_from_form(mob, request.form)
+            flash("Female cohort state observation recorded", "success")
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
         return redirect(url_for("web.mob_detail", mob_id=mob_id))
 
     @bp.post("/mobs/<mob_id>/events")

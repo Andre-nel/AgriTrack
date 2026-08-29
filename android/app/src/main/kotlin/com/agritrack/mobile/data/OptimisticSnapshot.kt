@@ -294,6 +294,7 @@ private fun applyStockCount(json: JSONObject, command: JSONObject, payload: JSON
         group = group,
         quantity = quantity,
         balanceId = pendingId(command, "balance"),
+        cohortId = payload.optString("cohort_id").takeIf { it.isNotBlank() },
     )
     return true
 }
@@ -344,11 +345,13 @@ private fun applyMobTransfer(json: JSONObject, command: JSONObject, payload: JSO
     for (index in 0 until transfers.length()) {
         val transfer = transfers.optJSONObject(index) ?: continue
         val groupId = transfer.optString("animal_group_type_id")
+        val cohortId = transfer.optString("cohort_id").takeIf { it.isNotBlank() }
         val quantity = transfer.optInt("quantity", 0)
         if (groupId.isBlank() || quantity <= 0) {
             continue
         }
-        val sourceBalance = findBalance(sourceMob, groupId)
+        val sourceBalance = findBalance(sourceMob, groupId, cohortId)
+        val sourceHead = sourceBalance?.optInt("head_count", 0) ?: 0
         val group = sourceBalance?.optJSONObject("animal_group_type")?.deepCopy()
             ?: animalGroupTypeForId(json, groupId)
             ?: JSONObject().put("id", groupId)
@@ -357,7 +360,12 @@ private fun applyMobTransfer(json: JSONObject, command: JSONObject, payload: JSO
             changed = true
         }
         if (destinationMob != null) {
-            val destinationBalance = findBalance(destinationMob, groupId)
+            val destinationCohortId = when {
+                cohortId.isNullOrBlank() -> null
+                quantity >= sourceHead -> cohortId
+                else -> pendingId(command, "cohort-$index")
+            }
+            val destinationBalance = findBalance(destinationMob, groupId, destinationCohortId)
             if (destinationBalance == null) {
                 addOrUpdateBalance(
                     mob = destinationMob,
@@ -365,7 +373,11 @@ private fun applyMobTransfer(json: JSONObject, command: JSONObject, payload: JSO
                     group = group,
                     quantity = quantity,
                     balanceId = pendingId(command, "balance"),
+                    cohortId = destinationCohortId,
                 )
+                findBalance(destinationMob, groupId, destinationCohortId)?.let { added ->
+                    copyCohortState(sourceBalance, added)
+                }
             } else {
                 destinationBalance.put("head_count", destinationBalance.optInt("head_count", 0) + quantity)
             }
@@ -373,6 +385,20 @@ private fun applyMobTransfer(json: JSONObject, command: JSONObject, payload: JSO
         }
     }
     return changed
+}
+
+private fun copyCohortState(source: JSONObject?, destination: JSONObject) {
+    source ?: return
+    listOf(
+        "reproductive_state",
+        "expected_litter_size",
+        "lactation_state",
+        "offspring_at_foot",
+    ).forEach { key ->
+        if (source.has(key)) {
+            destination.put(key, source.optString(key))
+        }
+    }
 }
 
 private fun applyPaddockUpdate(json: JSONObject, payload: JSONObject): Boolean {
@@ -1611,18 +1637,21 @@ private fun addOrUpdateBalance(
     group: JSONObject,
     quantity: Int,
     balanceId: String,
+    cohortId: String? = null,
 ) {
-    val balance = findBalance(mob, groupId)
+    val balance = findBalance(mob, groupId, cohortId)
     if (balance == null) {
-        ensureArray(mob, "balances").put(
-            JSONObject()
+        val row = JSONObject()
                 .put("id", balanceId)
                 .put("mob_id", mob.optString("id"))
                 .put("animal_group_type_id", groupId)
                 .put("animal_group_type", group.deepCopy().put("id", groupId))
                 .put("head_count", quantity)
-                .put("pending_sync", true),
-        )
+                .put("pending_sync", true)
+        if (!cohortId.isNullOrBlank()) {
+            row.put("cohort_id", cohortId)
+        }
+        ensureArray(mob, "balances").put(row)
     } else {
         balance.put("head_count", quantity)
         balance.put("pending_sync", true)
@@ -1644,11 +1673,14 @@ private fun animalGroupTypeForId(json: JSONObject, groupId: String): JSONObject?
     return null
 }
 
-private fun findBalance(mob: JSONObject, groupId: String): JSONObject? {
+private fun findBalance(mob: JSONObject, groupId: String, cohortId: String? = null): JSONObject? {
     val balances = mob.optJSONArray("balances") ?: return null
     for (index in 0 until balances.length()) {
         val balance = balances.optJSONObject(index) ?: continue
-        if (balance.optString("animal_group_type_id") == groupId) {
+        if (
+            balance.optString("animal_group_type_id") == groupId &&
+            (cohortId.isNullOrBlank() || balance.optString("cohort_id") == cohortId)
+        ) {
             return balance
         }
     }

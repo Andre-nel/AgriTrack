@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Reproduction Analytics | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-section-heading">
+  <div><h1>Reproduction Analytics</h1><p class="muted">Metrics use cycles selected by exposure start date. Unknown observations are not treated as zero.</p></div>
+  <a class="btn btn-secondary" href="{{ url_for('reproduction.index') }}">Manage Cycles</a>
+</div>
+<section class="card">
+  <form method="get" action="{{ url_for('reproduction.analytics') }}" class="grid-form">
+    <div class="grid-two">
+      <label>Farm<select name="farm_id"><option value="">All farms</option>{% for farm in farms %}<option value="{{ farm.id }}" {% if selected_farm_id == farm.id|string %}selected{% endif %}>{{ farm.name }}</option>{% endfor %}</select></label>
+      <label>Species<select name="species"><option value="">All species</option>{% for species in ("Cattle", "Sheep", "Goat") %}<option value="{{ species }}" {% if selected_species == species %}selected{% endif %}>{{ species }}</option>{% endfor %}</select></label>
+      <label>Exposure start from<input type="date" name="start_date" value="{{ start_date }}" /></label>
+      <label>Exposure start through<input type="date" name="end_date" value="{{ end_date }}" /></label>
+    </div>
+    <div class="row-actions"><button class="btn" type="submit">Apply Filters</button><a class="btn btn-secondary" href="{{ url_for('reproduction.analytics') }}">Clear</a></div>
+  </form>
+</section>
+
+<section class="cards farm-grid reproduction-metric-grid">
+  <article class="card"><h2>Parturition Rate</h2><p class="simulator-summary-value">{% if report.metrics.parturition_rate_pct is not none %}{{ "%.2f"|format(report.metrics.parturition_rate_pct) }}%{% else %}N/A{% endif %}</p><p class="muted">{{ report.totals.parturated }} parturated / {{ report.totals.birth_observed_exposed }} exposed with an outcome</p></article>
+  <article class="card"><h2>Expected Offspring / Parturition</h2><p class="simulator-summary-value">{% if report.metrics.expected_offspring_per_parturition is not none %}{{ "%.3f"|format(report.metrics.expected_offspring_per_parturition) }}{% else %}N/A{% endif %}</p><p class="muted">{{ report.totals.expected_offspring }} expected / {{ report.totals.expected_quantified_pregnant }} pregnant with a quantified expectation</p></article>
+  <article class="card"><h2>Strong / Total Births</h2><p class="simulator-summary-value">{% if report.metrics.strong_at_birth_pct is not none %}{{ "%.2f"|format(report.metrics.strong_at_birth_pct) }}%{% else %}N/A{% endif %}</p><p class="muted">{{ report.totals.strong_at_birth }} strong / {{ report.totals.total_births }} total births</p></article>
+  <article class="card"><h2>Strong / Exposed Female</h2><p class="simulator-summary-value">{% if report.metrics.strong_per_exposed_female is not none %}{{ "%.3f"|format(report.metrics.strong_per_exposed_female) }}{% else %}N/A{% endif %}</p><p class="muted">{{ report.totals.strong_at_birth }} strong / {{ report.totals.birth_observed_exposed }} exposed with a birth outcome</p></article>
+</section>
+
+<section class="card">
+  <h2>Coverage</h2>
+  <p>{{ cycles | length }} cycles &middot; {{ report.enrollments | length }} female cohorts &middot; {{ report.totals.birth_unobserved_exposed }} exposed females without a parturition outcome &middot; {{ report.totals.expected_unquantified_pregnant }} pregnant females without a quantified offspring expectation &middot; {{ report.totals.unassessed_scan }} females unassessed at scan &middot; {{ report.totals.unassessed_birth }} live births without a recorded birth-strength classification.</p>
+</section>
+
+{% if report.later_assessments %}
+<section class="card"><h2>Later Strength Assessments</h2><table><thead><tr><th>Stage</th><th>Present</th><th>Assessed</th><th>Strong</th><th>Strong / Assessed</th><th>Strong / Total Births</th></tr></thead><tbody>
+{% for row in report.later_assessments %}<tr><td>{{ row.stage | title }}</td><td>{{ row.present }}</td><td>{{ row.assessed }}</td><td>{{ row.strong }}</td><td>{% if row.strong_of_assessed_pct is not none %}{{ "%.2f"|format(row.strong_of_assessed_pct) }}%{% else %}N/A{% endif %}</td><td>{% if row.strong_of_births_pct is not none %}{{ "%.2f"|format(row.strong_of_births_pct) }}%{% else %}N/A{% endif %}</td></tr>{% endfor %}
+</tbody></table></section>
+{% endif %}
+
+<section class="card"><h2>Cohort Detail</h2><table><thead><tr><th>Cycle</th><th>Farm</th><th>Mob</th><th>Female cohort</th><th>Exposed</th><th>Pregnant</th><th>Expected</th><th>Parturated</th><th>Births</th><th>Strong</th></tr></thead><tbody>
+{% for row in report.enrollments %}<tr><td>{{ row.cycle_name }}</td><td>{{ row.farm_name }}</td><td>{{ row.mob_name }}</td><td>{{ row.group_label }}</td><td>{{ row.exposed }}</td><td>{{ row.pregnant if row.pregnant is not none else "N/A" }}</td><td>{{ row.expected_offspring if row.expected_offspring is not none else "N/A" }}</td><td>{{ row.parturated if row.parturated is not none else "N/A" }}</td><td>{{ row.total_births if row.total_births is not none else "N/A" }}</td><td>{{ row.strong_at_birth if row.strong_at_birth is not none else "N/A" }}</td></tr>{% else %}<tr><td colspan="10">No reproductive records match these filters.</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

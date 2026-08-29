@@ -1,9 +1,10 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.models import Farm, Mob, MobEvent, Paddock
 from app.models.stock_ledger import StockEventType
 from app.modules.tasks.entity_links import linked_task_rows_for_entity
+from app.services.cohort_service import CohortService
 from app.services.mob_event_service import MobEventService
 from app.services.reporting_service import ReportingService
 
@@ -179,7 +180,9 @@ def build_mob_detail_context(
                 }
             )
 
-    split_group_options = []
+    split_group_options_by_id = {}
+    stock_line_options = []
+    female_balance_options = []
     for balance in sorted(
         mob.balances,
         key=lambda b: (
@@ -193,9 +196,17 @@ def build_mob_detail_context(
             continue
         group = balance.animal_group_type
         lsu_per_head = ReportingService.group_lsu_per_head(group.species, group.sex, group.age_class)
-        split_group_options.append(
-            {
-                "id": str(balance.animal_group_type_id),
+        group_id = str(balance.animal_group_type_id)
+        existing_group_option = split_group_options_by_id.get(group_id)
+        if existing_group_option:
+            existing_group_option["head_count"] += int(balance.head_count)
+            existing_group_option["label"] = (
+                f"{group.species} | {group.breed} | {group.sex} | {group.age_class} "
+                f"(available: {existing_group_option['head_count']})"
+            )
+        else:
+            split_group_options_by_id[group_id] = {
+                "id": group_id,
                 "species": group.species,
                 "breed": group.breed,
                 "sex": group.sex,
@@ -207,7 +218,32 @@ def build_mob_detail_context(
                     f"(available: {int(balance.head_count)})"
                 ),
             }
+        stock_line_options.append(
+            {
+                "id": (
+                    f"cohort:{balance.cohort_id}"
+                    if balance.cohort_id
+                    else str(balance.animal_group_type_id)
+                ),
+                "cohort_id": str(balance.cohort_id) if balance.cohort_id else None,
+                "animal_group_type_id": group_id,
+                "head_count": int(balance.head_count),
+                "label": (
+                    f"{CohortService.display_label(balance.cohort, group)} "
+                    f"(available: {int(balance.head_count)})"
+                ),
+            }
         )
+        if CohortService.is_female_group(group):
+            female_balance_options.append(
+                {
+                    "id": str(balance.id),
+                    "head_count": int(balance.head_count),
+                    "label": CohortService.display_label(balance.cohort, group),
+                }
+            )
+
+    split_group_options = list(split_group_options_by_id.values())
 
     if current_count_allocations:
         initial_count_allocation_rows = []
@@ -283,6 +319,9 @@ def build_mob_detail_context(
         "allocation_total_pct": float(allocation_total_pct),
         "mob_species_totals": _species_total_rows(mob),
         "split_group_options": split_group_options,
+        "stock_line_options": stock_line_options,
+        "female_balance_options": female_balance_options,
+        "today": date.today().isoformat(),
         "initial_count_allocation_rows": initial_count_allocation_rows,
         "has_current_count_allocations": bool(current_count_allocations),
         "mob_events": mob_events,
