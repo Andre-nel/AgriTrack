@@ -576,7 +576,6 @@ class MovementService:
                 destination_farm_id=destination_farm_id,
                 when=event_time,
                 allocation_mode="counts",
-                apply_open_gate_network=False,
                 allow_cross_farm_allocations=True,
             )
             moved_mob_count += 1

@@ -1,8 +1,18 @@
 from datetime import datetime, timezone
 
 from app.extensions import db
-from app.models import AnimalGroupBalance, AnimalGroupType, Farm, Mob, MobEvent, StockLedgerEntry
+from app.models import (
+    AnimalGroupBalance,
+    AnimalGroupType,
+    Farm,
+    GrazingAllocationLsuBreakdownHistory,
+    Mob,
+    MobEvent,
+    Paddock,
+    StockLedgerEntry,
+)
 from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_balance_line_from_form
+from app.services.grazing_service import GrazingService
 from app.services.movement_service import MovementService
 
 
@@ -196,3 +206,79 @@ def test_transfer_stock_between_mobs_records_log_notes_for_both_mobs(app):
         assert "2 head Sheep | Merino | ewe | adult" in destination_event.description
         assert "Moved weaners after count" in source_event.description
         assert "Moved weaners after count" in destination_event.description
+
+
+def test_transfer_into_grazed_mob_aggregates_same_group_across_cohorts(app):
+    with app.app_context():
+        source_farm = Farm(name="Source Transfer Farm", timezone="SAST", active=True)
+        destination_farm = Farm(name="Destination Transfer Farm", timezone="SAST", active=True)
+        db.session.add_all([source_farm, destination_farm])
+        db.session.flush()
+
+        source = Mob(farm_id=source_farm.id, name="Source Ewes", status="active")
+        destination = Mob(
+            farm_id=destination_farm.id,
+            name="Destination Ewes",
+            status="active",
+        )
+        paddock = Paddock(
+            farm_id=destination_farm.id,
+            name="Destination Camp",
+            area_ha=10,
+            grazeable_area_ha=10,
+        )
+        group_type = AnimalGroupType(
+            species="Sheep",
+            breed="Dohne",
+            sex="ewe",
+            age_class="adult",
+        )
+        db.session.add_all([source, destination, paddock, group_type])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(
+                    mob_id=source.id,
+                    animal_group_type_id=group_type.id,
+                    head_count=10,
+                ),
+                AnimalGroupBalance(
+                    mob_id=destination.id,
+                    animal_group_type_id=group_type.id,
+                    head_count=20,
+                ),
+            ]
+        )
+        session_started_at = datetime(2026, 5, 18, 8, 0, tzinfo=timezone.utc)
+        GrazingService.open_session(
+            farm_id=destination_farm.id,
+            mob_id=destination.id,
+            start_at=session_started_at,
+            allocations=[{"paddock_id": str(paddock.id), "allocation_fraction": "1.0"}],
+        )
+        db.session.commit()
+
+        MovementService.transfer_stock_between_mobs(
+            source_mob=source,
+            destination_mob=destination,
+            transfers=[{"animal_group_type_id": str(group_type.id), "quantity": 5}],
+            destination_farm_id=str(destination_farm.id),
+            when=datetime(2026, 5, 18, 9, 30, tzinfo=timezone.utc),
+        )
+        db.session.commit()
+
+        destination_balances = AnimalGroupBalance.query.filter_by(
+            mob_id=destination.id,
+            animal_group_type_id=group_type.id,
+        ).all()
+        assert len(destination_balances) == 2
+        assert sum(balance.head_count for balance in destination_balances) == 25
+
+        live_breakdown = GrazingAllocationLsuBreakdownHistory.query.filter_by(
+            mob_id=destination.id,
+            animal_group_type_id=group_type.id,
+            effective_to=None,
+        ).one()
+        assert live_breakdown.head_count == 25
+        assert float(live_breakdown.allocated_head_count) == 25.0
+        assert float(live_breakdown.allocation_fraction) == 1.0

@@ -229,32 +229,35 @@ class GrazingHistoryService:
 
     @classmethod
     def _mob_lsu_breakdown_from_balances(cls, mob: Mob) -> list[dict]:
-        breakdown = []
+        breakdown_by_group: dict[str, dict] = {}
         for balance in mob.balances:
             head_count = int(balance.head_count or 0)
             if head_count <= 0:
                 continue
 
             group = balance.animal_group_type
+            group_id = str(group.id)
             lsu_per_head = ReportingService.group_lsu_per_head(
                 group.species,
                 group.sex,
                 group.age_class,
             )
-            group_lsu = head_count * lsu_per_head
-            if group_lsu <= 0:
+            if lsu_per_head <= 0:
                 continue
 
-            breakdown.append(
+            row = breakdown_by_group.setdefault(
+                group_id,
                 {
-                    "animal_group_type_id": str(group.id),
-                    "head_count": head_count,
+                    "animal_group_type_id": group_id,
+                    "head_count": 0,
                     "lsu_per_head": lsu_per_head,
-                    "group_lsu": group_lsu,
-                }
+                    "group_lsu": 0,
+                },
             )
+            row["head_count"] += head_count
+            row["group_lsu"] += head_count * lsu_per_head
 
-        return sorted(breakdown, key=lambda row: row["animal_group_type_id"])
+        return sorted(breakdown_by_group.values(), key=lambda row: row["animal_group_type_id"])
 
     @classmethod
     def _allocation_lsu_values(
@@ -324,7 +327,11 @@ class GrazingHistoryService:
                 }
             )
 
-        allocation_fraction = allocated_lsu_total / float(mob_total_lsu) if mob_total_lsu > 0 else 0.0
+        allocation_fraction = (
+            min(1.0, max(0.0, allocated_lsu_total / float(mob_total_lsu)))
+            if mob_total_lsu > 0
+            else 0.0
+        )
         return {
             "allocation_fraction": allocation_fraction,
             "allocated_lsu": allocated_lsu_total,

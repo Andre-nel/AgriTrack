@@ -7,6 +7,7 @@ from app.models import (
     Mob,
     Paddock,
 )
+from app.services.gate_service import GateService
 from app.services.movement_service import MovementService
 
 
@@ -127,3 +128,70 @@ def test_map_species_move_converts_percentage_allocations_to_whole_head_counts(c
         }
         assert counts[target_id] == {cattle_id: moved_head_count}
         assert counts[middle_id] == {cattle_id: 5 - moved_head_count}
+
+
+def test_map_species_move_distributes_stock_across_target_open_gate_network(client, app):
+    with app.app_context():
+        farm = Farm(name="Open Gate Species Drag Farm", timezone="SAST")
+        db.session.add(farm)
+        db.session.flush()
+        source = Paddock(farm_id=farm.id, name="Source", area_ha=10, grazeable_area_ha=10)
+        target = Paddock(farm_id=farm.id, name="Target", area_ha=30, grazeable_area_ha=30)
+        adjacent = Paddock(farm_id=farm.id, name="Adjacent", area_ha=10, grazeable_area_ha=10)
+        mob = Mob(farm_id=farm.id, name="Open Gate Mixed Mob", status="active")
+        cattle = AnimalGroupType(species="Cattle", breed="Bonsmara", sex="cow", age_class="adult")
+        sheep = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add_all([source, target, adjacent, mob, cattle, sheep])
+        db.session.flush()
+        db.session.add_all(
+            [
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=cattle.id, head_count=8),
+                AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=sheep.id, head_count=12),
+            ]
+        )
+        MovementService.move_mob(
+            mob=mob,
+            allocations=[{"paddock_id": str(source.id), "allocation_fraction": "1.0"}],
+            destination_farm_id=str(farm.id),
+        )
+        gate = GateService.create_manual_gate(
+            farm_id=str(farm.id),
+            paddock_a_id=str(target.id),
+            paddock_b_id=str(adjacent.id),
+        )
+        gate.status = "open"
+        db.session.commit()
+
+        source_id = str(source.id)
+        target_id = str(target.id)
+        adjacent_id = str(adjacent.id)
+        mob_id = str(mob.id)
+        cattle_id = str(cattle.id)
+        sheep_id = str(sheep.id)
+
+    response = client.post(
+        "/api/mobs/map-species-move",
+        json={
+            "source_paddock_id": source_id,
+            "target_paddock_id": target_id,
+            "species": "Cattle",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["moved_head_count"] == 8
+
+    with app.app_context():
+        session = GrazingSession.query.filter_by(mob_id=mob_id, end_at=None).one()
+        counts = {
+            str(allocation.paddock_id): {
+                str(row.animal_group_type_id): row.head_count
+                for row in allocation.group_assignments
+            }
+            for allocation in session.allocations
+        }
+        assert counts == {
+            source_id: {sheep_id: 12},
+            target_id: {cattle_id: 6},
+            adjacent_id: {cattle_id: 2},
+        }

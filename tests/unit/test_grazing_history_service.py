@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from app.extensions import db
 from app.models import (
@@ -27,6 +28,34 @@ def _build_base_entities():
     db.session.add_all([paddock, mob])
     db.session.flush()
     return farm, paddock, mob
+
+
+def test_allocation_lsu_values_clamps_full_allocation_float_drift():
+    allocation = SimpleNamespace(
+        group_assignments=[
+            SimpleNamespace(
+                animal_group_type_id="group-1",
+                head_count=1,
+                group_fraction=1,
+            )
+        ]
+    )
+    group_breakdown = [
+        {
+            "animal_group_type_id": "group-1",
+            "head_count": 1,
+            "lsu_per_head": 57.6,
+            "group_lsu": 57.599999999999994,
+        }
+    ]
+
+    values = GrazingHistoryService._allocation_lsu_values(
+        allocation,
+        group_breakdown,
+        mob_total_lsu=57.599999999999994,
+    )
+
+    assert values["allocation_fraction"] == 1.0
 
 
 def test_mob_lsu_intervals_from_ledger_builds_expected_totals(app):
