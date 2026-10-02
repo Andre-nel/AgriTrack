@@ -73,7 +73,7 @@ fun filterMobs(mobs: List<MobSummary>, filters: MobFilterState): List<MobSummary
         if (minCount != null && mob.totalHead < minCount) return@filter false
         if (maxCount != null && mob.totalHead > maxCount) return@filter false
         if (species.isNotEmpty()) {
-            val mobSpecies = mob.balances.map { it.animalGroupType.species.normalizedToken() }.toSet()
+            val mobSpecies = mob.animalGroups.map { it.animalGroupType.species.normalizedToken() }.toSet()
             if (mobSpecies.intersect(species).isEmpty()) return@filter false
         }
         true

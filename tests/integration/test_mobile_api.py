@@ -1256,16 +1256,16 @@ def test_mobile_sync_commands_apply_and_duplicate_replay_is_idempotent(client, a
         assert FenceEvent.query.filter_by(farm_id=farm_id).count() == 1
         assert Incident.query.filter_by(farm_id=farm_id).count() == 1
         assert Incident.query.filter_by(farm_id=farm_id).one().category == "Stock missing"
-        balance = AnimalGroupBalance.query.filter_by(
+        balances = AnimalGroupBalance.query.filter_by(
             mob_id=mob_id,
             animal_group_type_id=group_id,
-        ).first()
-        assert balance.head_count == 5
-        target_balance = AnimalGroupBalance.query.filter_by(
+        ).all()
+        assert sum(balance.head_count for balance in balances) == 5
+        target_balances = AnimalGroupBalance.query.filter_by(
             mob_id=transfer_target_id,
             animal_group_type_id=group_id,
-        ).first()
-        assert target_balance.head_count == 2
+        ).all()
+        assert sum(balance.head_count for balance in target_balances) == 2
         active_session = GrazingSession.query.filter_by(farm_id=farm_id, mob_id=mob_id, end_at=None).first()
         assert active_session is not None
         assert sorted(float(row.allocation_fraction) for row in active_session.allocations) == [0.4, 0.6]

@@ -133,9 +133,10 @@ class CohortService:
         lactation_state: str | None = None,
         offspring_at_foot: str | None = None,
         origin_farm_id: str | None = None,
+        animal_group_type_id: str | None = None,
     ) -> AnimalCohort:
         child = cls.create_cohort(
-            animal_group_type_id=str(parent.animal_group_type_id),
+            animal_group_type_id=animal_group_type_id or str(parent.animal_group_type_id),
             origin_farm_id=origin_farm_id or parent.origin_farm_id,
             origin="split",
             reproductive_state=reproductive_state or parent.reproductive_state,

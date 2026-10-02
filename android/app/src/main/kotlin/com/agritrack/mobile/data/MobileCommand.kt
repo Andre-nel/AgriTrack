@@ -4,9 +4,21 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+private fun JSONObject.putAnimalGroupSelector(groupId: String, group: AnimalGroupTypeSummary?): JSONObject =
+    if (group == null) {
+        put("animal_group_type_id", groupId)
+    } else {
+        put("animal_group_type", JSONObject()
+            .put("species", group.species)
+            .put("breed", group.breed)
+            .put("sex", group.sex)
+            .put("age_class", group.ageClass))
+    }
+
 data class MobMoveGroupCount(
     val animalGroupTypeId: String,
     val headCount: Int,
+    val animalGroupType: AnimalGroupTypeSummary? = null,
 )
 
 data class MobMoveCountAllocation(
@@ -150,7 +162,7 @@ data class MobileCommand(
                                             allocation.groupCounts.forEach { group ->
                                                 put(
                                                     JSONObject()
-                                                        .put("animal_group_type_id", group.animalGroupTypeId)
+                                                        .putAnimalGroupSelector(group.animalGroupTypeId, group.animalGroupType)
                                                         .put("head_count", group.headCount)
                                                 )
                                             }
@@ -489,10 +501,11 @@ data class MobileCommand(
             cohortId: String?,
             quantity: Int,
             note: String,
+            animalGroupType: AnimalGroupTypeSummary? = null,
         ): MobileCommand {
             val transfer = JSONObject()
-                .put("animal_group_type_id", animalGroupTypeId)
                 .put("quantity", quantity)
+            transfer.putAnimalGroupSelector(animalGroupTypeId, animalGroupType)
             if (!cohortId.isNullOrBlank()) {
                 transfer.put("cohort_id", cohortId)
             }

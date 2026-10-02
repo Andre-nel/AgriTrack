@@ -662,6 +662,22 @@ class GateService:
         return {paddock_id}
 
     @classmethod
+    def open_gate_component(cls, paddock: Paddock) -> list[Paddock]:
+        """Return a camp and its active open-gate connections, including other farms."""
+        paddocks_by_id = cls._active_paddocks_by_id(str(paddock.farm_id))
+        paddock_id = str(paddock.id)
+        # An existing assignment to an inactive camp can still be corrected,
+        # but inactive camps must never provide a route through the gate graph.
+        if paddock_id not in paddocks_by_id:
+            return [paddock]
+        components = cls._components(
+            set(paddocks_by_id),
+            cls._open_edges(str(paddock.farm_id), paddock_ids=set(paddocks_by_id)),
+        )
+        component = cls._component_containing(components, paddock_id)
+        return [paddocks_by_id[row_id] for row_id in sorted(component)]
+
+    @classmethod
     def _component_options(cls, components: list[set[str]], paddocks_by_id: dict[str, Paddock]) -> list[dict]:
         options = []
         for component in components:

@@ -2,6 +2,7 @@ package com.agritrack.mobile.data
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.round
@@ -280,22 +281,44 @@ private fun applyStockCount(json: JSONObject, command: JSONObject, payload: JSON
     if (quantity < 0) {
         return false
     }
+    val groupPayload = payload.optJSONObject("animal_group_type")
     val groupId = payload.optString("animal_group_type_id").ifBlank {
-        pendingId(command, "animal-group")
+        groupPayload?.let { existingAnimalGroupId(json, it) } ?: pendingId(command, "animal-group")
     }
     val group = payload.optJSONObject("animal_group_type")
-        ?.deepCopy()
+        ?.let(::normalizedAnimalGroupTaxonomy)
         ?.put("id", groupId)
         ?: animalGroupTypeForId(json, groupId)
         ?: JSONObject().put("id", groupId)
-    addOrUpdateBalance(
-        mob = mob,
-        groupId = groupId,
-        group = group,
-        quantity = quantity,
-        balanceId = pendingId(command, "balance"),
-        cohortId = payload.optString("cohort_id").takeIf { it.isNotBlank() },
-    )
+    val cohortId = payload.optionalString("cohort_id")
+    if (cohortId != null) {
+        // Preserve already-queued operations made by the cohort-aware client.
+        val balance = findBalance(mob, groupId, cohortId) ?: return false
+        balance.put("head_count", quantity).put("pending_sync", true)
+    } else {
+        val balances = balancesForGroup(mob, groupId)
+        val currentHead = balances.sumOf { it.optInt("head_count", 0) }
+        when {
+            quantity > currentHead -> {
+                // An unexplained increase says nothing about reproductive state.
+                // Always project a fresh unrecorded arrival cohort.
+                addOrUpdateBalance(
+                    mob = mob,
+                    groupId = groupId,
+                    group = group,
+                    quantity = quantity - currentHead,
+                    balanceId = pendingId(command, "balance"),
+                    cohortId = pendingId(command, "cohort"),
+                )
+            }
+            quantity < currentHead -> proportionalReduction(balances, currentHead - quantity).forEach { (balance, removed) ->
+                balance.put("head_count", balance.optInt("head_count", 0) - removed)
+                    .put("pending_sync", true)
+            }
+            else -> return false
+        }
+    }
+    mob.put("pending_sync", true)
     return true
 }
 
@@ -311,6 +334,17 @@ private fun applyMobMove(json: JSONObject, command: JSONObject, payload: JSONObj
         if (mob != null) {
             for (index in 0 until sessionAllocations.length()) {
                 val allocation = sessionAllocations.optJSONObject(index) ?: continue
+                val groupCounts = allocation.optJSONArray("group_counts") ?: JSONArray()
+                for (groupIndex in 0 until groupCounts.length()) {
+                    val groupCount = groupCounts.optJSONObject(groupIndex) ?: return false
+                    val groupId = groupCount.optString("animal_group_type_id").ifBlank {
+                        groupCount.optJSONObject("animal_group_type")?.let { existingAnimalGroupId(json, it) }.orEmpty()
+                    }
+                    if (groupId.isBlank()) return false
+                    groupCount.put("animal_group_type_id", groupId)
+                    val total = balancesForGroup(mob, groupId).sumOf { it.optInt("head_count", 0) }
+                    if (total > 0) groupCount.put("group_fraction", groupCount.optInt("head_count", 0).toDouble() / total)
+                }
                 allocation.put("allocation_fraction", optimisticAllocationFraction(allocation, mob))
             }
         }
@@ -338,53 +372,90 @@ private fun applyMobMove(json: JSONObject, command: JSONObject, payload: JSONObj
 }
 
 private fun applyMobTransfer(json: JSONObject, command: JSONObject, payload: JSONObject): Boolean {
-    val sourceMob = findObjectById(json.optJSONArray("mobs"), payload.optString("source_mob_id")) ?: return false
-    val destinationMob = findObjectById(json.optJSONArray("mobs"), payload.optString("destination_mob_id"))
+    val originalSource = findObjectById(json.optJSONArray("mobs"), payload.optString("source_mob_id")) ?: return false
+    val originalDestination = findObjectById(json.optJSONArray("mobs"), payload.optString("destination_mob_id"))
+    if (originalSource === originalDestination) return false
+    // Validate and project a whole command before committing either side.
+    val sourceMob = originalSource.deepCopy()
+    val destinationMob = originalDestination?.deepCopy()
     val transfers = payload.optJSONArray("transfers") ?: return false
     var changed = false
     for (index in 0 until transfers.length()) {
         val transfer = transfers.optJSONObject(index) ?: continue
-        val groupId = transfer.optString("animal_group_type_id")
-        val cohortId = transfer.optString("cohort_id").takeIf { it.isNotBlank() }
+        val groupId = transfer.optString("animal_group_type_id").ifBlank {
+            transfer.optJSONObject("animal_group_type")?.let { existingAnimalGroupId(json, it) }.orEmpty()
+        }
+        val cohortId = transfer.optionalString("cohort_id")
         val quantity = transfer.optInt("quantity", 0)
         if (groupId.isBlank() || quantity <= 0) {
-            continue
+            return false
         }
-        val sourceBalance = findBalance(sourceMob, groupId, cohortId)
-        val sourceHead = sourceBalance?.optInt("head_count", 0) ?: 0
-        val group = sourceBalance?.optJSONObject("animal_group_type")?.deepCopy()
-            ?: animalGroupTypeForId(json, groupId)
-            ?: JSONObject().put("id", groupId)
-        if (sourceBalance != null) {
-            sourceBalance.put("head_count", (sourceBalance.optInt("head_count", 0) - quantity).coerceAtLeast(0))
-            changed = true
+        val sourceBalances = balancesForGroup(sourceMob, groupId).filter {
+            cohortId == null || it.optionalString("cohort_id") == cohortId
         }
-        if (destinationMob != null) {
-            val destinationCohortId = when {
-                cohortId.isNullOrBlank() -> null
-                quantity >= sourceHead -> cohortId
-                else -> pendingId(command, "cohort-$index")
-            }
-            val destinationBalance = findBalance(destinationMob, groupId, destinationCohortId)
-            if (destinationBalance == null) {
-                addOrUpdateBalance(
-                    mob = destinationMob,
-                    groupId = groupId,
-                    group = group,
-                    quantity = quantity,
-                    balanceId = pendingId(command, "balance"),
-                    cohortId = destinationCohortId,
-                )
-                findBalance(destinationMob, groupId, destinationCohortId)?.let { added ->
-                    copyCohortState(sourceBalance, added)
+        if (quantity.toLong() > sourceBalances.sumOf { it.optInt("head_count", 0).toLong() }) return false
+        proportionalReduction(sourceBalances, quantity).forEach { (sourceBalance, moved) ->
+            if (moved > 0) {
+                val sourceHead = sourceBalance.optInt("head_count", 0)
+                val sourceCohortId = sourceBalance.optionalString("cohort_id")
+                val fragmentKey = "$index-${sourceBalance.optString("id")}"
+                val destinationCohortId = if (moved == sourceHead && sourceCohortId != null) {
+                    sourceCohortId
+                } else {
+                    pendingId(command, "cohort-$fragmentKey")
                 }
-            } else {
-                destinationBalance.put("head_count", destinationBalance.optInt("head_count", 0) + quantity)
+                if (destinationMob != null) {
+                    val destinationBalance = findBalance(destinationMob, groupId, destinationCohortId)
+                    if (destinationBalance == null) {
+                        val group = sourceBalance.optJSONObject("animal_group_type")?.deepCopy()
+                            ?: animalGroupTypeForId(json, groupId)
+                            ?: JSONObject().put("id", groupId)
+                        addOrUpdateBalance(
+                            mob = destinationMob,
+                            groupId = groupId,
+                            group = group,
+                            quantity = moved,
+                            balanceId = pendingId(command, "balance-$fragmentKey"),
+                            cohortId = destinationCohortId,
+                        )
+                        findBalance(destinationMob, groupId, destinationCohortId)?.let { added ->
+                            copyCohortState(sourceBalance, added)
+                        }
+                    } else {
+                        destinationBalance.put("head_count", destinationBalance.optInt("head_count", 0) + moved)
+                            .put("pending_sync", true)
+                    }
+                }
+                sourceBalance.put("head_count", sourceHead - moved).put("pending_sync", true)
+                changed = true
             }
-            changed = true
+        }
+    }
+    if (changed) {
+        originalSource.put("balances", sourceMob.getJSONArray("balances")).put("pending_sync", true)
+        if (originalDestination != null && destinationMob != null) {
+            originalDestination.put("balances", destinationMob.getJSONArray("balances")).put("pending_sync", true)
         }
     }
     return changed
+}
+
+/** Largest remainders, with the same stable balance-ID tie break as the server.
+ * Pending IDs make synthetic cohort detail provisional; animal-group totals remain exact.
+ */
+private fun proportionalReduction(balances: List<JSONObject>, quantity: Int): List<Pair<JSONObject, Int>> {
+    val total = balances.sumOf { it.optInt("head_count", 0).toLong() }
+    require(quantity >= 0 && quantity.toLong() <= total)
+    if (quantity == 0) return balances.map { it to 0 }
+    val allocations = balances.map { balance ->
+        val numerator = quantity.toLong() * balance.optInt("head_count", 0)
+        Triple(balance, (numerator / total).toInt(), numerator % total)
+    }
+    val remaining = quantity - allocations.sumOf { it.second }
+    val extraIds = allocations.sortedWith(
+        compareByDescending<Triple<JSONObject, Int, Long>> { it.third }.thenBy { it.first.optString("id") },
+    ).take(remaining).map { it.first }.toSet()
+    return allocations.map { (balance, base, _) -> balance to base + if (balance in extraIds) 1 else 0 }
 }
 
 private fun copyCohortState(source: JSONObject?, destination: JSONObject) {
@@ -1559,13 +1630,13 @@ private fun rebuildGrazingByPaddock(json: JSONObject) {
                     val groupId = groupCount.optString("animal_group_type_id")
                     if (groupId.isBlank()) continue
                     val balance = findBalance(mob, groupId)
-                    val sourceHead = balance?.optDouble("head_count", 0.0) ?: 0.0
+                    val sourceHead = balancesForGroup(mob, groupId).sumOf { it.optDouble("head_count", 0.0) }
                     val groupFraction = if (groupCount.has("group_fraction") && !groupCount.isNull("group_fraction")) {
                         groupCount.optDouble("group_fraction")
                     } else {
                         Double.NaN
                     }
-                    val head = if (!groupFraction.isNaN() && sourceHead > 0.0) {
+                    val head = if (!groupFraction.isNaN()) {
                         sourceHead * groupFraction
                     } else {
                         groupCount.optDouble("head_count", 0.0)
@@ -1685,6 +1756,41 @@ private fun findBalance(mob: JSONObject, groupId: String, cohortId: String? = nu
         }
     }
     return null
+}
+
+private fun balancesForGroup(mob: JSONObject, groupId: String): List<JSONObject> {
+    val balances = mob.optJSONArray("balances") ?: return emptyList()
+    return (0 until balances.length()).mapNotNull { balances.optJSONObject(it) }
+        .filter { it.optString("animal_group_type_id") == groupId && it.optInt("head_count", 0) > 0 }
+}
+
+private fun existingAnimalGroupId(json: JSONObject, group: JSONObject): String? {
+    val mobs = json.optJSONArray("mobs") ?: return null
+    val requested = normalizedAnimalGroupTaxonomy(group)
+    for (mobIndex in 0 until mobs.length()) {
+        val balances = mobs.optJSONObject(mobIndex)?.optJSONArray("balances") ?: continue
+        for (balanceIndex in 0 until balances.length()) {
+            val balance = balances.optJSONObject(balanceIndex) ?: continue
+            val candidate = balance.optJSONObject("animal_group_type")?.let(::normalizedAnimalGroupTaxonomy) ?: continue
+            if (listOf("species", "breed", "sex", "age_class").all { field ->
+                    candidate.optString(field) == requested.optString(field)
+                }) {
+                return balance.optString("animal_group_type_id", candidate.optString("id"))
+            }
+        }
+    }
+    return null
+}
+
+private fun normalizedAnimalGroupTaxonomy(group: JSONObject): JSONObject {
+    val species = group.optString("species").trim().lowercase(Locale.ROOT)
+    val sex = group.optString("sex").trim().lowercase(Locale.ROOT)
+    return group.deepCopy()
+        .put("species", species.replaceFirstChar { it.titlecase(Locale.ROOT) })
+        // Breed is case-sensitive in the server's canonical animal-type identity.
+        .put("breed", group.optString("breed").trim().replace(Regex("\\s+"), " "))
+        .put("sex", if (species == "cattle" && sex == "bull") "bul" else sex)
+        .put("age_class", group.optString("age_class").trim().lowercase(Locale.ROOT))
 }
 
 private fun entityName(json: JSONObject, entityType: String, entityId: String): String? {
@@ -1812,25 +1918,23 @@ private fun addOptimisticGroupHead(
 }
 
 private fun optimisticAllocationFraction(allocation: JSONObject, mob: JSONObject): Double {
-    if (allocation.has("allocation_fraction") && !allocation.isNull("allocation_fraction")) {
-        return allocation.optDouble("allocation_fraction", 1.0)
-    }
-    val groupCounts = allocation.optJSONArray("group_counts") ?: return 1.0
+    val groupCounts = allocation.optJSONArray("group_counts")
+    if (groupCounts == null || groupCounts.length() == 0) return allocation.optDouble("allocation_fraction", 1.0)
     val totalLsu = optimisticMobTotalLsu(mob)
-    if (totalLsu <= 0.0) return 1.0
+    if (totalLsu <= 0.0) return 0.0
     var assignedLsu = 0.0
     for (index in 0 until groupCounts.length()) {
         val groupCount = groupCounts.optJSONObject(index) ?: continue
         val groupId = groupCount.optString("animal_group_type_id")
         val balance = findBalance(mob, groupId)
         val group = balance?.optJSONObject("animal_group_type") ?: JSONObject().put("id", groupId)
-        val sourceHead = balance?.optDouble("head_count", 0.0) ?: 0.0
+        val sourceHead = balancesForGroup(mob, groupId).sumOf { it.optDouble("head_count", 0.0) }
         val groupFraction = if (groupCount.has("group_fraction") && !groupCount.isNull("group_fraction")) {
             groupCount.optDouble("group_fraction")
         } else {
             Double.NaN
         }
-        val head = if (!groupFraction.isNaN() && sourceHead > 0.0) {
+        val head = if (!groupFraction.isNaN()) {
             sourceHead * groupFraction
         } else {
             groupCount.optDouble("head_count", 0.0)

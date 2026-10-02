@@ -12,6 +12,15 @@ class MobileRepository(
 
     fun loadCachedFarms(): List<FarmSummary> = fieldStore.loadAvailableFarms()
 
+    fun aggregateStockOperationsSupported(): Boolean =
+        fieldStore.loadAggregateStockOperations(apiClient.baseUrl)
+
+    private fun requireAggregateStockOperations() {
+        check(aggregateStockOperationsSupported()) {
+            "Connect to an updated server to enable stock counts and transfers."
+        }
+    }
+
     fun ping(): Boolean {
         val token = tokenStore.load() ?: return false
         apiClient.ping(token)
@@ -103,7 +112,15 @@ class MobileRepository(
         allocations: List<MobMoveCountAllocation>,
         note: String,
     ) {
-        fieldStore.enqueue(MobileCommand.mobMoveCountAllocations(farmId, mobId, allocations))
+        val resolvedAllocations = allocations.map { allocation ->
+            allocation.copy(groupCounts = allocation.groupCounts.map { group ->
+                group.copy(animalGroupType = pendingAnimalGroup(farmId, mobId, group.animalGroupTypeId))
+            })
+        }
+        if (resolvedAllocations.any { allocation -> allocation.groupCounts.any { it.animalGroupType != null } }) {
+            requireAggregateStockOperations()
+        }
+        fieldStore.enqueue(MobileCommand.mobMoveCountAllocations(farmId, mobId, resolvedAllocations))
         if (note.isNotBlank()) {
             fieldStore.enqueue(
                 MobileCommand.mobNote(
@@ -162,6 +179,17 @@ class MobileRepository(
         note: String,
         cohortId: String? = null,
     ) {
+        if (cohortId.isNullOrBlank()) requireAggregateStockOperations()
+        val pendingGroup = pendingAnimalGroup(farmId, mobId, animalGroupTypeId)
+        if (pendingGroup != null && cohortId.isNullOrBlank()) {
+            fieldStore.enqueue(
+                MobileCommand.stockCount(
+                    farmId, mobId, pendingGroup.species, pendingGroup.breed,
+                    pendingGroup.sex, pendingGroup.ageClass, quantity, note,
+                ),
+            )
+            return
+        }
         fieldStore.enqueue(
             MobileCommand.stockCount(
                 farmId = farmId,
@@ -184,6 +212,7 @@ class MobileRepository(
         quantity: Int,
         note: String,
     ) {
+        requireAggregateStockOperations()
         fieldStore.enqueue(
             MobileCommand.stockCount(
                 farmId = farmId,
@@ -262,6 +291,7 @@ class MobileRepository(
         quantity: Int,
         note: String,
     ) {
+        if (cohortId.isNullOrBlank()) requireAggregateStockOperations()
         fieldStore.enqueue(
             MobileCommand.mobTransfer(
                 farmId = farmId,
@@ -271,8 +301,16 @@ class MobileRepository(
                 cohortId = cohortId,
                 quantity = quantity,
                 note = note,
+                animalGroupType = pendingAnimalGroup(farmId, sourceMobId, animalGroupTypeId),
             )
         )
+    }
+
+    private fun pendingAnimalGroup(farmId: String, mobId: String, groupId: String): AnimalGroupTypeSummary? {
+        if (!groupId.startsWith("pending-")) return null
+        return fieldStore.loadSnapshot(farmId)?.mobs?.firstOrNull { it.id == mobId }
+            ?.animalGroups?.firstOrNull { it.animalGroupTypeId == groupId }?.animalGroupType
+            ?: error("The pending animal group could not be found. Refresh the mob before trying again.")
     }
 
     fun queueTaskPhoto(
@@ -467,6 +505,21 @@ class MobileRepository(
                 refreshedSnapshots = refreshedSnapshots,
             )
         }
+        // Confirm against this server immediately before sending: cached support only
+        // authorizes offline drafting. Defer the entire batch to preserve its order.
+        val stockCheck = AggregateStockPolicy.confirmBatch(
+            commands = pending,
+            fetchBootstrap = { BootstrapResult.fromJson(apiClient.bootstrap(token)) },
+            saveSupport = { fieldStore.saveAggregateStockOperations(apiClient.baseUrl, it) },
+        )
+        if (stockCheck.pauseMessage != null) {
+            return SyncSummary(
+                results = emptyList(),
+                remainingQueueCount = fieldStore.pendingCount(),
+                pauseMessage = stockCheck.pauseMessage,
+                aggregateStockOperations = stockCheck.supported,
+            )
+        }
         val response = apiClient.syncCommands(token, pending)
         val resultsJson = response.getJSONArray("results")
         fieldStore.applySyncResults(resultsJson)
@@ -494,6 +547,7 @@ class MobileRepository(
             remainingQueueCount = fieldStore.pendingCount(),
             refreshedSnapshot = refreshed,
             refreshedSnapshots = refreshedSnapshots,
+            aggregateStockOperations = stockCheck.supported,
         )
     }
 
@@ -509,6 +563,7 @@ class MobileRepository(
 
     private fun loadFarmAccess(token: String, preferredFarmId: String?): FarmLoadResult {
         val bootstrap = BootstrapResult.fromJson(apiClient.bootstrap(token))
+        fieldStore.saveAggregateStockOperations(apiClient.baseUrl, bootstrap.aggregateStockOperations)
         val farms = bootstrap.farms
         fieldStore.saveAvailableFarms(farms)
 

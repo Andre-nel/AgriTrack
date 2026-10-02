@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 class MobileApiClient(baseUrl: String) {
-    private val baseUrl: String = MobileBaseUrl.normalize(baseUrl)
+    val baseUrl: String = MobileBaseUrl.normalize(baseUrl)
 
     fun ping(token: String): JSONObject = request("GET", "/api/mobile/v1/ping", token, null)
 

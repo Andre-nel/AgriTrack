@@ -4,24 +4,36 @@ from flask import current_app, flash, g, redirect, render_template, request, url
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import Farm, Mob, Paddock
+from app.models import AnimalGroupBalance, Farm, Mob, Paddock
+from app.models.stock_ledger import StockEventType
+from app.modules.analytics.stock_tracking import build_stock_tracking_report
 from app.modules.mobs.forms import (
     parse_count_move_allocations,
     parse_move_allocations,
     parse_split_rows,
     parse_transfer_rows,
 )
-from app.modules.mobs.presenters import build_mob_detail_context
+from app.modules.mobs.presenters import build_mob_cohorts_context, build_mob_detail_context
 from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_balance_line_from_form
+from app.services.cohort_service import CohortService
 from app.services.mob_event_service import MobEventService
 from app.services.mob_service import MobService
 from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
 from app.services.reproduction_service import ReproductionService
+from app.services.validation_service import ValidationService
 
 
 def _get_active_mob_or_404(mob_id: str) -> Mob:
     return Mob.query.filter_by(id=mob_id, status="active").first_or_404()
+
+
+def _selected_cohort_balance(mob: Mob) -> AnimalGroupBalance:
+    balance_id = (request.form.get("balance_id") or "").strip()
+    balance = AnimalGroupBalance.query.filter_by(id=balance_id, mob_id=mob.id).first()
+    if balance is None or int(balance.head_count or 0) <= 0:
+        raise ValueError("Selected cohort is no longer available in this mob. Refresh and try again.")
+    return balance
 
 
 def register_legacy_routes(bp) -> None:
@@ -33,6 +45,81 @@ def register_legacy_routes(bp) -> None:
         )
         context = build_mob_detail_context(mob, selected_event_tag)
         return render_template("mob_detail.html", **context)
+
+    @bp.get("/mobs/<mob_id>/cohorts")
+    def mob_cohorts(mob_id):
+        mob = _get_active_mob_or_404(mob_id)
+        return render_template("mob_cohorts.html", **build_mob_cohorts_context(mob))
+
+    @bp.post("/mobs/<mob_id>/cohorts/adjust")
+    def mob_cohort_adjust_form(mob_id):
+        mob = _get_active_mob_or_404(mob_id)
+        try:
+            balance = _selected_cohort_balance(mob)
+            event_type = StockEventType(request.form.get("event_type") or "adjustment_in")
+            quantity = ValidationService.parse_whole_number(request.form.get("quantity"))
+            if event_type == StockEventType.count and quantity == int(balance.head_count):
+                flash("Count matches current balance. No stock adjustment posted.", "success")
+            else:
+                cohort = CohortService.ensure_balance_cohort(balance)
+                group = balance.animal_group_type
+                form = request.form.to_dict()
+                form.update(
+                    cohort_id=str(cohort.id), species=group.species, breed=group.breed,
+                    sex=group.sex, age_class=group.age_class,
+                )
+                flash(adjust_mob_stock_from_form(mob, form), "success")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Stock adjustment failed due to a concurrent update. Please retry.", "error")
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+        return redirect(url_for("web.mob_cohorts", mob_id=mob_id))
+
+    @bp.post("/mobs/<mob_id>/cohorts/transfer")
+    def mob_cohort_transfer_form(mob_id):
+        mob = _get_active_mob_or_404(mob_id)
+        try:
+            balance = _selected_cohort_balance(mob)
+            destination_id = (request.form.get("destination_mob_id") or "").strip()
+            destination = Mob.query.filter_by(id=destination_id, status="active").first()
+            if destination is None:
+                raise ValueError("Destination mob is invalid")
+            cohort = CohortService.ensure_balance_cohort(balance)
+            MovementService.transfer_stock_between_mobs(
+                source_mob=mob,
+                destination_mob=destination,
+                transfers=[{
+                    "animal_group_type_id": str(balance.animal_group_type_id),
+                    "cohort_id": str(cohort.id),
+                    "quantity": request.form.get("quantity"),
+                }],
+                destination_farm_id=str(destination.farm_id),
+                note=(request.form.get("note") or "").strip() or None,
+            )
+            db.session.commit()
+            flash(f"Transferred cohort stock to {destination.name}", "success")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Transfer failed due to a concurrent stock update. Please retry.", "error")
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+        return redirect(url_for("web.mob_cohorts", mob_id=mob_id))
+
+    @bp.get("/mobs/<mob_id>/stock-history")
+    def mob_stock_history(mob_id):
+        mob = _get_active_mob_or_404(mob_id)
+        history_url = url_for("web.mob_stock_history", mob_id=mob.id)
+        try:
+            report = build_stock_tracking_report(request.args, mob_id=str(mob.id))
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(history_url)
+        return render_template(
+            "analytics/stock_tracking.html", mob=mob, history_url=history_url, **report
+        )
 
     @bp.post("/mobs/<mob_id>/adjust")
     def mob_adjust_form(mob_id):
@@ -63,7 +150,7 @@ def register_legacy_routes(bp) -> None:
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), "error")
-        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+        return redirect(url_for("web.mob_cohorts", mob_id=mob_id))
 
     @bp.post("/mobs/<mob_id>/events")
     def mob_event_create_form(mob_id):

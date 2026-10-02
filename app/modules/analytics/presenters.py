@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -47,6 +48,8 @@ def _stock_group_dimensions(farm_name: str, group_type: AnimalGroupType) -> dict
 
 
 def _stock_series_label(group_by_fields: list[str], group_key: tuple[str, ...]) -> str:
+    if not group_by_fields:
+        return "Total"
     if len(group_by_fields) == 1:
         return group_key[0]
 
@@ -59,6 +62,7 @@ def _stock_series_label(group_by_fields: list[str], group_key: tuple[str, ...]) 
 def current_stock_totals_by_group(
     selected_filters: dict[str, str | list[str]],
     group_by_fields: list[str],
+    mob_id: str | None = None,
 ) -> dict[tuple[str, ...], int]:
     rows = (
         db.session.query(AnimalGroupBalance, Mob, AnimalGroupType, Farm.name.label("farm_name"))
@@ -67,6 +71,8 @@ def current_stock_totals_by_group(
         .join(Farm, Mob.farm_id == Farm.id)
         .filter(Mob.status == "active", AnimalGroupBalance.head_count > 0)
     )
+    if mob_id is not None:
+        rows = rows.filter(Mob.id == mob_id)
 
     selected_farm_ids = selected_filters.get("farm_ids") or []
     if isinstance(selected_farm_ids, str):
@@ -95,6 +101,55 @@ def current_stock_totals_by_group(
     return totals
 
 
+_STOCK_NOTE_HIGHLIGHT_PATTERN = re.compile(r"\b(missing|kort|short|mis|weg)\b", re.IGNORECASE)
+_STOCK_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _stock_event_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _stock_timestamp_ms(value: datetime) -> float:
+    elapsed = value - _STOCK_EPOCH
+    return elapsed.days * 86_400_000 + elapsed.seconds * 1000 + elapsed.microseconds / 1000
+
+
+def _stock_chart_event(
+    entry: StockLedgerEntry,
+    event_at: datetime,
+    farm_name: str,
+    group_type: AnimalGroupType,
+    delta: int,
+) -> dict:
+    note = entry.note or ""
+    reasons = []
+    if entry.event_type == StockEventType.missing:
+        reasons.append("Missing stock recorded")
+    keywords = dict.fromkeys(
+        match.group(0).lower() for match in _STOCK_NOTE_HIGHLIGHT_PATTERN.finditer(note)
+    )
+    reasons.extend(f"Note keyword: {keyword}" for keyword in keywords)
+    dimensions = _stock_group_dimensions(farm_name, group_type)
+    return {
+        "id": str(entry.id),
+        "event_time": event_at.isoformat().replace("+00:00", "Z"),
+        "event_type": entry.event_type.value,
+        "event_label": entry.event_type.value.replace("_", " ").capitalize(),
+        "delta": delta,
+        "mob_id": str(entry.mob_id),
+        "mob_name": entry.mob.name if entry.mob is not None else "Unknown",
+        "farm_name": farm_name,
+        "animal_type": " | ".join(
+            dimensions[field] for field in ("species", "breed", "sex", "age_class")
+        ),
+        "note": note,
+        "highlight_missing": bool(reasons),
+        "highlight_reasons": reasons,
+    }
+
+
 def build_stock_tracking_chart_data(
     ledger_rows: list[tuple[StockLedgerEntry, str, AnimalGroupType]],
     group_by_fields: list[str],
@@ -102,71 +157,106 @@ def build_stock_tracking_chart_data(
     end_date: date,
     reconcile_to_current_totals: dict[tuple[str, ...], int] | None = None,
 ) -> tuple[dict, list[dict]]:
-    labels = []
-    cursor = start_date
-    while cursor <= end_date:
-        labels.append(cursor.isoformat())
-        cursor += timedelta(days=1)
-
+    """Build UTC stock steps, applying simultaneous ledger postings atomically per series."""
+    start_at = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+    end_at = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    min_x = _stock_timestamp_ms(start_at)
+    max_x = _stock_timestamp_ms(end_at)
     baseline_totals: dict[tuple[str, ...], int] = defaultdict(int)
-    daily_deltas: dict[str, dict[tuple[str, ...], int]] = defaultdict(lambda: defaultdict(int))
-
-    for entry, farm_name, group_type in ledger_rows:
-        event_date = entry.event_time.date()
+    events_by_group: dict[tuple[str, ...], dict[datetime, list[dict]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    ordered_rows = sorted(
+        ledger_rows,
+        key=lambda row: (_stock_event_datetime(row[0].event_time), str(row[0].id)),
+    )
+    for entry, farm_name, group_type in ordered_rows:
+        event_at = _stock_event_datetime(entry.event_time)
+        if event_at >= end_at:
+            continue
         dimensions = _stock_group_dimensions(farm_name=farm_name, group_type=group_type)
         group_key = tuple(dimensions[field] for field in group_by_fields)
         delta = _stock_delta_for_event(event_type=entry.event_type, quantity=int(entry.quantity))
         if delta == 0:
             continue
 
-        if event_date < start_date:
+        if event_at < start_at:
             baseline_totals[group_key] += delta
             continue
-        if event_date > end_date:
-            continue
+        events_by_group[group_key][event_at].append(
+            _stock_chart_event(entry, event_at, farm_name, group_type, delta)
+        )
 
-        daily_deltas[event_date.isoformat()][group_key] += delta
-
-    all_keys = set(baseline_totals.keys())
-    for values in daily_deltas.values():
-        all_keys.update(values.keys())
-    if reconcile_to_current_totals:
+    all_keys = set(baseline_totals) | set(events_by_group)
+    if reconcile_to_current_totals is not None:
         all_keys.update(reconcile_to_current_totals.keys())
-
     sorted_keys = sorted(all_keys, key=lambda row: tuple(value.lower() for value in row))
-    running_totals = {key: baseline_totals.get(key, 0) for key in sorted_keys}
-    series_by_key = {key: [] for key in sorted_keys}
-
-    for label in labels:
-        day_changes = daily_deltas.get(label, {})
-        for key, delta in day_changes.items():
-            running_totals[key] = running_totals.get(key, 0) + delta
-
-        for key in sorted_keys:
-            series_by_key[key].append(running_totals.get(key, 0))
-
-    if reconcile_to_current_totals:
-        for key in sorted_keys:
-            desired_latest = int(reconcile_to_current_totals.get(key, 0))
-            if not series_by_key[key]:
-                continue
-            observed_latest = int(series_by_key[key][-1])
-            offset = desired_latest - observed_latest
-            if offset:
-                series_by_key[key] = [value + offset for value in series_by_key[key]]
-
     datasets = []
     latest_totals = []
     for key in sorted_keys:
-        values = series_by_key[key]
-        if not values or not any(value != 0 for value in values):
+        timestamp_events = events_by_group.get(key, {})
+        opening_count = baseline_totals.get(key, 0)
+        observed_latest = opening_count + sum(
+            event["delta"] for events in timestamp_events.values() for event in events
+        )
+        opening_adjustment = 0
+        if reconcile_to_current_totals is not None:
+            # Legacy opening stock changes the baseline, not the recorded event deltas.
+            opening_adjustment = int(reconcile_to_current_totals.get(key, 0)) - observed_latest
+        running_count = opening_count + opening_adjustment
+        if not timestamp_events and running_count == 0:
             continue
+
+        points = [
+            {
+                "x": min_x,
+                "y": running_count,
+                "before": running_count,
+                "delta": 0,
+                "kind": "opening",
+                "events": [],
+                "highlight_missing": False,
+            }
+        ]
+        for event_at, events in timestamp_events.items():
+            delta = sum(event["delta"] for event in events)
+            before = running_count
+            running_count += delta
+            points.append(
+                {
+                    "x": _stock_timestamp_ms(event_at),
+                    "y": running_count,
+                    "before": before,
+                    "delta": delta,
+                    "kind": "event",
+                    "events": events,
+                    "highlight_missing": any(event["highlight_missing"] for event in events),
+                }
+            )
+        points.append(
+            {
+                "x": max_x,
+                "y": running_count,
+                "before": running_count,
+                "delta": 0,
+                "kind": "closing",
+                "events": [],
+                "highlight_missing": False,
+            }
+        )
         label = _stock_series_label(group_by_fields=group_by_fields, group_key=key)
-        datasets.append({"label": label, "values": values})
-        latest_totals.append({"label": label, "head_count": values[-1]})
+        datasets.append(
+            {"label": label, "points": points, "opening_adjustment": opening_adjustment}
+        )
+        latest_totals.append({"label": label, "head_count": running_count})
 
     latest_totals.sort(key=lambda row: (-row["head_count"], row["label"].lower()))
-    return {"labels": labels, "datasets": datasets}, latest_totals
+    return {
+        "datasets": datasets,
+        "min_x": min_x,
+        "max_x": max_x,
+        "time_zone": "UTC",
+    }, latest_totals
 
 
 def _normalize_journal_datetime(value: datetime) -> datetime:

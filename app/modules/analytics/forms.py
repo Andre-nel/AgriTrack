@@ -1,6 +1,7 @@
 from datetime import date
 from typing import Mapping
 
+from app.models.water import WATER_ASSET_TYPES
 from app.modules.analytics.constants import (
     ANALYTICS_DEFAULT_GROUP_BY,
     ANALYTICS_GROUP_LABELS,
@@ -12,7 +13,6 @@ from app.modules.analytics.constants import (
     WATER_ASSET_STATE_DEFAULT_FIELDS,
     WATER_ASSET_STATE_FIELD_LABELS,
 )
-from app.models.water import WATER_ASSET_TYPES
 
 
 def parse_query_date(value: str | None) -> date | None:
@@ -22,7 +22,9 @@ def parse_query_date(value: str | None) -> date | None:
     return date.fromisoformat(text)
 
 
-def normalize_analytics_group_by(raw_values: list[str]) -> list[str]:
+def normalize_analytics_group_by(
+    raw_values: list[str], *, use_default: bool = True
+) -> list[str]:
     selected = []
     seen = set()
     for raw in raw_values:
@@ -32,7 +34,7 @@ def normalize_analytics_group_by(raw_values: list[str]) -> list[str]:
         selected.append(value)
         seen.add(value)
 
-    if not selected:
+    if not selected and use_default:
         return list(ANALYTICS_DEFAULT_GROUP_BY)
     return selected
 

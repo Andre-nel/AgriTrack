@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ mob.name }} Cohorts | AgriTrack{% endblock %}
+{% block content %}
+<div class="task-page-actions row-actions">
+  <a class="btn btn-secondary" href="{{ url_for('web.mob_detail', mob_id=mob.id) }}">Back to Mob</a>
+</div>
+<h1>{{ mob.name }} — Cohorts</h1>
+<p class="muted">The mob's balances combine animals with the same species, breed, sex and age class. Manage the state or stock of a specific cohort here.</p>
+
+<section class="card">
+  <h2>Cohort Balances</h2>
+  <div class="table-wrap" role="region" aria-label="Mob cohort balances" tabindex="0">
+    <table class="mob-cohorts-table">
+      <thead><tr><th>Cohort</th><th>Animal Type</th><th>Head</th><th>Reproductive State</th><th>Expected Litter Size</th><th>Lactation</th><th>Offspring At Foot</th></tr></thead>
+      <tbody>
+        {% for row in cohort_rows %}
+        <tr>
+          <td>#{{ row.short_id }}</td><td>{{ row.label }}</td><td>{{ row.head_count }}</td>
+          <td>{{ row.reproductive_state }}</td><td>{{ row.expected_litter_size }}</td>
+          <td>{{ row.lactation_state }}</td><td>{{ row.offspring_at_foot }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7">No positive cohort balances in this mob.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if female_balance_options %}
+<section class="card">
+  <h2>Record Female Cohort State</h2>
+  <p class="muted">This is a dated observation. Choose a count smaller than the balance to split only those females into the selected state.</p>
+  <form method="post" action="{{ url_for('web.mob_female_status_form', mob_id=mob.id) }}" class="grid-form mob-cohort-form">
+    <label>Female cohort
+      <select name="balance_id" required>
+        <option value="">Choose female cohort</option>
+        {% for row in female_balance_options %}<option value="{{ row.id }}">{{ row.selection_label }}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="grid-two">
+      <label>Observed on<input type="date" name="observed_on" value="{{ today }}" required /></label>
+      <label>Observed females<input type="number" name="quantity" min="1" step="1" required /></label>
+      <label>Reproductive state
+        <select name="reproductive_state" required>
+          <option value="not_recorded">Not recorded</option>
+          <option value="with_sire">With sire / mated</option>
+          <option value="awaiting_scan">Awaiting pregnancy assessment</option>
+          <option value="pregnant">Pregnant</option>
+          <option value="not_pregnant">Not pregnant</option>
+          <option value="parturated">Parturated</option>
+        </select>
+      </label>
+      <label>Expected litter size
+        <select name="expected_litter_size" required>
+          <option value="not_recorded">Not recorded</option><option value="unknown">Unknown</option><option value="single">Single</option><option value="twins">Twins</option><option value="multiple">Multiple</option>
+        </select>
+      </label>
+      <label>Lactation state
+        <select name="lactation_state" required>
+          <option value="not_recorded">Not recorded</option><option value="lactating">Lactating</option><option value="dry">Dry</option>
+        </select>
+      </label>
+      <label>Offspring at foot
+        <select name="offspring_at_foot" required>
+          <option value="not_recorded">Not recorded</option><option value="none">None</option><option value="single">Single</option><option value="twins">Twins</option><option value="multiple">Multiple</option>
+        </select>
+      </label>
+    </div>
+    <label>Observation notes<input name="notes" placeholder="Optional field observation" /></label>
+    <button type="submit" class="btn">Record Female State</button>
+  </form>
+</section>
+{% endif %}
+
+{% if cohort_rows %}
+<section class="split">
+  <article class="card">
+    <h2>Adjust Cohort Stock</h2>
+    <form method="post" action="{{ url_for('web.mob_cohort_adjust_form', mob_id=mob.id) }}" class="grid-form mob-cohort-form">
+      <label>Cohort
+        <select name="balance_id" required>
+          <option value="">Choose cohort</option>
+          {% for row in cohort_rows %}<option value="{{ row.id }}">{{ row.selection_label }}</option>{% endfor %}
+        </select>
+      </label>
+      <div class="grid-two">
+        <label>Event type
+          <select name="event_type" id="cohortEventType">
+            {% for event in stock_event_types %}
+            <option value="{{ event.value }}" {% if event.value == "adjustment_in" %}selected{% endif %}>
+              {% if event.value == "count" %}count (set final cohort total){% else %}{{ event.value }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Quantity<input type="number" min="1" step="1" name="quantity" id="cohortQuantity" required /></label>
+      </div>
+      <p class="muted">Only the selected cohort changes. Count sets its final total, including zero.</p>
+      <label>Apply to paddock
+        <select name="allocation_paddock_id" {% if not adjust_paddock_options %}disabled{% endif %}>
+          <option value="">All current paddocks</option>
+          {% for paddock in adjust_paddock_options %}<option value="{{ paddock.id }}">{{ paddock.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Note<input name="note" /></label>
+      <button type="submit" class="btn">Apply Cohort Adjustment</button>
+    </form>
+  </article>
+  <article class="card">
+    <h2>Transfer Cohort Stock</h2>
+    {% if destination_mobs %}
+    <form method="post" action="{{ url_for('web.mob_cohort_transfer_form', mob_id=mob.id) }}" class="grid-form mob-cohort-form">
+      <label>Cohort
+        <select name="balance_id" required>
+          <option value="">Choose cohort</option>
+          {% for row in cohort_rows %}<option value="{{ row.id }}">{{ row.selection_label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Destination mob
+        <select name="destination_mob_id" required>
+          <option value="">Choose destination mob</option>
+          {% for destination in destination_mobs %}<option value="{{ destination.id }}">{{ destination.farm.name }} | {{ destination.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Quantity<input type="number" min="1" step="1" name="quantity" required /></label>
+      <p class="muted">Transferred animals keep the selected cohort's state and history.</p>
+      <label>Note<input name="note" /></label>
+      <button type="submit" class="btn">Transfer Cohort Stock</button>
+    </form>
+    {% else %}
+    <p>No destination mobs are available yet. Create another active mob first.</p>
+    {% endif %}
+  </article>
+</section>
+<script>
+  (function () {
+    const eventType = document.getElementById("cohortEventType");
+    const quantity = document.getElementById("cohortQuantity");
+    function updateMinimum() {
+      quantity.min = eventType.value === "count" ? "0" : "1";
+    }
+    eventType.addEventListener("change", updateMinimum);
+    updateMinimum();
+  })();
+</script>
+{% endif %}
+{% endblock %}

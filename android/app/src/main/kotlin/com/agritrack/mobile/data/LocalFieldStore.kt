@@ -134,6 +134,13 @@ class LocalFieldStore(context: Context) : SQLiteOpenHelper(context, DB_NAME, nul
 
     fun loadBaseUrl(): String? = getSetting("base_url")?.takeIf { it.isNotBlank() }
 
+    fun loadAggregateStockOperations(baseUrl: String): Boolean =
+        getSetting(AggregateStockPolicy.cacheKey(baseUrl)) == "true"
+
+    fun saveAggregateStockOperations(baseUrl: String, supported: Boolean) {
+        setSetting(AggregateStockPolicy.cacheKey(baseUrl), supported.toString())
+    }
+
     fun saveBaseUrl(baseUrl: String) {
         val normalized = normalizeBaseUrl(baseUrl)
         if (normalized.isNotBlank()) {

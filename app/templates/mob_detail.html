@@ -3,6 +3,7 @@
 {% block content %}
 <div class="task-page-actions row-actions">
   <a class="btn btn-secondary" href="{{ url_for('web.farm_detail', farm_id=mob.farm_id) }}">Back To Farm</a>
+  <a class="btn btn-secondary" href="{{ url_for('web.mob_stock_history', mob_id=mob.id) }}">Stock Count History</a>
   <a class="btn" href="{{ url_for('tasks.new_task_page', mob_id=mob.id) }}">Create Task</a>
 </div>
 <div class="mob-page-header">
@@ -64,7 +65,10 @@
 
 <section class="split">
   <article class="card mob-balances-card">
-    <h2>Balances</h2>
+    <div class="task-section-heading">
+      <h2>Balances</h2>
+      <a class="btn btn-secondary" href="{{ url_for('web.mob_cohorts', mob_id=mob.id) }}">Manage Cohorts</a>
+    </div>
     {% if mob_species_totals %}
     <ul class="mob-species-totals" aria-label="Species totals">
       {% for total in mob_species_totals %}
@@ -75,38 +79,33 @@
     <p class="muted">Select a balance line, then edit its sex, age class, and head count. Its animal type is also loaded into Adjust Stock.</p>
     <div class="table-wrap mob-balances-table-wrap" role="region" aria-label="Mob balances" tabindex="0">
       <table id="balanceTable" class="mob-balances-table">
-        <thead><tr><th>Select</th><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Reproductive State</th><th>Lactation</th><th>Offspring At Foot</th><th>Head</th></tr></thead>
+        <thead><tr><th>Select</th><th>Species</th><th>Breed</th><th>Sex</th><th>Age Class</th><th>Head</th></tr></thead>
         <tbody>
-          {% for b in mob.balances if b.head_count > 0 %}
+          {% for b in balance_rows %}
           <tr
             class="balance-row"
             data-group-id="{{ b.animal_group_type_id }}"
-            data-cohort-id="{{ b.cohort_id or '' }}"
-            data-species="{{ b.animal_group_type.species }}"
-            data-breed="{{ b.animal_group_type.breed }}"
-            data-sex="{{ b.animal_group_type.sex }}"
-            data-age-class="{{ b.animal_group_type.age_class }}"
+            data-species="{{ b.group.species }}"
+            data-breed="{{ b.group.breed }}"
+            data-sex="{{ b.group.sex }}"
+            data-age-class="{{ b.group.age_class }}"
             data-head-count="{{ b.head_count }}"
           >
             <td><input type="radio" name="selectedBalanceRow" value="{{ b.animal_group_type_id }}" aria-label="Select balance row for editing" /></td>
-            <td>{{ b.animal_group_type.species }}</td>
-            <td>{{ b.animal_group_type.breed }}</td>
-            <td>{{ b.animal_group_type.sex }}</td>
-            <td>{{ b.animal_group_type.age_class }}</td>
-            <td>{{ (b.cohort.reproductive_state if b.cohort else "not_recorded") | replace("_", " ") }}</td>
-            <td>{{ (b.cohort.lactation_state if b.cohort else "not_recorded") | replace("_", " ") }}</td>
-            <td>{{ (b.cohort.offspring_at_foot if b.cohort else "not_recorded") | replace("_", " ") }}</td>
+            <td>{{ b.group.species }}</td>
+            <td>{{ b.group.breed }}</td>
+            <td>{{ b.group.sex }}</td>
+            <td>{{ b.group.age_class }}</td>
             <td>{{ b.head_count }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="9">No stock balances yet.</td></tr>
+          <tr><td colspan="6">No stock balances yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     <form method="post" action="{{ url_for('web.mob_edit_balance_form', mob_id=mob.id) }}" class="grid-form" id="editBalanceForm">
       <input type="hidden" name="source_animal_group_type_id" id="editSourceGroupTypeId" />
-      <input type="hidden" name="source_cohort_id" id="editSourceCohortId" />
       <div class="grid-two">
         <label>Species
           <input id="editSpecies" disabled />
@@ -125,7 +124,7 @@
       </div>
       <div class="grid-two">
         <label>Head
-          <input type="number" min="1" step="1" name="head_count" id="editHeadCount" required disabled />
+          <input type="number" min="0" step="1" name="head_count" id="editHeadCount" required disabled />
         </label>
         <label>Current line
           <input id="editCurrentLine" value="Select a balance row" disabled />
@@ -137,57 +136,11 @@
       <button type="submit" class="btn" id="editBalanceSubmit" disabled>Save Balance Edit</button>
     </form>
 
-    {% if female_balance_options %}
-    <details>
-      <summary><strong>Record Female Cohort State</strong></summary>
-      <p class="muted">This is a dated observation. Choose a count smaller than the balance to split only those females into the selected state.</p>
-      <form method="post" action="{{ url_for('web.mob_female_status_form', mob_id=mob.id) }}" class="grid-form">
-        <label>Female cohort
-          <select name="balance_id" required>
-            <option value="">Choose female cohort</option>
-            {% for row in female_balance_options %}<option value="{{ row.id }}">{{ row.label }} (available: {{ row.head_count }})</option>{% endfor %}
-          </select>
-        </label>
-        <div class="grid-two">
-          <label>Observed on<input type="date" name="observed_on" value="{{ today }}" required /></label>
-          <label>Observed females<input type="number" name="quantity" min="1" step="1" required /></label>
-          <label>Reproductive state
-            <select name="reproductive_state" required>
-              <option value="not_recorded">Not recorded</option>
-              <option value="with_sire">With sire / mated</option>
-              <option value="awaiting_scan">Awaiting pregnancy assessment</option>
-              <option value="pregnant">Pregnant</option>
-              <option value="not_pregnant">Not pregnant</option>
-              <option value="parturated">Parturated</option>
-            </select>
-          </label>
-          <label>Expected litter size
-            <select name="expected_litter_size" required>
-              <option value="not_recorded">Not recorded</option><option value="unknown">Unknown</option><option value="single">Single</option><option value="twins">Twins</option><option value="multiple">Multiple</option>
-            </select>
-          </label>
-          <label>Lactation state
-            <select name="lactation_state" required>
-              <option value="not_recorded">Not recorded</option><option value="lactating">Lactating</option><option value="dry">Dry</option>
-            </select>
-          </label>
-          <label>Offspring at foot
-            <select name="offspring_at_foot" required>
-              <option value="not_recorded">Not recorded</option><option value="none">None</option><option value="single">Single</option><option value="twins">Twins</option><option value="multiple">Multiple</option>
-            </select>
-          </label>
-        </div>
-        <label>Observation notes<input name="notes" placeholder="Optional field observation" /></label>
-        <button type="submit" class="btn btn-secondary">Record Female State</button>
-      </form>
-    </details>
-    {% endif %}
   </article>
 
   <article class="card">
     <h2>Adjust Stock</h2>
     <form method="post" action="{{ url_for('web.mob_adjust_form', mob_id=mob.id) }}" class="grid-form">
-      <input type="hidden" name="cohort_id" id="adjustCohortId" />
       <div class="grid-two">
         <label>Species
           <select name="species" id="adjustSpecies" required>
@@ -226,7 +179,7 @@
             {% endfor %}
           </select>
         </label>
-        <label>Quantity<input type="number" min="1" step="1" name="quantity" required /></label>
+        <label>Quantity<input type="number" min="1" step="1" name="quantity" id="adjustQuantity" required /></label>
       </div>
       <label>Apply to paddock
         <select name="allocation_paddock_id" id="adjustPaddockId" {% if not adjust_paddock_options %}disabled{% endif %}>
@@ -237,7 +190,7 @@
         </select>
       </label>
       <p class="muted" id="adjustQuantityHelp">
-        Quantity is posted as the number of head for the selected event. Use count only when you want to set the final head count for this exact line. Pick a paddock to apply the resulting change there only.
+        Quantity is posted as the number of head for the selected animal type. A selected paddock includes its open-gate connected paddocks: additions follow paddock area, and reductions follow existing animal counts. Count sets the combined mob total across cohorts, including zero.
       </p>
       <label>Note<input name="note" /></label>
       <button type="submit" class="btn">Apply Adjustment</button>
@@ -739,13 +692,15 @@
 
     function updateAdjustQuantityHelp() {
       if (!eventTypeSelect || !adjustQuantityHelp) return;
+      const quantityInput = document.getElementById("adjustQuantity");
+      if (quantityInput) quantityInput.min = eventTypeSelect.value === "count" ? "0" : "1";
       if (eventTypeSelect.value === "count") {
         adjustQuantityHelp.textContent =
-          "Count uses the quantity as the final head count for this exact species, breed, sex, and age-class line. A selected paddock receives the resulting change only.";
+          "Count sets the combined mob total for this species, breed, sex, and age class across all cohorts, including zero. The resulting change applies to the selected paddock and its open-gate connected paddocks. Increases follow paddock area; decreases follow existing animal counts and require enough stock in that connected group.";
         return;
       }
       adjustQuantityHelp.textContent =
-        "Quantity is posted as the number of head for the selected event. Use count only when you want to set the final head count for this exact line. Pick a paddock to apply the resulting change there only.";
+        "Quantity is posted as the number of head for the selected animal type. A selected paddock includes its open-gate connected paddocks: additions follow paddock area, and reductions follow existing animal counts. Count sets the combined mob total across cohorts, including zero.";
     }
 
     if (speciesSelect) {
@@ -803,8 +758,6 @@
 
     const balanceTable = document.getElementById("balanceTable");
     const editSourceGroupTypeIdInput = document.getElementById("editSourceGroupTypeId");
-    const editSourceCohortIdInput = document.getElementById("editSourceCohortId");
-    const adjustCohortIdInput = document.getElementById("adjustCohortId");
     const editSpeciesInput = document.getElementById("editSpecies");
     const editBreedInput = document.getElementById("editBreed");
     const editSexSelect = document.getElementById("editSex");
@@ -845,7 +798,6 @@
       }
 
       const groupId = row.dataset.groupId || "";
-      const cohortId = row.dataset.cohortId || "";
       const species = row.dataset.species || "";
       const breed = row.dataset.breed || "";
       const sex = row.dataset.sex || "";
@@ -854,8 +806,6 @@
       const defaults = speciesDefaults[species];
 
       editSourceGroupTypeIdInput.value = groupId;
-      if (editSourceCohortIdInput) editSourceCohortIdInput.value = cohortId;
-      if (adjustCohortIdInput) adjustCohortIdInput.value = cohortId;
       editSpeciesInput.value = species;
       editBreedInput.value = breed;
       editHeadInput.value = headCount;

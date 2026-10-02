@@ -101,30 +101,52 @@ synonym for `dry`, and a parturition litter is not assumed to equal the current
 offspring-at-foot count. Dated `FemaleStatusObservation` records preserve the
 observation behind changes to the cohort's cached current state.
 
-## Animal Cohort Identity
+## Mob counts and cohort operations
 
-`AnimalGroupType` remains taxonomy: species, breed, sex, and age class.
-`AnimalCohort` is the persistent identity of a counted population. A mob balance
-therefore points to both a type and, after migration/backfill, a cohort. This
-allows two groups with identical taxonomy to retain different reproductive
-histories in the same mob.
+General mob stock counts combine all cohorts with the same species, breed, sex
+and age class. `StockService.group_summary_rows` supplies this read model, and
+`adjust_group_stock` expands a type-level stock change into cohort ledger entries.
+The existing `adjust_stock` operation remains the single-cohort posting primitive,
+including for reproductive birth observations. Callers own commit and rollback.
 
-Partial transfers and reproductive partitions create child cohorts and an
-`AnimalCohortLineage` edge. Full transfers keep the cohort ID. Stock ledger
-entries also carry the cohort ID, so identity and current state follow stock
-through mob transfers, splits, and merges.
+Without an explicit cohort selection, reductions and partial movements allocate
+whole animals proportionally using largest remainders, with balance ID breaking
+ties. This is an allocation assumption recorded in audit notes, not an observed
+reproductive fact. Multi-destination splits allocate the total moved pool first,
+then distribute that pool in destination request order so rounding cannot overdraw
+a cohort. Exact cohort actions remain available on the mob's Manage Cohorts page.
 
-Female state is deliberately multi-dimensional:
+Unspecified stock additions and upward recounts create fresh unrecorded cohorts.
+They must not inherit another population's observed state or breeding enrollment.
+Known transfers preserve identity/state and create lineage for partial transfers.
+Whole-type reclassification creates correction children rather than changing
+historical parent types. Female-state caches are cleared on non-female children;
+the original observations remain on their historical cohorts.
 
-- reproductive state (`with_sire`, `pregnant`, `not_pregnant`, or `parturated`);
-- expected litter size;
-- lactation state (`lactating` or `dry`); and
-- offspring at foot (`none`, `single`, `twins`, or `multiple`).
+Each stock operation is atomic. Allocation distributions are updated per animal
+type alongside its cohort postings, followed by one grazing-history refresh per
+affected mob. No schema migration or destructive cohort consolidation is needed.
 
-These fields are independent. For example, `not_pregnant` is not treated as a
-synonym for `dry`, and a parturition litter is not assumed to equal the current
-offspring-at-foot count. Dated `FemaleStatusObservation` records preserve the
-observation behind changes to the cohort's cached current state.
+Selected-paddock stock adjustments resolve the active open-gate component from
+the selected paddock's farm. Incoming heads follow existing gate area weights;
+outgoing heads follow the selected type's current counts within that component.
+Allocation changes carry the stock operation's timestamp. If a camp is emptied,
+the old grazing session is closed and its allocations retained, because deleting
+an allocation cascades to its LSU history. Remaining assignments enter a new
+session without a movement event; history is refreshed after stock posting.
+
+Existing history limitation outside this adjustment path: reclassification still
+rewrites allocations in place. A simultaneous head-count reduction that empties a
+camp can therefore delete that camp's allocation history. When this path is next
+changed, extend the timestamped session replacement to reclassification and cover
+depletion; changing cohort identity rules or rebuilding old history is not needed.
+
+Android retains detailed v1 snapshots for compatibility but shows animal-type
+totals. Its offline cohort fragments are provisional: totals and head conservation
+are exact, while server-generated identities and any tied cohort allocation are
+reconciled from the refreshed snapshot. The server's aggregate-stock capability
+is confirmed before syncing aggregate commands; old cohort-specific outbox
+commands preserve their original meaning. Deploy the server before Android.
 
 Compatibility follow-up:
 

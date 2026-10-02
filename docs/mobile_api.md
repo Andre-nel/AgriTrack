@@ -174,6 +174,7 @@ Important response fields:
   ],
   "animal_group_types": [],
   "sync": {
+    "aggregate_stock_operations": true,
     "supported_command_types": [
       "rainfall.create",
       "mob.create",
@@ -264,9 +265,12 @@ upgrade time; the server does not synthesize older state rows.
 
 Each positive mob balance includes `cohort_id`, `reproductive_state`,
 `expected_litter_size`, `lactation_state`, and `offspring_at_foot`. Older rows
-without cohort data serialize these fields as `null` / `not_recorded`. Android
-uses the cohort ID when posting a count so multiple cohorts with the same animal
-group type are not combined accidentally.
+without cohort data serialize these fields as `null` / `not_recorded`. This
+detailed v1 wire format remains compatible with existing snapshots. Ordinary
+Android mob views and stock forms sum balances by `animal_group_type_id`, which
+uniquely represents species, breed, sex and age class. Cohort state does not
+separate those counts. New counts and transfers omit `cohort_id`; existing
+queued commands that specify a cohort retain their targeted meaning.
 
 `active_grazing_by_paddock` groups current grazing allocations for paddock
 detail views. Each mob row includes `mob_id`, `mob_name`, `allocation_pct`, and
@@ -412,9 +416,9 @@ Supported command types:
 - `water_asset_event.create`: `water_asset_id`, `description`, optional `tags`, optional `event_at`.
 - `fence_event.create`: `fence_section_id`, `description`, optional `event_type`, optional `tags`, optional `condition_after`, optional `materials`, optional `event_at`.
 - `incident.create`: `occurred_on`, `category`, `note`, optional `tags`, optional `reported_by`.
-- `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group. Existing cohort-aware balances should also send `cohort_id`; omitting it is accepted only when the mob has at most one matching cohort.
-- `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`.
-- `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`.
+- `stock_count.record`: `mob_id`, `quantity`, optional `note`, plus either `"animal_group_type_id"` for an existing group or `"animal_group_type"` with `species`, `breed`, `sex`, and `age_class` for a new group. Without `cohort_id`, quantity sets the combined animal-type total. An explicit `cohort_id` sets only that cohort's count and must still exist in the source mob.
+- `mob.move`: `mob_id`, `allocations`, optional `destination_farm_id`, optional `event_time`. Exact-count allocations use `group_counts` with `animal_group_type_id` and `head_count`; a newly entered offline type can instead use the `animal_group_type` taxonomy object. The type must already have positive source stock when the command runs, including stock from an earlier command in the same batch.
+- `mob.transfer`: `source_mob_id`, `destination_mob_id`, `transfers`, optional `note`, optional `event_time`. Each transfer selects `animal_group_type_id` and `quantity`; a newly entered offline type can instead use the `animal_group_type` taxonomy object. Without `cohort_id`, animals are drawn proportionally across that source type's cohorts. Explicit cohort selections remain supported.
 - `shearer.create`: client-generated `id`, `name`, optional `active`.
 - `shearing_session.create`: client-generated `id`, `name`, `species` (`Sheep` or `Goat`), `start_date`, optional `end_date`, `lootjie_rate`, optional `notes`.
 - `shearing_session.update`: `session_id`, and at least one editable field: `name`, `species`, `start_date`, `end_date`, `lootjie_rate`, `notes`, or `status`.
@@ -436,6 +440,26 @@ Android should keep these commands in a durable outbox until the backend returns
 `invalid_command` or `unsupported_command` should be dropped locally because the
 payload cannot succeed on retry. Other failed commands remain local with their
 last error so the field user can retry after fixing data or connectivity.
+
+## Aggregate stock compatibility
+
+Deploy the server before the Android update. Bootstrap advertises
+`sync.aggregate_stock_operations: true`. Android caches that capability per
+normalized server URL; a confirmed cached value permits offline entry. It checks
+bootstrap again before sending any batch containing aggregate stock operations.
+If support is absent or cannot be confirmed, the entire batch stays pending in
+its original order. Existing command IDs and cohort-specific payloads are never
+rewritten. No mobile database version change is required.
+
+Aggregate counts and movements use proportional whole-animal allocation, with
+largest remainders and balance-ID tie-breaking. Additions and upward counts create
+fresh unrecorded cohorts. Count results expose `ledger_ids` (empty for a no-op)
+and retain `ledger_id` for a single posting. General REST stock adjustments follow
+the same convention; `GET /api/mobs/<id>/balances` returns summed animal types.
+
+Offline projections conserve animal-type totals. Pending cohort identities and
+their internal tie allocations are provisional until the next server snapshot;
+they must not be submitted as persistent cohort IDs.
 
 ## Error Shape
 

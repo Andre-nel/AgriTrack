@@ -94,7 +94,7 @@ import com.agritrack.mobile.data.MapFeatureSummary
 import com.agritrack.mobile.data.MobileFormOptions
 import com.agritrack.mobile.data.MobileOption
 import com.agritrack.mobile.data.MobFilterState
-import com.agritrack.mobile.data.MobBalanceSummary
+import com.agritrack.mobile.data.MobAnimalGroupSummary
 import com.agritrack.mobile.data.MobMoveCountAllocation
 import com.agritrack.mobile.data.MobMoveGroupCount
 import com.agritrack.mobile.data.MobSummary
@@ -184,6 +184,7 @@ class MainActivity : ComponentActivity() {
             farmSnapshots = cachedFarmSnapshots,
         ).copy(
             baseUrl = cachedBaseUrl,
+            aggregateStockOperations = hasStoredToken && fieldStore.loadAggregateStockOperations(cachedBaseUrl),
             isAuthenticated = hasStoredToken,
             statusMessage = if (hasStoredToken) "Ready" else "Log in to continue.",
         )
@@ -745,6 +746,7 @@ private data class FieldUiState(
     val lastSync: SyncSummary? = null,
     val animalGroupTypes: List<AnimalGroupTypeSummary> = emptyList(),
     val formOptions: MobileFormOptions = defaultMobileFormOptions(),
+    val aggregateStockOperations: Boolean = false,
     val syncIntervalMinutes: Int = 5,
     val syncIntervalText: String = "5",
     val rainfallDate: String = LocalDate.now().toString(),
@@ -764,7 +766,7 @@ private data class FieldUiState(
     val editingShearingEntryId: String = "",
     val selectedShearerId: String = "",
     val selectedAnimalGroupTypeId: String = "",
-    val selectedTransferBalanceId: String = "",
+    val selectedTransferAnimalGroupTypeId: String = "",
     val selectedShearingBaleCodeId: String = "",
     val moveNote: String = "",
     val stockQuantity: String = "",
@@ -842,7 +844,7 @@ private data class FieldUiState(
             val firstShearingSession = snapshot?.shearingSessions?.firstOrNull()
             val firstBaleCode = snapshot?.shearingBaleCodes?.firstOrNull { it.active && it.species == firstShearingSession?.species }
                 ?: snapshot?.shearingBaleCodes?.firstOrNull { it.active }
-            val firstBalance = firstMob?.balances?.firstOrNull()
+            val firstBalance = firstMob?.animalGroups?.firstOrNull()
             val selectedFarm = activeFarm ?: snapshot?.let { farmWithRole(it.farm, availableFarms) }
             val cachedSnapshots = mergeFarmSnapshots(emptyMap(), farmSnapshots, snapshot)
             return FieldUiState(
@@ -864,7 +866,7 @@ private data class FieldUiState(
                 selectedShearingSessionId = firstShearingSession?.id.orEmpty(),
                 selectedShearerId = firstShearer?.id.orEmpty(),
                 selectedAnimalGroupTypeId = firstBalance?.animalGroupTypeId.orEmpty(),
-                selectedTransferBalanceId = firstBalance?.id.orEmpty(),
+                selectedTransferAnimalGroupTypeId = firstBalance?.animalGroupTypeId.orEmpty(),
                 selectedShearingBaleCodeId = firstBaleCode?.id.orEmpty(),
                 baleCodeSpecies = firstShearingSession?.species ?: firstBaleCode?.species ?: "Sheep",
                 stockQuantity = firstBalance?.headCount?.toString().orEmpty(),
@@ -936,7 +938,6 @@ private data class StockCountRowDraft(
     val label: String,
     val originalQuantity: Int,
     val quantity: String,
-    val cohortId: String? = null,
 )
 
 private data class NewStockGroupDraft(
@@ -3121,7 +3122,7 @@ private fun DecisionsScreen(
 
 @Composable
 private fun MobFilters(mobs: List<MobSummary>, filters: MobFilterState, onFiltersChange: (MobFilterState) -> Unit) {
-    val species = mobs.flatMap { mob -> mob.balances.map { it.animalGroupType.species } }
+    val species = mobs.flatMap { mob -> mob.animalGroups.map { it.animalGroupType.species } }
         .filter { it.isNotBlank() }
         .distinct()
         .sorted()
@@ -3352,10 +3353,10 @@ private fun MobDetailScreen(
             )
         )
         SectionCard("Balances") {
-            if (mob.balances.isEmpty()) {
+            if (mob.animalGroups.isEmpty()) {
                 Text("No stock balances recorded", color = Color(0xFF516052))
             }
-            mob.balances.forEach { balance ->
+            mob.animalGroups.forEach { balance ->
                 EntityCard(balance.animalGroupType.label, "${balance.headCount} head")
             }
         }
@@ -4433,7 +4434,7 @@ private fun MoveMobScreen(
             if (allocationMode == MoveAllocationMode.Counts) {
                 Button(
                     onClick = { allocationMode = MoveAllocationMode.Counts },
-                    enabled = mob?.balances.orEmpty().isNotEmpty(),
+                    enabled = mob?.animalGroups.orEmpty().isNotEmpty(),
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Counts")
@@ -4441,7 +4442,7 @@ private fun MoveMobScreen(
             } else {
                 OutlinedButton(
                     onClick = { allocationMode = MoveAllocationMode.Counts },
-                    enabled = mob?.balances.orEmpty().isNotEmpty(),
+                    enabled = mob?.animalGroups.orEmpty().isNotEmpty(),
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Counts")
@@ -4498,7 +4499,7 @@ private fun MoveMobScreen(
             }
         } else {
             SectionCard("Animal Count Allocations") {
-                if (mob == null || mob.balances.isEmpty()) {
+                if (mob == null || mob.animalGroups.isEmpty()) {
                     Text("No animal groups available for this mob.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF516052))
                 }
                 countAllocations.forEachIndexed { index, allocation ->
@@ -4551,7 +4552,7 @@ private fun MoveMobScreen(
                                 groupCounts = allocationBalances.associate { it.animalGroupTypeId to "0" },
                             )
                         },
-                        enabled = paddocks.isNotEmpty() && mob?.balances.orEmpty().isNotEmpty(),
+                        enabled = paddocks.isNotEmpty() && mob?.animalGroups.orEmpty().isNotEmpty(),
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Add Row")
@@ -4586,7 +4587,7 @@ private fun StockCountScreen(
     FormScaffold("Stock Count", onBackHome) {
         val snapshot = state.snapshot
         val mob = selectedMob(state)
-        val balanceKey = mob?.balances?.joinToString("|") { "${it.animalGroupTypeId}:${it.headCount}" }.orEmpty()
+        val balanceKey = mob?.animalGroups?.joinToString("|") { "${it.animalGroupTypeId}:${it.headCount}" }.orEmpty()
         var rows by remember(mob?.id, balanceKey) {
             mutableStateOf(initialStockCountRows(mob))
         }
@@ -4660,7 +4661,10 @@ private fun StockCountScreen(
                 )
             }
         }
-        Button(onClick = { onQueueStockCount(rows, newGroup) }, enabled = mob != null, modifier = Modifier.fillMaxWidth()) {
+        if (!state.aggregateStockOperations) {
+            Text("Connect to an updated server to enable stock counts.")
+        }
+        Button(onClick = { onQueueStockCount(rows, newGroup) }, enabled = mob != null && state.aggregateStockOperations, modifier = Modifier.fillMaxWidth()) {
             Text("Queue Count")
         }
     }
@@ -4685,9 +4689,9 @@ private fun TransferMobScreen(
             onTransferDestinationChange,
             label = "Destination mob",
         )
-        CohortBalancePicker(
-            selectedMob(state)?.balances.orEmpty(),
-            state.selectedTransferBalanceId,
+        AnimalGroupBalancePicker(
+            selectedMob(state)?.animalGroups.orEmpty(),
+            state.selectedTransferAnimalGroupTypeId,
             onTransferBalanceSelected,
         )
         OutlinedTextField(
@@ -4698,7 +4702,10 @@ private fun TransferMobScreen(
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(state.transferNote, onTransferNoteChange, label = { Text("Transfer note") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = onQueueMobTransfer, enabled = state.snapshot != null, modifier = Modifier.fillMaxWidth()) {
+        if (!state.aggregateStockOperations) {
+            Text("Connect to an updated server to enable stock transfers.")
+        }
+        Button(onClick = onQueueMobTransfer, enabled = state.snapshot != null && state.aggregateStockOperations, modifier = Modifier.fillMaxWidth()) {
             Text("Queue Transfer")
         }
     }
@@ -4923,26 +4930,26 @@ private fun AnimalGroupPicker(
 }
 
 @Composable
-private fun CohortBalancePicker(
-    balances: List<MobBalanceSummary>,
-    selectedBalanceId: String,
+private fun AnimalGroupBalancePicker(
+    balances: List<MobAnimalGroupSummary>,
+    selectedGroupId: String,
     onBalanceSelected: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selected = balances.firstOrNull { it.id == selectedBalanceId } ?: balances.firstOrNull()
+    val selected = balances.firstOrNull { it.animalGroupTypeId == selectedGroupId } ?: balances.firstOrNull()
     Picker(
-        "Animal cohort",
-        selected?.let { "${it.displayLabel} | ${it.headCount} head" } ?: "No animal cohorts",
+        "Animal group",
+        selected?.let { "${it.animalGroupType.label} | ${it.headCount} head" } ?: "No animal groups",
         balances.isNotEmpty(),
         expanded,
         { expanded = it },
     ) {
         balances.forEach { balance ->
             DropdownMenuItem(
-                text = { Text("${balance.displayLabel} | ${balance.headCount} head") },
+                text = { Text("${balance.animalGroupType.label} | ${balance.headCount} head") },
                 onClick = {
                     expanded = false
-                    onBalanceSelected(balance.id)
+                    onBalanceSelected(balance.animalGroupTypeId)
                 },
             )
         }
@@ -5328,6 +5335,7 @@ private fun loginLoaded(state: FieldUiState, result: FarmLoadResult): FieldUiSta
             password = "",
             animalGroupTypes = result.bootstrap.animalGroupTypes,
             formOptions = result.bootstrap.formOptions,
+            aggregateStockOperations = result.bootstrap.aggregateStockOperations,
             statusMessage = if (result.availableFarms.isEmpty()) {
                 "Login worked, but this user has no farm access yet."
             } else {
@@ -5349,6 +5357,7 @@ private fun loginLoaded(state: FieldUiState, result: FarmLoadResult): FieldUiSta
         isAuthenticated = true,
         animalGroupTypes = mergeAnimalGroupTypes(result.bootstrap.animalGroupTypes, animalGroupTypesFromSnapshot(snapshot)),
         formOptions = result.bootstrap.formOptions,
+        aggregateStockOperations = result.bootstrap.aggregateStockOperations,
         statusMessage = farmLoadMessage("Loaded ${result.activeFarm?.name ?: snapshot.farm.name}", result),
     )
 }
@@ -5376,6 +5385,7 @@ private fun farmsRefreshed(state: FieldUiState, result: FarmLoadResult): FieldUi
             availableFarms = result.availableFarms,
             selectedFarm = result.activeFarm,
             snapshot = null,
+            aggregateStockOperations = result.bootstrap.aggregateStockOperations,
             statusMessage = farmLoadMessage("Refreshed farm access", result),
         ).withFarmSnapshotSet(result.snapshots, activeSnapshot = null)
     return FieldUiState.fromSnapshot(
@@ -5392,6 +5402,7 @@ private fun farmsRefreshed(state: FieldUiState, result: FarmLoadResult): FieldUi
         isAuthenticated = state.isAuthenticated,
         animalGroupTypes = mergeAnimalGroupTypes(result.bootstrap.animalGroupTypes, animalGroupTypesFromSnapshot(snapshot)),
         formOptions = result.bootstrap.formOptions,
+        aggregateStockOperations = result.bootstrap.aggregateStockOperations,
         statusMessage = farmLoadMessage("Refreshed ${result.activeFarm?.name ?: snapshot.farm.name}", result),
     )
 }
@@ -5411,6 +5422,7 @@ private fun farmSelected(state: FieldUiState, snapshot: FarmSnapshot): FieldUiSt
         isAuthenticated = state.isAuthenticated,
         animalGroupTypes = mergeAnimalGroupTypes(state.animalGroupTypes, animalGroupTypesFromSnapshot(snapshot)),
         formOptions = state.formOptions,
+        aggregateStockOperations = state.aggregateStockOperations,
         statusMessage = "Loaded ${farmWithRole(snapshot.farm, state.availableFarms).name}",
     )
 
@@ -5437,18 +5449,19 @@ private fun synced(state: FieldUiState, summary: SyncSummary): FieldUiState {
             mergeAnimalGroupTypes(state.animalGroupTypes, animalGroupTypesFromSnapshot(it))
         } ?: state.animalGroupTypes,
         formOptions = state.formOptions,
+        aggregateStockOperations = summary.aggregateStockOperations ?: state.aggregateStockOperations,
         lastSync = summary,
-        statusMessage = "Sync applied ${summary.appliedCount}, failed ${summary.failedCount}. Pending: ${summary.remainingQueueCount}",
+        statusMessage = summary.pauseMessage ?: "Sync applied ${summary.appliedCount}, failed ${summary.failedCount}. Pending: ${summary.remainingQueueCount}",
     )
 }
 
 private fun selectMob(state: FieldUiState, mobId: String): FieldUiState {
-    val balance = state.snapshot?.mobs?.firstOrNull { it.id == mobId }?.balances?.firstOrNull()
+    val balance = state.snapshot?.mobs?.firstOrNull { it.id == mobId }?.animalGroups?.firstOrNull()
     val destination = state.snapshot?.mobs?.firstOrNull { it.id != mobId }?.id.orEmpty()
     return state.copy(
         selectedMobId = mobId,
         transferDestinationMobId = destination,
-        selectedTransferBalanceId = balance?.id.orEmpty(),
+        selectedTransferAnimalGroupTypeId = balance?.animalGroupTypeId.orEmpty(),
         selectedAnimalGroupTypeId = balance?.animalGroupTypeId
             ?: state.selectedAnimalGroupTypeId.ifBlank { state.animalGroupTypes.firstOrNull()?.id.orEmpty() },
         stockQuantity = balance?.headCount?.toString() ?: state.stockQuantity,
@@ -5494,14 +5507,14 @@ private fun selectFenceSection(state: FieldUiState, fenceSectionId: String): Fie
 }
 
 private fun selectAnimalGroup(state: FieldUiState, groupTypeId: String): FieldUiState {
-    val currentBalance = selectedMob(state)?.balances?.firstOrNull { it.animalGroupTypeId == groupTypeId }
+    val currentBalance = selectedMob(state)?.animalGroups?.firstOrNull { it.animalGroupTypeId == groupTypeId }
     return state.copy(selectedAnimalGroupTypeId = groupTypeId, stockQuantity = currentBalance?.headCount?.toString() ?: state.stockQuantity)
 }
 
-private fun selectTransferBalance(state: FieldUiState, balanceId: String): FieldUiState {
-    val balance = selectedMob(state)?.balances?.firstOrNull { it.id == balanceId }
+private fun selectTransferBalance(state: FieldUiState, groupId: String): FieldUiState {
+    val balance = selectedMob(state)?.animalGroups?.firstOrNull { it.animalGroupTypeId == groupId }
     return state.copy(
-        selectedTransferBalanceId = balanceId,
+        selectedTransferAnimalGroupTypeId = groupId,
         selectedAnimalGroupTypeId = balance?.animalGroupTypeId
             ?: state.selectedAnimalGroupTypeId,
         transferQuantity = balance?.headCount?.toString() ?: state.transferQuantity,
@@ -5636,20 +5649,8 @@ private fun initialMoveAllocations(
     return listOf(MoveAllocationDraft(paddockId = paddockId, allocationPct = "100"))
 }
 
-private fun aggregateMobBalances(mob: MobSummary?): List<MobBalanceSummary> =
-    mob?.balances.orEmpty()
-        .groupBy { it.animalGroupTypeId }
-        .values
-        .map { rows ->
-            rows.first().copy(
-                headCount = rows.sumOf { it.headCount },
-                cohortId = null,
-                reproductiveState = "not_recorded",
-                expectedLitterSize = "not_recorded",
-                lactationState = "not_recorded",
-                offspringAtFoot = "not_recorded",
-            )
-        }
+private fun aggregateMobBalances(mob: MobSummary?): List<MobAnimalGroupSummary> =
+    mob?.animalGroups.orEmpty()
 
 private fun initialCountMoveAllocations(
     snapshot: FarmSnapshot?,
@@ -5691,7 +5692,7 @@ private fun countAllocationPct(draft: CountMoveAllocationDraft, mob: MobSummary?
 }
 
 private fun countRemainingLabel(mob: MobSummary?, drafts: List<CountMoveAllocationDraft>): String {
-    if (mob == null || mob.balances.isEmpty()) return "No stock"
+    if (mob == null || mob.animalGroups.isEmpty()) return "No stock"
     val remaining = aggregateMobBalances(mob).map { balance ->
         val assigned = drafts.sumOf { draft ->
             draft.groupCounts[balance.animalGroupTypeId]?.trim()?.toIntOrNull() ?: 0
@@ -5742,7 +5743,7 @@ internal fun normalizeCountMoveAllocations(
     mob: MobSummary?,
 ): Result<List<MobMoveCountAllocation>> {
     mob ?: return Result.failure(IllegalArgumentException("Choose a mob."))
-    if (mob.balances.isEmpty()) {
+    if (mob.animalGroups.isEmpty()) {
         return Result.failure(IllegalArgumentException("The selected mob has no animal groups to allocate."))
     }
     if (mob.totalLsu <= 0.0) {
@@ -5878,6 +5879,10 @@ private fun queueMobMove(
     if (allocationMode == MoveAllocationMode.Counts) {
         val allocations = normalizeCountMoveAllocations(countAllocationDrafts, selectedMob(state))
             .getOrElse { return state.copy(statusMessage = it.message ?: "Check count allocations.") }
+        if (allocations.any { allocation -> allocation.groupCounts.any { it.animalGroupTypeId.startsWith("pending-") } } &&
+            (!state.aggregateStockOperations || !repo.aggregateStockOperationsSupported())) {
+            return state.copy(statusMessage = "Connect to an updated server before allocating a newly added animal type.")
+        }
         repo.queueMobMoveCounts(farm.id, mobId, allocations, state.moveNote)
     } else {
         val allocations = normalizeMoveAllocations(allocationDrafts)
@@ -5893,6 +5898,9 @@ private fun queueStockCount(
     rows: List<StockCountRowDraft>,
     newGroup: NewStockGroupDraft,
 ): FieldUiState {
+    if (!state.aggregateStockOperations || !repo.aggregateStockOperationsSupported()) {
+        return state.copy(statusMessage = "Connect to an updated server to enable stock counts.")
+    }
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a stock count.")
     val mobId = state.selectedMobId.ifBlank { state.snapshot?.mobs?.firstOrNull()?.id.orEmpty() }
     if (mobId.isBlank()) return state.copy(statusMessage = "Choose a mob.")
@@ -5909,7 +5917,6 @@ private fun queueStockCount(
                 row.animalGroupTypeId,
                 quantity,
                 state.stockNote,
-                row.cohortId,
             )
             queued += 1
         }
@@ -5927,7 +5934,7 @@ private fun queueStockCount(
         if (newGroup.sex !in sexValues) return state.copy(statusMessage = "Choose a valid sex.")
         if (newGroup.ageClass !in ageValues) return state.copy(statusMessage = "Choose a valid age class.")
         if (quantity <= 0) return state.copy(statusMessage = "New group head count must be greater than zero.")
-        val duplicate = mob?.balances.orEmpty().any { balance ->
+        val duplicate = mob?.animalGroups.orEmpty().any { balance ->
             balance.animalGroupType.species == newGroup.species &&
                 balance.animalGroupType.breed == breed &&
                 balance.animalGroupType.sex == newGroup.sex &&
@@ -5957,24 +5964,27 @@ private fun queueStockCount(
 }
 
 private fun queueMobTransfer(state: FieldUiState, repo: MobileRepository): FieldUiState {
+    if (!state.aggregateStockOperations || !repo.aggregateStockOperationsSupported()) {
+        return state.copy(statusMessage = "Connect to an updated server to enable stock transfers.")
+    }
     val farm = state.selectedFarm ?: return state.copy(statusMessage = "Load a farm snapshot before queueing a transfer.")
     val quantity = state.transferQuantity.toIntOrNull() ?: return state.copy(statusMessage = "Transfer quantity must be a whole number.")
     if (quantity <= 0) return state.copy(statusMessage = "Transfer quantity must be greater than zero.")
-    val balance = selectedMob(state)?.balances?.firstOrNull {
-        it.id == state.selectedTransferBalanceId
-    } ?: return state.copy(statusMessage = "Choose a source animal cohort.")
+    val balance = selectedMob(state)?.animalGroups?.firstOrNull {
+        it.animalGroupTypeId == state.selectedTransferAnimalGroupTypeId
+    } ?: return state.copy(statusMessage = "Choose a source animal group.")
     if (state.selectedMobId.isBlank() || state.transferDestinationMobId.isBlank()) {
         return state.copy(statusMessage = "Choose source and destination mobs.")
     }
     if (quantity > balance.headCount) {
-        return state.copy(statusMessage = "Transfer quantity cannot exceed ${balance.headCount} head in the selected cohort.")
+        return state.copy(statusMessage = "Transfer quantity cannot exceed ${balance.headCount} head in the selected animal group.")
     }
     repo.queueMobTransfer(
         farm.id,
         state.selectedMobId,
         state.transferDestinationMobId,
         balance.animalGroupTypeId,
-        balance.cohortId,
+        null,
         quantity,
         state.transferNote,
     )
@@ -6410,13 +6420,12 @@ private fun selectShearingEntryForEdit(state: FieldUiState, entryId: String): Fi
 }
 
 private fun initialStockCountRows(mob: MobSummary?): List<StockCountRowDraft> =
-    mob?.balances.orEmpty().map { balance ->
+    mob?.animalGroups.orEmpty().map { balance ->
         StockCountRowDraft(
             animalGroupTypeId = balance.animalGroupTypeId,
-            label = balance.displayLabel,
+            label = balance.animalGroupType.label,
             originalQuantity = balance.headCount,
             quantity = balance.headCount.toString(),
-            cohortId = balance.cohortId,
         )
     }
 
@@ -6432,7 +6441,7 @@ private fun defaultNewStockGroupDraft(formOptions: MobileFormOptions): NewStockG
 private fun breedSuggestionsForSpecies(snapshot: FarmSnapshot?, species: String): List<String> =
     (
         snapshot?.mobs.orEmpty()
-            .flatMap { mob -> mob.balances.map { it.animalGroupType } } +
+            .flatMap { mob -> mob.animalGroups.map { it.animalGroupType } } +
             snapshot?.shearingSessions.orEmpty()
                 .flatMap { session -> session.entries.map { it.animalGroupType } }
     )
@@ -6516,7 +6525,7 @@ private fun animalGroupTypesFromSnapshot(snapshot: FarmSnapshot?): List<AnimalGr
     if (snapshot == null) return emptyList()
     return mergeAnimalGroupTypes(
         emptyList(),
-        snapshot.mobs.flatMap { mob -> mob.balances.map { it.animalGroupType } } +
+        snapshot.mobs.flatMap { mob -> mob.animalGroups.map { it.animalGroupType } } +
             snapshot.shearingSessions.flatMap { session -> session.entries.map { it.animalGroupType } },
     )
 }

@@ -123,12 +123,26 @@ data class MobBalanceSummary(
         }
 }
 
+/** Ordinary stock counts use animal type; cohort details stay in the cached wire model. */
+data class MobAnimalGroupSummary(
+    val animalGroupTypeId: String,
+    val animalGroupType: AnimalGroupTypeSummary,
+    val headCount: Int,
+)
+
 data class MobSummary(
     val id: String,
     val name: String,
     val status: String,
     val balances: List<MobBalanceSummary>,
 ) {
+    val animalGroups: List<MobAnimalGroupSummary>
+        get() = balances.filter { it.headCount > 0 }
+            .groupBy { it.animalGroupTypeId }
+            .map { (groupId, rows) ->
+                MobAnimalGroupSummary(groupId, rows.first().animalGroupType, rows.sumOf { it.headCount })
+            }
+
     val totalHead: Int
         get() = balances.sumOf { it.headCount }
 
@@ -742,7 +756,7 @@ data class FarmSnapshot(
                         animalGroupTypeId = groupId,
                         animalGroupType = parseAnimalGroupType(groupJson, groupId),
                         headCount = balance.optInt("head_count", 0),
-                        cohortId = balance.optString("cohort_id").takeIf { it.isNotBlank() },
+                        cohortId = balance.optNullableString("cohort_id"),
                         reproductiveState = balance.optString("reproductive_state", "not_recorded"),
                         expectedLitterSize = balance.optString("expected_litter_size", "not_recorded"),
                         lactationState = balance.optString("lactation_state", "not_recorded"),
@@ -1463,6 +1477,7 @@ data class BootstrapResult(
     val animalGroupTypes: List<AnimalGroupTypeSummary>,
     val supportedCommandTypes: List<String>,
     val formOptions: MobileFormOptions = MobileFormOptions(),
+    val aggregateStockOperations: Boolean = false,
 ) {
     companion object {
         fun fromJson(json: JSONObject): BootstrapResult {
@@ -1488,6 +1503,7 @@ data class BootstrapResult(
                 animalGroupTypes = groupTypes,
                 supportedCommandTypes = supported.strings(),
                 formOptions = MobileFormOptions.fromJson(json.optJSONObject("form_options") ?: JSONObject()),
+                aggregateStockOperations = json.optJSONObject("sync")?.optBoolean("aggregate_stock_operations", false) ?: false,
             )
         }
     }
@@ -1572,6 +1588,8 @@ data class SyncSummary(
     val remainingQueueCount: Int,
     val refreshedSnapshot: FarmSnapshot? = null,
     val refreshedSnapshots: List<FarmSnapshot> = emptyList(),
+    val pauseMessage: String? = null,
+    val aggregateStockOperations: Boolean? = null,
 ) {
     val appliedCount: Int = results.count { it.status == "applied" }
     val failedCount: Int = results.count { it.status == "failed" }

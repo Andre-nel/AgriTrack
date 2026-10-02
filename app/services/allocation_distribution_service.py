@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 
 from app.extensions import db
 from app.models import (
@@ -9,10 +10,13 @@ from app.models import (
     AnimalGroupType,
     GrazingAllocation,
     GrazingAllocationGroupAssignment,
+    GrazingAllocationLsuBreakdownHistory,
+    GrazingAllocationLsuHistory,
     GrazingSession,
     Mob,
 )
 from app.services.reporting_service import ReportingService
+from app.services.stock_groups import apportion_counts
 
 
 FRACTION_QUANT = Decimal("0.0001")
@@ -94,40 +98,7 @@ class AllocationDistributionService:
 
     @staticmethod
     def split_count(total_count: int, weighted_items: list[tuple[str, Decimal | float | int]]) -> dict[str, int]:
-        total = int(total_count or 0)
-        keys = [str(key) for key, _weight in weighted_items]
-        if total <= 0 or not keys:
-            return {key: 0 for key in keys}
-
-        weights = [Decimal(str(weight)) for _key, weight in weighted_items]
-        if sum((weight for weight in weights if weight > 0), Decimal("0")) <= 0:
-            weights = [Decimal("1") for _key in keys]
-
-        positive_total = sum((weight for weight in weights if weight > 0), Decimal("0"))
-        base_counts: list[int] = []
-        remainders: list[tuple[Decimal, str, int]] = []
-        assigned = 0
-        for index, (key, weight) in enumerate(zip(keys, weights)):
-            if weight <= 0 or positive_total <= 0:
-                base_counts.append(0)
-                remainders.append((Decimal("0"), key, index))
-                continue
-            raw = Decimal(total) * (weight / positive_total)
-            count = int(raw.to_integral_value(rounding=ROUND_DOWN))
-            base_counts.append(count)
-            assigned += count
-            remainders.append((raw - Decimal(count), key, index))
-
-        remaining = total - assigned
-        for _remainder, _key, index in sorted(remainders, key=lambda item: (-item[0], item[1])):
-            if remaining <= 0:
-                break
-            if weights[index] <= 0:
-                continue
-            base_counts[index] += 1
-            remaining -= 1
-
-        return {key: count for key, count in zip(keys, base_counts)}
+        return apportion_counts(total_count, weighted_items)
 
     @classmethod
     def _distribution_for_group(
@@ -383,6 +354,7 @@ class AllocationDistributionService:
         delta: int,
         final_head_count: int,
         paddock_id: str | None = None,
+        effective_at: datetime | None = None,
     ) -> None:
         session = cls.active_session_for_mob(mob)
         if session is None:
@@ -397,28 +369,35 @@ class AllocationDistributionService:
             if group_counts.get(group_id, 0) > 0
         }
 
+        selected_paddock = None
         if selected_paddock_id:
-            assigned_paddock_ids = {
-                str(allocation.paddock_id) for allocation in session.allocations
+            assigned_paddocks = {
+                str(allocation.paddock_id): allocation.paddock for allocation in session.allocations
             }
-            if selected_paddock_id not in assigned_paddock_ids:
+            if selected_paddock_id not in assigned_paddocks:
                 raise ValueError("Selected paddock is not currently assigned to this mob")
+            selected_paddock = assigned_paddocks[selected_paddock_id]
 
         if delta < 0:
             if selected_paddock_id:
-                available = counts_by_paddock.get(selected_paddock_id, {}).get(group_id, 0)
+                from app.services.gate_service import GateService
+
+                connected_ids = {
+                    str(paddock.id) for paddock in GateService.open_gate_component(selected_paddock)
+                }
+                group_distribution = {
+                    row_id: count for row_id, count in group_distribution.items()
+                    if row_id in connected_ids
+                }
+                available = sum(group_distribution.values())
                 requested = abs(int(delta))
                 if requested > available:
                     raise ValueError(
-                        "Selected paddock does not have enough of this animal type "
+                        "Selected paddock and its open-gate connected paddocks do not have "
+                        "enough of this animal type "
                         f"for the adjustment ({available} available, {requested} requested)"
                     )
-                removals = {selected_paddock_id: requested}
-            else:
-                removals = cls.split_count(
-                    abs(int(delta)),
-                    [(paddock_id, count) for paddock_id, count in group_distribution.items()],
-                )
+            removals = cls.split_count(abs(int(delta)), list(group_distribution.items()))
             for paddock_id, removal in removals.items():
                 if removal <= 0:
                     continue
@@ -429,7 +408,26 @@ class AllocationDistributionService:
                     counts_by_paddock.get(paddock_id, {}).pop(group_id, None)
         elif delta > 0:
             if selected_paddock_id:
-                additions = {selected_paddock_id: int(delta)}
+                from app.services.gate_service import GateService
+
+                # Normalize just the new heads, not the mob's existing stock.
+                allocations = GateService.allocations_for_open_gate_network(
+                    str(selected_paddock.farm_id),
+                    [{
+                        "paddock_id": selected_paddock_id,
+                        "group_counts": [{
+                            "animal_group_type_id": group_id,
+                            "head_count": int(delta),
+                        }],
+                    }],
+                )
+                additions = {
+                    str(row["paddock_id"]): sum(
+                        int(group["head_count"]) for group in row["group_counts"]
+                        if str(group["animal_group_type_id"]) == group_id
+                    )
+                    for row in allocations
+                }
             else:
                 weights = (
                     [(paddock_id, count) for paddock_id, count in group_distribution.items()]
@@ -447,6 +445,40 @@ class AllocationDistributionService:
             session.mob,
             overrides={group_id: int(final_head_count or 0)},
         )
+        payloads = cls.allocations_from_count_map(session.mob, counts_by_paddock, context=final_context)
+        remaining_paddocks = {str(row["paddock_id"]) for row in payloads}
+        if any(str(row.paddock_id) not in remaining_paddocks for row in session.allocations):
+            from app.services.grazing_history_service import GrazingHistoryService
+
+            # Deleting an allocation cascades to its past grazing history. Close
+            # the old session instead, and let the caller sync the new history
+            # after its ledger entries and balances have all been posted.
+            changed_at = effective_at or datetime.now(timezone.utc)
+            normalized_at = GrazingHistoryService._normalize_datetime(changed_at)
+            history_boundaries = [session.start_at]
+            for model in (GrazingAllocationLsuHistory, GrazingAllocationLsuBreakdownHistory):
+                history_boundaries.extend(
+                    row.effective_from
+                    for row in model.query.filter_by(grazing_session_id=session.id, effective_to=None)
+                )
+            if any(
+                GrazingHistoryService._normalize_datetime(boundary) > normalized_at
+                for boundary in history_boundaries
+            ):
+                raise ValueError(
+                    "Stock adjustment time precedes the current grazing allocation history. "
+                    "Use a current event time or review the historical correction separately."
+                )
+            session.end_at = changed_at
+            GrazingHistoryService.close_open_history_for_session(session, end_at=changed_at)
+            if not payloads:
+                db.session.flush()
+                return
+            session = GrazingSession(
+                mob=session.mob, farm_id=session.farm_id, start_at=changed_at,
+            )
+            db.session.add(session)
+            db.session.flush()
         cls.rewrite_session_assignments(session, counts_by_paddock, context=final_context)
 
     @classmethod

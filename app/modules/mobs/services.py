@@ -2,13 +2,12 @@ from datetime import datetime, timezone
 from typing import Mapping
 
 from app.extensions import db
-from app.models import AnimalGroupBalance, Mob
+from app.models import Mob
 from app.models.stock_ledger import StockEventType
-from app.services.allocation_distribution_service import AllocationDistributionService
 from app.services.cohort_service import CohortService
-from app.services.grazing_history_service import GrazingHistoryService
 from app.services.mob_event_service import MobEventService
 from app.services.stock_service import StockService
+from app.services.validation_service import ValidationService
 
 
 STOCK_IN_EVENTS = {
@@ -107,19 +106,27 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
             age_class=(form.get("age_class") or "adult").strip(),
         )
         selected_event_type = StockEventType(form.get("event_type") or "adjustment_in")
-        quantity = int(form.get("quantity") or 0)
+        quantity = ValidationService.parse_whole_number(form.get("quantity"))
 
         event_type = selected_event_type
         event_quantity = quantity
         success_message = "Stock updated"
         selected_cohort_id = (form.get("cohort_id") or "").strip() or None
-        current_balance = CohortService.balance_for_selector(
-            mob_id=str(mob.id),
-            animal_group_type_id=str(group_type.id),
-            cohort_id=selected_cohort_id,
-        )
-        current_head_count = current_balance.head_count if current_balance else 0
+        if selected_cohort_id:
+            current_balance = CohortService.balance_for_selector(
+                mob_id=str(mob.id),
+                animal_group_type_id=str(group_type.id),
+                cohort_id=selected_cohort_id,
+                require_positive=True,
+            )
+            if current_balance is None:
+                raise ValueError("Selected cohort is no longer available in this mob")
+            current_head_count = int(current_balance.head_count)
+        else:
+            current_head_count = StockService.group_head_count(str(mob.id), str(group_type.id))
         if selected_event_type == StockEventType.count:
+            if quantity < 0:
+                raise ValueError("Count must be greater than or equal to 0")
             delta = quantity - current_head_count
             if delta == 0:
                 return "Count matches current balance. No stock adjustment posted."
@@ -139,11 +146,10 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
             else current_head_count - event_quantity
         )
         change_time = datetime.now(timezone.utc)
-        StockService.adjust_stock(
+        posting_arguments = dict(
             mob_id=mob.id,
             farm_id=mob.farm_id,
             animal_group_type_id=group_type.id,
-            cohort_id=selected_cohort_id,
             event_type=event_type,
             quantity=event_quantity,
             note=form.get("note"),
@@ -153,6 +159,10 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
                 or None
             ),
         )
+        if selected_cohort_id:
+            StockService.adjust_stock(cohort_id=selected_cohort_id, **posting_arguments)
+        else:
+            StockService.adjust_group_stock(**posting_arguments)
         MobEventService.create_event(
             mob_id=mob.id,
             farm_id=mob.farm_id,
@@ -177,29 +187,25 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
 
 def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
     source_group_type_id = (form.get("source_animal_group_type_id") or "").strip()
-    source_cohort_id = (form.get("source_cohort_id") or "").strip() or None
     if not source_group_type_id:
         raise ValueError("Select a balance line to edit")
+    if (form.get("source_cohort_id") or "").strip():
+        raise ValueError("Balance lines now combine cohorts. Refresh the mob page before editing.")
 
-    source_balance = CohortService.balance_for_selector(
-        mob_id=str(mob.id),
-        animal_group_type_id=source_group_type_id,
-        cohort_id=source_cohort_id,
-        require_positive=True,
-    )
-    if not source_balance or int(source_balance.head_count) <= 0:
+    source_balances = StockService.group_balances(str(mob.id), source_group_type_id)
+    if not source_balances:
         raise ValueError("Selected balance line is no longer available. Refresh and try again.")
 
-    source_group = source_balance.animal_group_type
-    source_head = int(source_balance.head_count)
+    source_group = source_balances[0].animal_group_type
+    source_head = sum(int(balance.head_count) for balance in source_balances)
     head_count_raw = (form.get("head_count") or "").strip()
     try:
         target_head = int(head_count_raw)
     except ValueError:
         raise ValueError("Head count must be a whole number")
 
-    if target_head <= 0:
-        raise ValueError("Head count must be greater than 0")
+    if target_head < 0:
+        raise ValueError("Head count must be greater than or equal to 0")
 
     note_text = " ".join((form.get("note") or "").strip().split())
 
@@ -231,18 +237,16 @@ def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
                 "head adjustment",
             )
             change_time = datetime.now(timezone.utc)
-            StockService.adjust_stock(
+            StockService.adjust_group_stock(
                 mob_id=mob.id,
                 farm_id=mob.farm_id,
                 animal_group_type_id=source_group.id,
-                cohort_id=source_balance.cohort_id,
                 event_type=event_type,
                 quantity=quantity,
                 note=f"{description} Note: {note_text}" if note_text else description,
                 event_time=change_time,
             )
         else:
-            source_cohort = CohortService.ensure_balance_cohort(source_balance)
             description = (
                 f"Balance reclassified from {source_label} (head: {source_head}) "
                 f"to {target_label} (head: {target_head})."
@@ -259,39 +263,14 @@ def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
             )
             ledger_note = f"{description} Note: {note_text}" if note_text else description
             change_time = datetime.now(timezone.utc)
-            AllocationDistributionService.apply_reclassification(
+            StockService.reclassify_group_stock(
                 mob,
                 source_group_id=str(source_group.id),
-                target_group_id=str(target_group.id),
+                target_group=target_group,
                 target_head_count=target_head,
-            )
-            StockService.adjust_stock(
-                mob_id=mob.id,
-                farm_id=mob.farm_id,
-                animal_group_type_id=source_group.id,
-                cohort_id=source_cohort.id,
-                event_type=StockEventType.adjustment_out,
-                quantity=source_head,
                 note=ledger_note,
                 event_time=change_time,
-                sync_grazing_history=False,
-                sync_allocation_distribution=False,
             )
-            source_cohort.animal_group_type_id = target_group.id
-            db.session.flush()
-            StockService.adjust_stock(
-                mob_id=mob.id,
-                farm_id=mob.farm_id,
-                animal_group_type_id=target_group.id,
-                cohort_id=source_cohort.id,
-                event_type=StockEventType.adjustment_in,
-                quantity=target_head,
-                note=ledger_note,
-                event_time=change_time,
-                sync_grazing_history=False,
-                sync_allocation_distribution=False,
-            )
-            GrazingHistoryService.sync_live_history_for_mob(mob, effective_at=change_time)
 
         event_description = f"{description} Note: {note_text}" if note_text else description
         MobEventService.create_event(

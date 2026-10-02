@@ -542,7 +542,22 @@ th, td {
 }
 
 .mob-balances-table {
+  min-width: 30rem;
+}
+
+.mob-cohorts-table {
   min-width: 58rem;
+}
+
+.mob-cohort-form {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mob-cohort-form label,
+.mob-cohort-form input,
+.mob-cohort-form select {
+  min-width: 0;
+  max-width: 100%;
 }
 
 a { color: #1b5f49; }

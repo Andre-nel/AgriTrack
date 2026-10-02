@@ -7,6 +7,7 @@ from app.modules.tasks.entity_links import linked_task_rows_for_entity
 from app.services.cohort_service import CohortService
 from app.services.mob_event_service import MobEventService
 from app.services.reporting_service import ReportingService
+from app.services.stock_service import StockService
 
 _CONTINUITY_TOLERANCE = timedelta(seconds=1)
 
@@ -117,6 +118,54 @@ def _continuous_assignment_days(
     return max(0.0, (now_dt - streak_start).total_seconds() / 86400.0)
 
 
+def build_mob_cohorts_context(mob: Mob) -> dict:
+    cohort_rows = []
+    female_balance_options = []
+    for balance in sorted(
+        (row for row in mob.balances if int(row.head_count or 0) > 0),
+        key=lambda row: (_animal_group_label(row.animal_group_type).lower(), str(row.id)),
+    ):
+        cohort = balance.cohort
+        short_id = str(cohort.id if cohort else balance.id)[:8]
+        row = {
+            "id": str(balance.id),
+            "short_id": short_id,
+            "label": _animal_group_label(balance.animal_group_type),
+            "head_count": int(balance.head_count),
+        }
+        for field in (
+            "reproductive_state", "expected_litter_size", "lactation_state", "offspring_at_foot"
+        ):
+            row[field] = getattr(cohort, field, "not_recorded").replace("_", " ")
+        row["selection_label"] = (
+            f"{row['label']} | {row['reproductive_state']} | #{short_id} "
+            f"(available: {row['head_count']})"
+        )
+        cohort_rows.append(row)
+        if CohortService.is_female_group(balance.animal_group_type):
+            female_balance_options.append(row)
+
+    destination_mobs = (
+        Mob.query.filter(Mob.status == "active", Mob.id != mob.id)
+        .join(Farm)
+        .order_by(Farm.name, Mob.name)
+        .all()
+    )
+    active_session = next((session for session in mob.grazing_sessions if session.end_at is None), None)
+    return {
+        "mob": mob,
+        "cohort_rows": cohort_rows,
+        "female_balance_options": female_balance_options,
+        "destination_mobs": destination_mobs,
+        "stock_event_types": StockEventType,
+        "adjust_paddock_options": [
+            {"id": str(allocation.paddock_id), "name": allocation.paddock.name}
+            for allocation in sorted(active_session.allocations, key=lambda row: row.paddock.name.lower())
+        ] if active_session else [],
+        "today": date.today().isoformat(),
+    }
+
+
 def build_mob_detail_context(
     mob: Mob,
     selected_event_tag: str,
@@ -180,70 +229,23 @@ def build_mob_detail_context(
                 }
             )
 
-    split_group_options_by_id = {}
-    stock_line_options = []
-    female_balance_options = []
-    for balance in sorted(
-        mob.balances,
-        key=lambda b: (
-            b.animal_group_type.species.lower(),
-            b.animal_group_type.breed.lower(),
-            b.animal_group_type.sex.lower(),
-            b.animal_group_type.age_class.lower(),
-        ),
-    ):
-        if int(balance.head_count) <= 0:
-            continue
-        group = balance.animal_group_type
+    balance_rows = StockService.group_summary_rows(mob)
+    split_group_options = []
+    for row in balance_rows:
+        group = row["group"]
         lsu_per_head = ReportingService.group_lsu_per_head(group.species, group.sex, group.age_class)
-        group_id = str(balance.animal_group_type_id)
-        existing_group_option = split_group_options_by_id.get(group_id)
-        if existing_group_option:
-            existing_group_option["head_count"] += int(balance.head_count)
-            existing_group_option["label"] = (
-                f"{group.species} | {group.breed} | {group.sex} | {group.age_class} "
-                f"(available: {existing_group_option['head_count']})"
-            )
-        else:
-            split_group_options_by_id[group_id] = {
-                "id": group_id,
+        split_group_options.append(
+            {
+                "id": str(row["animal_group_type_id"]),
                 "species": group.species,
                 "breed": group.breed,
                 "sex": group.sex,
                 "age_class": group.age_class,
-                "head_count": int(balance.head_count),
+                "head_count": row["head_count"],
                 "lsu_per_head": lsu_per_head,
-                "label": (
-                    f"{group.species} | {group.breed} | {group.sex} | {group.age_class} "
-                    f"(available: {int(balance.head_count)})"
-                ),
-            }
-        stock_line_options.append(
-            {
-                "id": (
-                    f"cohort:{balance.cohort_id}"
-                    if balance.cohort_id
-                    else str(balance.animal_group_type_id)
-                ),
-                "cohort_id": str(balance.cohort_id) if balance.cohort_id else None,
-                "animal_group_type_id": group_id,
-                "head_count": int(balance.head_count),
-                "label": (
-                    f"{CohortService.display_label(balance.cohort, group)} "
-                    f"(available: {int(balance.head_count)})"
-                ),
+                "label": f"{_animal_group_label(group)} (available: {row['head_count']})",
             }
         )
-        if CohortService.is_female_group(group):
-            female_balance_options.append(
-                {
-                    "id": str(balance.id),
-                    "head_count": int(balance.head_count),
-                    "label": CohortService.display_label(balance.cohort, group),
-                }
-            )
-
-    split_group_options = list(split_group_options_by_id.values())
 
     if current_count_allocations:
         initial_count_allocation_rows = []
@@ -318,10 +320,9 @@ def build_mob_detail_context(
         "adjust_paddock_options": adjust_paddock_options,
         "allocation_total_pct": float(allocation_total_pct),
         "mob_species_totals": _species_total_rows(mob),
+        "balance_rows": balance_rows,
         "split_group_options": split_group_options,
-        "stock_line_options": stock_line_options,
-        "female_balance_options": female_balance_options,
-        "today": date.today().isoformat(),
+        "stock_line_options": split_group_options,
         "initial_count_allocation_rows": initial_count_allocation_rows,
         "has_current_count_allocations": bool(current_count_allocations),
         "mob_events": mob_events,

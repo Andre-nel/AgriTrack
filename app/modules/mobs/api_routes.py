@@ -2,12 +2,13 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import AnimalGroupBalance, Mob, MobEvent
+from app.models import Mob, MobEvent
 from app.models.stock_ledger import StockEventType
 from app.services.mob_event_service import MobEventService
 from app.services.mob_service import MobService
 from app.services.movement_service import MovementService
 from app.services.stock_service import StockService
+from app.services.validation_service import ValidationService
 
 bp = Blueprint("mobs", __name__)
 
@@ -77,59 +78,40 @@ def adjust_mob_stock(mob_id):
     payload = request.get_json() or {}
     try:
         selected_event_type = StockEventType(payload["event_type"])
-        quantity = int(payload["quantity"])
-        event_type = selected_event_type
-        event_quantity = quantity
-        if selected_event_type == StockEventType.count:
-            current_balance = AnimalGroupBalance.query.filter_by(
-                mob_id=mob_id,
-                animal_group_type_id=payload["animal_group_type_id"],
-            ).first()
-            current_head_count = current_balance.head_count if current_balance else 0
-            delta = quantity - current_head_count
-            if delta == 0:
-                return jsonify({"message": "Count matches current balance. No stock adjustment posted."}), 200
-            if delta > 0:
-                event_type = StockEventType.adjustment_in
-                event_quantity = delta
-            else:
-                event_type = StockEventType.missing
-                event_quantity = -delta
-
-        ledger = StockService.adjust_stock(
+        quantity = ValidationService.parse_whole_number(payload["quantity"])
+        ledgers = StockService.adjust_group_stock(
             mob_id=mob.id,
             farm_id=mob.farm_id,
             animal_group_type_id=payload["animal_group_type_id"],
-            event_type=event_type,
-            quantity=event_quantity,
+            event_type=selected_event_type,
+            quantity=quantity,
             note=payload.get("note"),
             allocation_paddock_id=payload.get("allocation_paddock_id") or payload.get("paddock_id"),
         )
         db.session.commit()
-    except (KeyError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         db.session.rollback()
         return jsonify({"error": str(exc)}), 400
 
-    return jsonify({"ledger_id": str(ledger.id)}), 201
+    result = {"ledger_ids": [str(ledger.id) for ledger in ledgers]}
+    if not ledgers:
+        result["message"] = "Count matches current balance. No stock adjustment posted."
+        return jsonify(result), 200
+    if len(ledgers) == 1:
+        result["ledger_id"] = str(ledgers[0].id)
+    return jsonify(result), 201
 
 
 @bp.get("/<mob_id>/balances")
 def mob_balances(mob_id):
     mob = _get_active_mob_or_404(mob_id)
-    balances = (
-        AnimalGroupBalance.query.filter(
-            AnimalGroupBalance.mob_id == mob.id,
-            AnimalGroupBalance.head_count > 0,
-        )
-        .all()
-    )
     return jsonify(
         [
             {
-                "animal_group_type_id": b.animal_group_type_id,
-                "head_count": b.head_count,
+                "animal_group_type_id": row["animal_group_type_id"],
+                "head_count": row["head_count"],
             }
-            for b in balances
+            for row in StockService.group_summary_rows(mob)
         ]
     )
 

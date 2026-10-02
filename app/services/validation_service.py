@@ -3,6 +3,19 @@ from decimal import Decimal
 
 class ValidationService:
     @staticmethod
+    def parse_whole_number(value, field_name: str = "quantity") -> int:
+        """Parse submitted head counts without silently truncating JSON numbers."""
+        try:
+            if isinstance(value, bool):
+                raise ValueError
+            parsed = int(value)
+            if not isinstance(value, (str, int)) and value != parsed:
+                raise ValueError
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{field_name} must be a whole number") from exc
+        return parsed
+
+    @staticmethod
     def validate_positive_int(value: int, field_name: str = "value") -> None:
         if int(value) <= 0:
             raise ValueError(f"{field_name} must be positive")

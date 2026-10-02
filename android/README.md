@@ -23,6 +23,29 @@ This is a native Kotlin + Jetpack Compose client for the Flask mobile API at
   default 5 minutes, and when connectivity returns.
 - Shows pending, applied, and failed sync counts after each sync.
 
+Mob balances, counts, transfers, and grazing allocations combine animals by
+species, breed, sex, and age class. Reproductive cohort details remain in the
+cached API snapshot for compatibility; ordinary field forms show one row per
+animal type. Cohort management is available on the web mob's **Manage Cohorts**
+page.
+
+Counts and transfers require a server advertising
+`sync.aggregate_stock_operations: true` in bootstrap. Support is cached per
+normalized server URL so confirmed devices can queue these actions offline.
+Before sending a batch containing an aggregate stock action, the app checks
+bootstrap again. If support cannot be confirmed, the whole batch stays queued
+in its original order. Deploy the updated server before updating the app.
+Older queued operations with an explicit cohort ID retain their original scope.
+
+Offline stock reductions and partial transfers distribute whole animals
+proportionally across cohorts. Count increases create fresh cohorts with
+unrecorded state. Head counts and animal-type totals remain exact in the local
+projection; the allocation between newly created pending cohorts is provisional
+until the server snapshot refreshes. Newly created animal types can be recounted,
+transferred, and allocated to paddocks offline by their species, breed, sex, and
+age class. Exact-count moves using a pending animal type also require confirmed
+aggregate stock support.
+
 ## Local Smoke Test
 
 1. Open the `android/` folder in Android Studio.
@@ -95,3 +118,24 @@ query strings, fragments, or unsupported schemes.
 
 No Gradle wrapper is checked in yet. Use Android Studio's bundled Gradle or
 generate a wrapper once the local Android toolchain version is locked.
+
+## Unit Tests and Debug APK
+
+From the repository root, use the installed Gradle and Android Studio Java
+runtime to run `testDebugUnitTest assembleDebug` against `android/`. The debug
+APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+On this Windows setup, Android Studio's JBR 21 failed before compilation with
+`Unable to establish loopback connection` / `UnixDomainSockets.connect0`.
+Using a process-local socket temporary directory in the workspace resolved the
+failure without changing the project or Java installation:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+New-Item -ItemType Directory -Force android/.gradle | Out-Null
+$socketTempDirectory = (Resolve-Path android/.gradle).Path.Replace('\', '/')
+$env:JAVA_TOOL_OPTIONS = '-Djdk.net.unixdomain.tmpdir="' + $socketTempDirectory + '"'
+& "<installed Gradle directory>\bin\gradle.bat" -p android testDebugUnitTest assembleDebug --console=plain
+```
+
+This was validated with the already installed Gradle 9.4.1 and JBR 21.0.10.

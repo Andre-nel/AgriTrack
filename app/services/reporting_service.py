@@ -4,6 +4,7 @@ from sqlalchemy import or_
 
 from app.models import Farm, Mob, MovementEvent
 from app.models.grazing import GrazingAllocation, GrazingSession
+from app.services.stock_groups import summarize_balances
 
 
 class ReportingService:
@@ -126,7 +127,9 @@ class ReportingService:
     @classmethod
     def allocation_group_head_rows(cls, allocation: GrazingAllocation) -> list[dict]:
         mob = allocation.grazing_session.mob
-        balances_by_group = {str(balance.animal_group_type_id): balance for balance in mob.balances}
+        balances_by_group = {
+            row["animal_group_type_id"]: row for row in summarize_balances(mob.balances)
+        }
         assignments = [
             assignment
             for assignment in getattr(allocation, "group_assignments", [])
@@ -139,13 +142,13 @@ class ReportingService:
                 balance = balances_by_group.get(str(assignment.animal_group_type_id))
                 if balance is None:
                     continue
-                group = balance.animal_group_type
+                group = balance["group"]
                 head_count = float(assignment.head_count or 0)
                 if head_count <= 0:
                     continue
                 rows.append(
                     {
-                        "animal_group_type_id": str(balance.animal_group_type_id),
+                        "animal_group_type_id": str(assignment.animal_group_type_id),
                         "animal_group_type": group,
                         "head_count": head_count,
                         "allocated_lsu": head_count
@@ -157,14 +160,14 @@ class ReportingService:
             return rows
 
         fraction = float(allocation.allocation_fraction)
-        for balance in mob.balances:
-            group = balance.animal_group_type
-            head_count = float(balance.head_count or 0) * fraction
+        for group_id, balance in balances_by_group.items():
+            group = balance["group"]
+            head_count = float(balance["head_count"]) * fraction
             if head_count <= 0:
                 continue
             rows.append(
                 {
-                    "animal_group_type_id": str(balance.animal_group_type_id),
+                    "animal_group_type_id": group_id,
                     "animal_group_type": group,
                     "head_count": head_count,
                     "allocated_lsu": head_count

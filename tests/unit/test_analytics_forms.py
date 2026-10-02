@@ -23,6 +23,11 @@ def test_normalize_analytics_group_by_defaults_to_species():
     assert normalize_analytics_group_by(["", "invalid"]) == ["species"]
 
 
+def test_normalize_analytics_group_by_allows_explicit_combined_total():
+    assert normalize_analytics_group_by([], use_default=False) == []
+    assert normalize_analytics_group_by(["Species", "species"], use_default=False) == ["species"]
+
+
 def test_normalize_lsu_paddock_tracking_controls_default_safely():
     assert normalize_lsu_paddock_tracking_metric("CURRENT_LSU") == "current_lsu"
     assert normalize_lsu_paddock_tracking_metric("head_count") == "head_count"

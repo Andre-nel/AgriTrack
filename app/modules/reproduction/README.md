@@ -12,9 +12,15 @@ automatically posted to stock.
 
 Female cohort state is orthogonal: reproductive state, expected litter size,
 lactation state, and offspring at foot are separate fields. A dated status form
-on the mob page can split a subset of a balance and records a
+on the mob's **Manage Cohorts** page (`/mobs/<mob_id>/cohorts`) can split a subset
+of a balance and records a
 `FemaleStatusObservation`. Parturition does not infer lactation or offspring at
 foot.
+
+Ordinary mob counts combine all cohorts of the same species, breed, sex and age
+class. Proportional stock reductions and movements preserve cohort state and
+lineage without creating reproductive observations. Generic additions have state
+not recorded; a targeted addition on the cohort page retains the selected state.
 
 ## Analytics
 

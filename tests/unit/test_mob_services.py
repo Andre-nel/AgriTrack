@@ -76,10 +76,10 @@ def test_adjust_mob_stock_from_form_count_posts_delta_and_reports_resolution(app
             },
         )
 
-        balance = AnimalGroupBalance.query.filter_by(
+        balances = AnimalGroupBalance.query.filter_by(
             mob_id=mob.id,
             animal_group_type_id=group_type.id,
-        ).first()
+        ).all()
         ledger = StockLedgerEntry.query.filter_by(
             mob_id=mob.id,
             animal_group_type_id=group_type.id,
@@ -87,8 +87,8 @@ def test_adjust_mob_stock_from_form_count_posts_delta_and_reports_resolution(app
         event = MobEvent.query.filter_by(mob_id=mob.id).first()
 
         assert message == "Count set to 10. Posted adjustment_in of 8."
-        assert balance is not None
-        assert balance.head_count == 10
+        assert sorted(balance.head_count for balance in balances) == [2, 8]
+        assert sum(balance.head_count for balance in balances) == 10
         assert ledger is not None
         assert ledger.event_type.value == "adjustment_in"
         assert ledger.quantity == 8
@@ -145,14 +145,15 @@ def test_update_mob_balance_line_from_form_updates_balance_and_records_event(app
             },
         )
 
-        balance = AnimalGroupBalance.query.filter_by(
+        balances = AnimalGroupBalance.query.filter_by(
             mob_id=mob.id,
             animal_group_type_id=group_type.id,
-        ).first()
+        ).all()
         event = MobEvent.query.filter_by(mob_id=mob.id).first()
 
         assert message == "Balance line updated"
-        assert balance.head_count == 7
+        assert sorted(balance.head_count for balance in balances) == [2, 5]
+        assert sum(balance.head_count for balance in balances) == 7
         assert StockLedgerEntry.query.count() == 1
         assert event is not None
         assert event.tags_csv == "stock,balance edit,head adjustment,adjustment in,stock adjustment"

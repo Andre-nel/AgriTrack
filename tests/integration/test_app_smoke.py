@@ -2314,7 +2314,9 @@ def test_mob_detail_defaults_adjust_stock_to_delta_mode(client, app):
         assert f'<details class="card">\n  <summary><strong>{heading}</strong></summary>' in body
     assert 'option value="adjustment_in" selected' in body
     assert "count (set final total)" in body
-    assert "Use count only when you want to set the final head count for this exact line." in body
+    assert "Count sets the combined mob total across cohorts, including zero." in body
+    assert "A selected paddock includes its open-gate connected paddocks" in body
+    assert "additions follow paddock area, and reductions follow existing animal counts" in body
     assert 'name="allocation_paddock_id"' in body
     assert "All current paddocks" in body
     assert f'<option value="{paddock_id}">Default North Camp</option>' in body

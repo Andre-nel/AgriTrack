@@ -55,6 +55,7 @@ from app.services.paddock_event_service import PaddockEventService
 from app.services.reporting_service import ReportingService
 from app.services.shearing_service import ShearingService
 from app.services.stock_service import StockService
+from app.services.validation_service import ValidationService
 from app.services.task_service import (
     TASK_PRIORITIES,
     TASK_PRIORITY_LABELS,
@@ -962,6 +963,7 @@ def bootstrap():
                 ).all()
             ],
             "sync": {
+                "aggregate_stock_operations": True,
                 "supported_command_types": [
                     "rainfall.create",
                     "mob.create",
@@ -1804,68 +1806,80 @@ def _resolve_stock_count_group(payload: dict) -> tuple[AnimalGroupType, bool]:
     if not breed:
         raise ValueError("breed is required")
 
-    return (
-        StockService.get_or_create_group_type(
-            species=str(group_payload.get("species") or "").strip(),
-            breed=breed,
-            sex=str(group_payload.get("sex") or "").strip(),
-            age_class=str(group_payload.get("age_class") or "").strip(),
-        ),
-        True,
+    species = StockService.normalize_species(str(group_payload.get("species") or ""))
+    taxonomy = dict(
+        species=species,
+        breed=breed,
+        sex=StockService.normalize_sex(species, str(group_payload.get("sex") or "")),
+        age_class=StockService.normalize_age_class(species, str(group_payload.get("age_class") or "")),
     )
+    existing = AnimalGroupType.query.filter_by(**taxonomy).first()
+    if existing is not None:
+        return existing, False
+    return StockService.get_or_create_group_type(**taxonomy), True
 
 
 def _handle_stock_count_record(farm: Farm, payload: dict) -> dict:
     mob = _get_active_mob_for_farm(farm, str(payload.get("mob_id") or "").strip())
-    group_type, uses_group_payload = _resolve_stock_count_group(payload)
+    group_type, is_new_group = _resolve_stock_count_group(payload)
     group_id = str(group_type.id)
-    try:
-        counted_quantity = int(payload.get("quantity"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("quantity must be a whole number") from exc
+    counted_quantity = ValidationService.parse_whole_number(payload.get("quantity"))
     if counted_quantity < 0:
         raise ValueError("quantity must be greater than or equal to 0")
-    if uses_group_payload and counted_quantity <= 0:
+    if is_new_group and counted_quantity <= 0:
         raise ValueError("quantity must be greater than 0 for a new animal group")
 
     cohort_id = str(payload.get("cohort_id") or "").strip() or None
-    current_balance = CohortService.balance_for_selector(
-        mob_id=str(mob.id),
-        animal_group_type_id=group_id,
-        cohort_id=cohort_id,
-    )
-    current_head_count = int(current_balance.head_count) if current_balance else 0
+    if cohort_id:
+        current_balance = CohortService.balance_for_selector(
+            mob_id=str(mob.id),
+            animal_group_type_id=group_id,
+            cohort_id=cohort_id,
+            require_positive=True,
+        )
+        if current_balance is None:
+            raise ValueError("Selected cohort is no longer available in this mob")
+        current_head_count = int(current_balance.head_count)
+    else:
+        current_head_count = StockService.group_head_count(str(mob.id), group_id)
     delta = counted_quantity - current_head_count
     if delta == 0:
         return {
             "mob_id": str(mob.id),
             "animal_group_type_id": group_id,
-            "cohort_id": str(current_balance.cohort_id) if current_balance and current_balance.cohort_id else None,
+            "cohort_id": cohort_id,
+            "ledger_ids": [],
             "head_count": counted_quantity,
             "message": "Count matches current balance. No stock adjustment posted.",
         }
 
     event_type = StockEventType.adjustment_in if delta > 0 else StockEventType.missing
-    ledger = StockService.adjust_stock(
+    posting_arguments = dict(
         mob_id=mob.id,
         farm_id=farm.id,
         animal_group_type_id=group_id,
-        cohort_id=cohort_id,
         event_type=event_type,
         quantity=abs(delta),
         note=payload.get("note") or "mobile stock count",
         event_time=_parse_iso_datetime(payload.get("event_time"), "event_time"),
         allocation_paddock_id=payload.get("allocation_paddock_id") or payload.get("paddock_id"),
     )
+    if cohort_id:
+        ledgers = [StockService.adjust_stock(cohort_id=cohort_id, **posting_arguments)]
+    else:
+        ledgers = StockService.adjust_group_stock(**posting_arguments)
     db.session.flush()
-    return {
-        "ledger_id": str(ledger.id),
+    result = {
+        "ledger_ids": [str(ledger.id) for ledger in ledgers],
         "animal_group_type_id": group_id,
-        "cohort_id": str(ledger.cohort_id) if ledger.cohort_id else None,
+        "cohort_id": cohort_id,
         "event_type": event_type.value,
         "quantity": abs(delta),
         "head_count": counted_quantity,
     }
+    if len(ledgers) == 1:
+        result["ledger_id"] = str(ledgers[0].id)
+    return result
 
 
 def _handle_mob_move(farm: Farm, payload: dict) -> dict:

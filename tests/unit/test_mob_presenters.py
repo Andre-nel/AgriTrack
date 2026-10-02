@@ -12,7 +12,8 @@ from app.models import (
     MobEvent,
     Paddock,
 )
-from app.modules.mobs.presenters import build_mob_detail_context
+from app.modules.mobs.presenters import build_mob_cohorts_context, build_mob_detail_context
+from app.services.cohort_service import CohortService
 
 
 def test_build_mob_detail_context_filters_events_and_builds_options(app):
@@ -273,3 +274,40 @@ def test_build_mob_detail_context_counts_back_to_back_paddock_assignment(app):
         rows_by_name = {row["paddock_name"]: row for row in context["current_allocations"]}
         assert rows_by_name["North Continuous"]["days_assigned_continuously"] == 3.5
         assert rows_by_name["South Continuous"]["days_assigned_continuously"] == 1.5
+
+
+def test_ordinary_options_sum_cohorts_and_legacy_balances(app):
+    with app.app_context():
+        farm = Farm(name="Cohort Presentation", timezone="SAST")
+        db.session.add(farm)
+        db.session.flush()
+        mob = Mob(farm_id=farm.id, name="Same Type", status="active")
+        group = AnimalGroupType(species="Sheep", breed="Merino", sex="ewe", age_class="adult")
+        db.session.add_all([mob, group])
+        db.session.flush()
+        for state, head in [("pregnant", 6), ("not_pregnant", 4), ("with_sire", 0)]:
+            cohort = CohortService.create_cohort(
+                animal_group_type_id=group.id, origin_farm_id=farm.id, reproductive_state=state,
+            )
+            db.session.add(AnimalGroupBalance(
+                mob_id=mob.id, animal_group_type_id=group.id, cohort_id=cohort.id, head_count=head,
+            ))
+        db.session.add(AnimalGroupBalance(mob_id=mob.id, animal_group_type_id=group.id, head_count=2))
+        db.session.commit()
+
+        detail = build_mob_detail_context(mob, "")
+        assert len(detail["balance_rows"]) == 1
+        assert detail["balance_rows"][0]["head_count"] == 12
+        assert detail["balance_rows"][0]["group"] == group
+        assert detail["stock_line_options"] == detail["split_group_options"]
+        assert len(detail["stock_line_options"]) == 1
+        assert detail["stock_line_options"][0]["id"] == str(group.id)
+        assert detail["stock_line_options"][0]["label"] == "Sheep | Merino | ewe | adult (available: 12)"
+
+        cohorts = build_mob_cohorts_context(mob)
+        assert len(cohorts["cohort_rows"]) == 3
+        assert len(cohorts["female_balance_options"]) == 3
+        assert {row["reproductive_state"] for row in cohorts["cohort_rows"]} == {
+            "pregnant", "not pregnant", "not recorded",
+        }
+        assert sum(row["head_count"] for row in cohorts["cohort_rows"]) == 12
