@@ -1728,6 +1728,38 @@ tr.is-selected-fence {
   margin: 0;
 }
 
+.mob-linked-tasks {
+  margin-bottom: 1rem;
+}
+
+.mob-linked-tasks-summary,
+.mob-linked-task > summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.mob-linked-tasks-summary h2 {
+  display: inline;
+  margin: 0;
+}
+
+.mob-linked-tasks-description {
+  display: block;
+  margin-top: 0.4rem;
+}
+
+.mob-linked-tasks[open] > summary {
+  margin-bottom: 1rem;
+}
+
+.mob-linked-task > summary > * {
+  margin-right: 0.4rem;
+}
+
+.mob-linked-task > .task-chip-row {
+  margin: 0.7rem 0 0;
+}
+
 .task-space-card h3 {
   margin-top: 0.2rem;
 }

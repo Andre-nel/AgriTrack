@@ -38,30 +38,41 @@
   </form>
 </dialog>
 
-<section class="card">
-  <div class="task-section-heading">
+<details class="card mob-linked-tasks">
+  <summary class="mob-linked-tasks-summary">
     <h2>Linked Tasks</h2>
+    <span class="muted mob-linked-tasks-description">
+      {% for status_label, tasks in linked_task_rows|groupby('status_label') %}
+      {{ status_label }}: {{ tasks|length }}{% if not loop.last %} &middot; {% endif %}
+      {% else %}
+      No tasks linked to this mob yet.
+      {% endfor %}
+    </span>
+  </summary>
+  <div class="row-actions">
     <a class="btn btn-secondary" href="{{ url_for('tasks.new_task_page', mob_id=mob.id) }}">Create Task For Mob</a>
   </div>
   <ul class="link-list-clean">
     {% for task in linked_task_rows %}
     <li class="link-card">
-      <div class="task-card-topline">
-        <a class="task-key" href="{{ task.url }}">{{ task.display_key }}</a>
-        <span class="status-pill status-{{ task.status }}">{{ task.status_label }}</span>
-      </div>
-      <p class="text-body"><strong>{{ task.heading }}</strong></p>
-      <div class="task-chip-row">
-        <span class="priority-pill priority-{{ task.priority }}">{{ task.priority_label }}</span>
-        {% if task.due_date %}<span class="tag-pill">Due {{ task.due_date }}</span>{% endif %}
-        {% if task.is_overdue %}<span class="priority-pill priority-high">Overdue</span>{% endif %}
-      </div>
+      <details class="mob-linked-task"{% if task.status != 'closed' %} open{% endif %}>
+        <summary>
+          <a class="task-key" href="{{ task.url }}">{{ task.display_key }}</a>
+          <strong>{{ task.heading }}</strong>
+          <span class="status-pill status-{{ task.status }}">{{ task.status_label }}</span>
+        </summary>
+        <div class="task-chip-row">
+          <span class="priority-pill priority-{{ task.priority }}">{{ task.priority_label }}</span>
+          {% if task.due_date %}<span class="tag-pill">Due {{ task.due_date }}</span>{% endif %}
+          {% if task.is_overdue %}<span class="priority-pill priority-high">Overdue</span>{% endif %}
+        </div>
+      </details>
     </li>
     {% else %}
     <li class="task-empty-state">No tasks linked to this mob yet.</li>
     {% endfor %}
   </ul>
-</section>
+</details>
 
 <section class="split">
   <article class="card mob-balances-card">

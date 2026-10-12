@@ -10,6 +10,14 @@ Current entry points:
 - `routes.py`
 - `services.py`
 
+## Linked tasks
+
+The mob detail page's Linked Tasks card starts folded and shows counts for each
+status present in its description. Expanding the card reveals individually
+foldable tasks: Closed tasks start folded, and every other status starts open.
+Each task's key links to its detail page even while that task is folded. Folding
+is local to the page; reloading restores these defaults.
+
 ## Balances and cohort management
 
 The Balances card and ordinary adjustment, transfer, split and paddock-allocation
