@@ -46,9 +46,11 @@ from app.modules.farms.map_routes import _build_farm_map_feature_collection
 from app.services.calendar_service import CalendarService
 from app.services.cohort_service import CohortService
 from app.services.fence_service import FenceService
+from app.services.farm_capacity_service import FarmCapacityService
 from app.services.gate_service import GateService
 from app.services.incident_service import IncidentService
 from app.services.mob_event_service import MobEventService
+from app.services.mob_inventory_service import MobInventoryService
 from app.services.movement_service import MovementService
 from app.services.note_attachment_service import NoteAttachmentService
 from app.services.paddock_event_service import PaddockEventService
@@ -1682,6 +1684,7 @@ def _handle_mob_create(farm: Farm, payload: dict) -> dict:
         db.session.flush()
     except IntegrityError as exc:
         raise MobileApiError("invalid_command", "Active mob name already exists on this farm") from exc
+    MobInventoryService.ensure_baseline(mob, source="created")
     return {"mob": _serialize_mob(mob)}
 
 
@@ -2198,6 +2201,8 @@ def _handle_paddock_update(farm: Farm, payload: dict) -> dict:
             raw_tags = ",".join(str(value) for value in raw_tags)
         paddock.tags_csv = TaskService.tags_to_csv(TaskService.parse_optional_tags(raw_tags))
     db.session.flush()
+    if "status" in payload:
+        FarmCapacityService.record(farm)
     return {"paddock": _serialize_paddock(paddock)}
 
 

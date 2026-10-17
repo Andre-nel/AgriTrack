@@ -9,9 +9,11 @@ from app.extensions import db
 from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, PaddockGate, RainfallRecord
 from app.modules.farms.forms import parse_mob_lines, parse_paddock_lines, parse_placements
 from app.services.farm_deletion_service import FarmDeletionService
+from app.services.farm_capacity_service import FarmCapacityService
 from app.services.fence_service import FenceService
 from app.services.gate_service import GateService
 from app.services.movement_service import MovementService
+from app.services.mob_inventory_service import MobInventoryService
 from app.services.paddock_service import PaddockService
 from app.services.reporting_service import ReportingService
 from app.services.water_network_service import WaterNetworkService
@@ -141,6 +143,7 @@ def register_legacy_routes(bp) -> None:
                 mob = Mob(farm_id=farm.id, name=name, status="active")
                 db.session.add(mob)
                 db.session.flush()
+                MobInventoryService.ensure_baseline(mob, source="created")
                 mob_map[mob.name.lower()] = mob
 
             for mob_name, paddock_name in parse_placements(placements_raw):
@@ -153,6 +156,7 @@ def register_legacy_routes(bp) -> None:
                     allocations=[{"paddock_id": paddock.id, "allocation_fraction": "1.0"}],
                 )
 
+            FarmCapacityService.record(farm, source="created")
             db.session.commit()
             flash("Farm setup complete", "success")
             return redirect(url_for("web.farm_detail", farm_id=farm.id))
@@ -170,7 +174,9 @@ def register_legacy_routes(bp) -> None:
                 flash("Farm name is required", "error")
                 return redirect(url_for("web.farms_page"))
 
-            db.session.add(Farm(name=name, timezone=timezone, active=True))
+            farm = Farm(name=name, timezone=timezone, active=True)
+            db.session.add(farm)
+            FarmCapacityService.record(farm, source="created")
             db.session.commit()
             flash("Farm created", "success")
             return redirect(url_for("web.farms_page"))
@@ -228,11 +234,7 @@ def register_legacy_routes(bp) -> None:
         }
         farm_total_area_ha = float(sum((p.area_ha or 0) for p in paddocks))
         farm_current_lsu = sum(ReportingService.mob_total_lsu(mob) for mob in mobs)
-        farm_capacity_lsu = (
-            farm_total_area_ha / float(farm.default_stocking_rate_ha_per_lsu)
-            if float(farm.default_stocking_rate_ha_per_lsu) > 0
-            else 0.0
-        )
+        farm_capacity_lsu = FarmCapacityService.calculate(farm, paddocks)
         selected_filters = {
             "species": (request.args.get("species") or "").strip(),
             "breed": (request.args.get("breed") or "").strip(),
@@ -516,6 +518,7 @@ def register_legacy_routes(bp) -> None:
             return redirect(url_for("web.farm_detail", farm_id=farm_id))
 
         farm.default_stocking_rate_ha_per_lsu = value
+        FarmCapacityService.record(farm)
         db.session.commit()
         flash("Farm carrying capacity updated", "success")
         return redirect(url_for("web.farm_detail", farm_id=farm_id))
@@ -549,6 +552,7 @@ def register_legacy_routes(bp) -> None:
         )
         db.session.add(paddock)
         try:
+            FarmCapacityService.record(farm)
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
@@ -568,6 +572,7 @@ def register_legacy_routes(bp) -> None:
         mob = Mob(farm_id=farm_id, name=name, status="active")
         db.session.add(mob)
         try:
+            MobInventoryService.ensure_baseline(mob, source="created")
             db.session.commit()
         except IntegrityError:
             db.session.rollback()

@@ -1,17 +1,13 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.extensions import db
 from app.models import AnimalCohort, AnimalGroupBalance, AnimalGroupType, Mob, StockLedgerEntry
-from app.models.stock_ledger import StockEventType
+from app.models.stock_ledger import STOCK_IN_EVENTS, StockEventType
 from app.services.validation_service import ValidationService
 from app.services.stock_groups import apportion_counts, summarize_balances
+from app.services.mob_inventory_service import MobInventoryService
 
-IN_EVENTS = {
-    StockEventType.birth,
-    StockEventType.purchase,
-    StockEventType.transfer_in,
-    StockEventType.adjustment_in,
-}
+IN_EVENTS = STOCK_IN_EVENTS
 
 
 class StockService:
@@ -98,7 +94,7 @@ class StockService:
             delta = quantity if event_type in IN_EVENTS else -quantity
         if current + delta < 0:
             raise ValueError("Stock balance cannot go negative")
-        posted_at = event_time or datetime.now(timezone.utc)
+        posted_at = MobInventoryService.normalize_timestamp(event_time)
 
         if sync_allocation_distribution:
             AllocationDistributionService.apply_stock_delta(
@@ -168,7 +164,7 @@ class StockService:
             max(0, current - target_head_count),
             [(str(row.id), int(row.head_count)) for row in balances],
         )
-        posted_at = event_time or datetime.now(timezone.utc)
+        posted_at = MobInventoryService.normalize_timestamp(event_time)
         if target_head_count < current and len(balances) > 1:
             note = cls.proportional_note(note)
         AllocationDistributionService.apply_reclassification(
@@ -286,9 +282,10 @@ class StockService:
             raise ValueError("Selected mob does not belong to this farm")
         if db.session.get(AnimalGroupType, str(animal_group_type_id)) is None:
             raise ValueError("Selected animal group type is invalid")
-        posted_at = event_time or datetime.now(timezone.utc)
+        posted_at = MobInventoryService.normalize_timestamp(event_time)
 
         from app.services.cohort_service import CohortService
+        MobInventoryService.ensure_baseline(mob)
 
         balance = CohortService.balance_for_selector(
             mob_id=str(mob_id),

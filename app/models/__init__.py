@@ -2,12 +2,15 @@ from app.models.animal_group import AnimalGroupBalance, AnimalGroupType
 from app.models.calendar import CalendarActivity, CalendarActivityException
 from app.models.cohort import AnimalCohort, AnimalCohortLineage
 from app.models.farm import Farm
+from app.models.farm_capacity import FarmCapacityHistory
 from app.models.fence import FenceEvent, FenceEventMaterial, FenceSection
 from app.models.finance import (
     CashTransaction,
     CashTransactionLine,
     LivestockTrade,
+    LivestockTradeAttachment,
     LivestockTradeFarm,
+    LivestockTradeGroup,
     LivestockTradeWeight,
 )
 from app.models.gate import PaddockGate
@@ -22,6 +25,7 @@ from app.models.incident import Incident
 from app.models.journal import JournalEntry
 from app.models.mobile import MobileAuthToken, MobileSyncCommand
 from app.models.mob import Mob
+from app.models.mob_inventory import MobInventoryBaselineGroup, MobInventoryStateHistory
 from app.models.mob_event import MobEvent
 from app.models.movement import MobLineage, MovementEvent, MovementEventMob
 from app.models.note_attachment import NoteAttachment
@@ -85,6 +89,7 @@ __all__ = [
     "BreedingEnrollment",
     "DailyStockSnapshot",
     "Farm",
+    "FarmCapacityHistory",
     "FemaleStatusObservation",
     "FenceEvent",
     "FenceEventMaterial",
@@ -97,11 +102,15 @@ __all__ = [
     "Incident",
     "JournalEntry",
     "LivestockTrade",
+    "LivestockTradeAttachment",
     "LivestockTradeFarm",
+    "LivestockTradeGroup",
     "LivestockTradeWeight",
     "MobileAuthToken",
     "MobileSyncCommand",
     "Mob",
+    "MobInventoryBaselineGroup",
+    "MobInventoryStateHistory",
     "MobEvent",
     "MobLineage",
     "MovementEvent",

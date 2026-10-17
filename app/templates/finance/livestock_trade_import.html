@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='livestock_trades.css') }}" />{% endblock %}
+{% from "finance/_livestock_trade_form.html" import livestock_trade_form with context %}
+{% from "finance/_trade_statistics.html" import statistics_table with context %}
+{% from "finance/_trade_images.html" import trade_image_uploads %}
+{% block title %}Import Livestock Trade | AgriTrack{% endblock %}
+{% block content %}
+<section class="hero cash-flow-hero">
+  <h1>Import Livestock Trade</h1>
+  <p>Transcribe your photographs with ChatGPT, then review and record one trade. Prices exclude VAT.</p>
+  <div class="hero-actions">
+    <a class="btn" href="{{ url_for('finance.livestock_trade_template') }}">Download JSON template</a>
+    <a class="btn btn-secondary" href="{{ url_for('finance.livestock_trade_instructions') }}">Download ChatGPT instructions</a>
+    <a class="btn btn-secondary" href="{{ url_for('finance.livestock_trades') }}">Trade Statistics</a>
+  </div>
+</section>
+{% if error %}<section class="card" role="alert"><h2>Check the import</h2><p>{{ error }}</p></section>{% endif %}
+{% if trade_document %}
+  {% if preview %}
+  <section class="card"><h2>Calculated preview</h2>
+    {{ statistics_table(preview_rows, trade_document.pricing_model) }}
+  </section>
+  {% endif %}
+  <section class="card"><h2>Review and complete details</h2>
+    <p>Nothing has been saved. Verify every group and weight, and complete any missing details.</p>
+    {{ livestock_trade_form(url_for('finance.confirm_livestock_trade_import'), 'Save trade and cashflow', preview_mode=True, preview_token=preview_token) }}
+  </section>
+{% else %}
+  <section class="card import-id-generator" data-import-id-generator data-generate-url="{{ url_for('finance.generate_livestock_trade_import_id') }}">
+    <h2>Generate an import ID</h2>
+    <p>Generate an ID to copy into the <code>import_id</code> field in your JSON. This does not create or save a trade.</p>
+    <div class="grid-form">
+      <label>Import ID<input type="text" readonly data-generated-import-id spellcheck="false" autocomplete="off" aria-describedby="import-id-feedback" /></label>
+      <div class="row-actions">
+        <button type="button" class="btn btn-secondary" data-generate-import-id>Generate import ID</button>
+        <button type="button" class="btn btn-secondary" data-copy-import-id disabled>Copy import ID</button>
+      </div>
+      <p class="muted import-id-feedback" id="import-id-feedback" role="status" aria-live="polite" data-import-id-feedback></p>
+    </div>
+    <noscript><p>Enable JavaScript to generate and copy an import ID here.</p></noscript>
+  </section>
+  <section class="card">
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('finance.preview_livestock_trade_import') }}" class="grid-form">
+      <label>Upload a JSON file<input type="file" name="trade_file" accept=".json,application/json" /></label>
+      <label>Or paste the completed JSON<textarea name="trade_json" rows="18" spellcheck="false">{{ raw_json or '' }}</textarea></label>
+      <p class="muted">Use either upload or paste. Maximum 2 MiB. One species and one pricing method per trade.</p>
+      {{ trade_image_uploads(import_images) }}
+      <button class="btn" type="submit">Preview import</button>
+    </form>
+  </section>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='livestock_trades.js') }}"></script>{% endblock %}

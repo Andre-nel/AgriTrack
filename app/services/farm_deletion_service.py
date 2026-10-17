@@ -15,6 +15,7 @@ from app.models import (
     CashTransaction,
     DailyStockSnapshot,
     Farm,
+    FarmCapacityHistory,
     FenceEvent,
     FenceEventMaterial,
     FenceSection,
@@ -25,6 +26,7 @@ from app.models import (
     Incident,
     JournalEntry,
     Mob,
+    MobInventoryStateHistory,
     MobEvent,
     MobLineage,
     MovementEvent,
@@ -377,6 +379,14 @@ class FarmDeletionService:
             synchronize_session=False,
         )
 
+        cls._delete_where(FarmCapacityHistory, FarmCapacityHistory.farm_id == farm_id)
+        # Owned mobs lose their baselines with the farm. States for surviving mobs
+        # remain; SET NULL farm references make lost historical ownership explicit.
+        # Baseline detail rows cascade from their parent state at the database level.
+        cls._delete_where(
+            MobInventoryStateHistory,
+            cls._in_if_any(MobInventoryStateHistory.mob_id, mob_ids),
+        )
         cls._delete_where(Paddock, cls._in_if_any(Paddock.id, paddock_ids))
         cls._delete_where(Mob, cls._in_if_any(Mob.id, mob_ids))
 

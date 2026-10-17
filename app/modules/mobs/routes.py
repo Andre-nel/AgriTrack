@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import InvalidOperation
 
 from flask import current_app, flash, g, redirect, render_template, request, url_for
@@ -261,38 +262,55 @@ def register_legacy_routes(bp) -> None:
     @bp.post("/mobs/<mob_id>/transfer")
     def mob_transfer_form(mob_id):
         source = _get_active_mob_or_404(mob_id)
-        destination_farm_id = (
-            request.form.get("transfer_destination_farm_id") or str(source.farm_id)
-        ).strip()
-        destination_mob_id = (request.form.get("transfer_destination_mob_id") or "").strip()
-        transfer_group_ids = request.form.getlist("transfer_group_id")
-        transfer_quantities = request.form.getlist("transfer_quantity")
-        note = (request.form.get("transfer_note") or "").strip() or None
 
         try:
-            if not destination_farm_id:
-                raise ValueError("Destination farm is required")
-            if not Farm.query.filter_by(id=destination_farm_id).first():
-                raise ValueError("Destination farm is invalid")
-            if not destination_mob_id:
-                raise ValueError("Destination mob is required")
-
-            destination_mob = Mob.query.filter_by(id=destination_mob_id, status="active").first()
-            if not destination_mob:
-                raise ValueError("Destination mob is invalid")
-            if str(destination_mob.farm_id) != destination_farm_id:
-                raise ValueError("Destination mob is invalid for the selected farm")
-
-            transfers = parse_transfer_rows(transfer_group_ids, transfer_quantities)
-            MovementService.transfer_stock_between_mobs(
-                source_mob=source,
-                destination_mob=destination_mob,
-                transfers=transfers,
-                destination_farm_id=destination_farm_id,
-                note=note,
+            transfers = parse_transfer_rows(
+                farm_ids=request.form.getlist("transfer_destination_farm_id"),
+                destination_mob_ids=request.form.getlist("transfer_destination_mob_id"),
+                group_ids=request.form.getlist("transfer_group_id"),
+                quantities=request.form.getlist("transfer_quantity"),
+                notes=request.form.getlist("transfer_note"),
             )
+            destination_farm_ids = {row["destination_farm_id"] for row in transfers}
+            valid_farm_ids = {
+                str(farm.id) for farm in Farm.query.filter(Farm.id.in_(destination_farm_ids)).all()
+            }
+            destination_mob_ids = {row["destination_mob_id"] for row in transfers}
+            destination_mobs = {
+                str(mob.id): mob
+                for mob in Mob.query.filter(Mob.id.in_(destination_mob_ids), Mob.status == "active").all()
+            }
+            for row in transfers:
+                if row["destination_farm_id"] not in valid_farm_ids:
+                    raise ValueError("Destination farm is invalid")
+                destination_mob = destination_mobs.get(row["destination_mob_id"])
+                if destination_mob is None:
+                    raise ValueError("Destination mob is invalid")
+                if str(destination_mob.farm_id) != row["destination_farm_id"]:
+                    raise ValueError("Destination mob is invalid for the selected farm")
+                if str(destination_mob.id) == str(source.id):
+                    raise ValueError("Destination mob must be different from source mob")
+
+            when = datetime.now(timezone.utc)
+            # Each call checks the remaining stock; one commit makes all rows atomic.
+            for row in transfers:
+                MovementService.transfer_stock_between_mobs(
+                    source_mob=source,
+                    destination_mob=destination_mobs[row["destination_mob_id"]],
+                    transfers=[{
+                        "animal_group_type_id": row["animal_group_type_id"],
+                        "quantity": row["quantity"],
+                    }],
+                    destination_farm_id=row["destination_farm_id"],
+                    note=row["note"],
+                    when=when,
+                )
             db.session.commit()
-            flash(f"Transferred stock to {destination_mob.name}", "success")
+            destination_label = (
+                next(iter(destination_mobs.values())).name
+                if len(destination_mobs) == 1 else f"{len(destination_mobs)} mobs"
+            )
+            flash(f"Transferred stock to {destination_label}", "success")
         except IntegrityError:
             db.session.rollback()
             flash("Transfer failed due to a concurrent stock update. Please retry.", "error")

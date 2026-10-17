@@ -66,6 +66,37 @@ Second-pass decomposition now started:
 - `mobs.presenters`: mob detail template payload assembly.
 - `mobs.services`: stock adjustment and balance-line edit business rules and transactions.
 
+## Farm capacity and inventory history
+
+The grazing module owns the farm LSU history report. `FarmCapacityService`
+provides the shared active-paddock capacity calculation and explicit snapshot
+recording. Farm/paddock web and API edits, mobile status changes, and completed
+farm imports record their final capacity in the caller's transaction. The
+paddock API records before the rename service's internal commit when both area
+and name are changed. Read paths never create a baseline.
+
+`MobInventoryService` captures one baseline per mob and records registered farm
+or active-status transitions. Baseline details aggregate cohorts by animal type
+and preserve both current counts and the signed ledger net already included.
+The report replays subsequent and backdated ledger entries against this fixed
+anchor. This is needed because whole-mob moves change farm ownership without
+posting stock transfer entries, while cohort partitions can change balance rows
+without changing animal-type totals. Existing ledger rows remain the quantity
+source; the new history does not duplicate stock events.
+
+History starts from an observation at migration/creation time. Older stock is
+reconstructed only when records support it; old capacity is unavailable. The
+report preserves gaps for missing or inconsistent evidence, including conflicting
+backdated movement chains. This is a data limitation, not a zero-stock assertion.
+Historical records survive mob archival. Deleting a farm removes its owned
+history while preserving inventory anchors for surviving mobs; deleted farm
+references become null so lost ownership is visible as missing coverage.
+
+New write paths must call the appropriate recorder in the same transaction as
+the business change. Explicit calls follow the existing water-history pattern
+and avoid hidden ORM hooks or scheduled snapshots. The maintenance obligation is
+covered by workflow tests and documented in the grazing module README.
+
 ## Animal Cohort Identity
 
 `AnimalGroupType` remains taxonomy: species, breed, sex, and age class.

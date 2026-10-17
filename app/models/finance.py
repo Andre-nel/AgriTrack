@@ -58,17 +58,10 @@ class LivestockTrade(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     counterparty = db.Column(db.String(120), nullable=False)
     reference = db.Column(db.String(120), nullable=True)
     vat_rate = db.Column(db.Numeric(7, 4), nullable=False, default=0.15)
-    animal_group_type_id = db.Column(
-        db.String(36),
-        db.ForeignKey("animal_group_types.id"),
-        nullable=False,
-        index=True,
-    )
+    species = db.Column(db.String(20), nullable=False, index=True)
     pricing_model = db.Column(db.String(20), nullable=False)
-    price_per_kg = db.Column(db.Numeric(12, 4), nullable=True)
-    price_per_head = db.Column(db.Numeric(12, 2), nullable=True)
-    goat_count = db.Column(db.Integer, nullable=True)
-    hair_lengths = db.Column(db.String(250), nullable=True)
+    import_id = db.Column(db.String(36), nullable=True, unique=True)
+    import_payload_hash = db.Column(db.String(64), nullable=True)
     notes = db.Column(db.Text, nullable=True)
     cash_transaction_id = db.Column(
         db.String(36),
@@ -78,7 +71,6 @@ class LivestockTrade(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         index=True,
     )
 
-    animal_group_type = db.relationship("AnimalGroupType")
     cash_transaction = db.relationship("CashTransaction")
     farm_links = db.relationship(
         "LivestockTradeFarm",
@@ -86,11 +78,17 @@ class LivestockTrade(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         cascade="all, delete-orphan",
         order_by="LivestockTradeFarm.sort_order",
     )
-    weights = db.relationship(
-        "LivestockTradeWeight",
+    groups = db.relationship(
+        "LivestockTradeGroup",
         back_populates="trade",
         cascade="all, delete-orphan",
-        order_by="LivestockTradeWeight.sequence",
+        order_by="LivestockTradeGroup.sort_order",
+    )
+    attachments = db.relationship(
+        "LivestockTradeAttachment",
+        back_populates="trade",
+        cascade="all, delete-orphan",
+        order_by="LivestockTradeAttachment.sort_order",
     )
 
     __table_args__ = (
@@ -99,18 +97,59 @@ class LivestockTrade(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
             "pricing_model IN ('weight', 'head')",
             name="ck_livestock_trade_pricing_model_allowed",
         ),
-        db.CheckConstraint("vat_rate >= 0", name="ck_livestock_trade_vat_non_negative"),
+        db.CheckConstraint("vat_rate >= 0 AND vat_rate <= 1", name="ck_livestock_trade_vat_range"),
         db.CheckConstraint(
-            "price_per_kg IS NULL OR price_per_kg > 0",
-            name="ck_livestock_trade_price_per_kg_positive",
+            "species IN ('Cattle', 'Sheep', 'Goat')", name="ck_livestock_trade_species",
         ),
+    )
+
+
+class LivestockTradeAttachment(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "livestock_trade_attachments"
+
+    livestock_trade_id = db.Column(
+        db.String(36), db.ForeignKey("livestock_trades.id"), nullable=False, index=True,
+    )
+    sort_order = db.Column(db.Integer, nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    content_type = db.Column(db.String(120), nullable=False)
+    byte_size = db.Column(db.Integer, nullable=False)
+    sha256 = db.Column(db.String(64), nullable=False)
+    storage_path = db.Column(db.String(500), nullable=False)
+
+    trade = db.relationship("LivestockTrade", back_populates="attachments")
+
+    __table_args__ = (
+        db.CheckConstraint("byte_size > 0", name="ck_livestock_trade_attachment_size_positive"),
+        db.CheckConstraint("sort_order >= 0", name="ck_livestock_trade_attachment_order"),
+        db.UniqueConstraint("livestock_trade_id", "sort_order", name="uq_livestock_trade_attachment_order"),
+    )
+
+
+class LivestockTradeGroup(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "livestock_trade_groups"
+
+    livestock_trade_id = db.Column(db.String(36), db.ForeignKey("livestock_trades.id"), nullable=False, index=True)
+    sort_order = db.Column(db.Integer, nullable=False)
+    label = db.Column(db.String(120), nullable=True)
+    animal_group_type_id = db.Column(db.String(36), db.ForeignKey("animal_group_types.id"), nullable=False, index=True)
+    price_per_kg = db.Column(db.Numeric(12, 4), nullable=True)
+    price_per_head = db.Column(db.Numeric(12, 2), nullable=True)
+    head_count = db.Column(db.Integer, nullable=True)
+    hair_lengths = db.Column(db.String(250), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    trade = db.relationship("LivestockTrade", back_populates="groups")
+    animal_group_type = db.relationship("AnimalGroupType")
+    weights = db.relationship("LivestockTradeWeight", back_populates="group", cascade="all, delete-orphan", order_by="LivestockTradeWeight.sequence")
+
+    __table_args__ = (
+        db.UniqueConstraint("livestock_trade_id", "sort_order", name="uq_livestock_trade_group_order"),
+        db.CheckConstraint("sort_order >= 0", name="ck_livestock_trade_group_order"),
         db.CheckConstraint(
-            "price_per_head IS NULL OR price_per_head > 0",
-            name="ck_livestock_trade_price_per_head_positive",
-        ),
-        db.CheckConstraint(
-            "goat_count IS NULL OR goat_count > 0",
-            name="ck_livestock_trade_goat_count_positive",
+            "(price_per_kg IS NOT NULL AND price_per_kg > 0 AND price_per_head IS NULL AND head_count IS NULL) OR "
+            "(price_per_kg IS NULL AND price_per_head IS NOT NULL AND price_per_head > 0 AND head_count IS NOT NULL AND head_count > 0)",
+            name="ck_livestock_trade_group_pricing",
         ),
     )
 
@@ -143,22 +182,22 @@ class LivestockTradeFarm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
 class LivestockTradeWeight(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     __tablename__ = "livestock_trade_weights"
 
-    livestock_trade_id = db.Column(
+    group_id = db.Column(
         db.String(36),
-        db.ForeignKey("livestock_trades.id"),
+        db.ForeignKey("livestock_trade_groups.id"),
         nullable=False,
         index=True,
     )
     sequence = db.Column(db.Integer, nullable=False)
     weight_kg = db.Column(db.Numeric(10, 3), nullable=False)
 
-    trade = db.relationship("LivestockTrade", back_populates="weights")
+    group = db.relationship("LivestockTradeGroup", back_populates="weights")
 
     __table_args__ = (
         db.CheckConstraint("sequence >= 0", name="ck_livestock_trade_weight_sequence_non_negative"),
         db.CheckConstraint("weight_kg > 0", name="ck_livestock_trade_weight_positive"),
         db.UniqueConstraint(
-            "livestock_trade_id",
+            "group_id",
             "sequence",
             name="uq_livestock_trade_weight_sequence",
         ),

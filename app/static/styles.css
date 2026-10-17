@@ -189,6 +189,25 @@ body {
   color: var(--muted);
   font-weight: 400;
 }
+#transferRows {
+  display: grid;
+  gap: 0.85rem;
+}
+.transfer-row {
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 2.6fr) minmax(4.5rem, 0.5fr)
+    minmax(0, 1fr) auto;
+}
+.transfer-row > label,
+.transfer-row input,
+.transfer-row select {
+  min-width: 0;
+  width: 100%;
+}
+.transfer-row + .transfer-row {
+  border-top: 1px solid var(--line);
+  padding-top: 0.85rem;
+}
 .split-row {
   display: grid;
   grid-template-columns: 1.3fr 1.8fr 0.8fr auto;
@@ -2923,6 +2942,15 @@ tr.is-selected-fence {
 .incident-card a {
   color: var(--text);
   text-decoration: none;
+}
+
+@media (min-width: 761px) and (max-width: 1000px) {
+  .transfer-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 2fr);
+  }
+  .transfer-row-remove {
+    justify-self: start;
+  }
 }
 
 @media (max-width: 760px) {

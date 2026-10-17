@@ -17,6 +17,12 @@ class StockEventType(str, enum.Enum):
     adjustment_out = "adjustment_out"
 
 
+STOCK_IN_EVENTS = frozenset({
+    StockEventType.birth, StockEventType.purchase,
+    StockEventType.transfer_in, StockEventType.adjustment_in,
+})
+
+
 class StockLedgerEntry(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     __tablename__ = "stock_ledger_entries"
 

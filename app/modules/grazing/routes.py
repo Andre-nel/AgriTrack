@@ -1,7 +1,7 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import abort, flash, redirect, render_template, request, url_for
 from sqlalchemy.sql import func
 
 from app.extensions import db
@@ -19,6 +19,7 @@ from app.modules.grazing.forms import (
     normalize_grazing_point_filter_operator,
     normalize_grazing_split_mode,
     parse_query_date,
+    parse_farm_lsu_history_filters,
 )
 from app.modules.grazing.presenters import (
     build_grazing_chart_panels,
@@ -26,11 +27,32 @@ from app.modules.grazing.presenters import (
     flatten_grazing_periods,
     grazing_paddock_series_label,
     grazing_uncovered_paddocks_in_range,
+    present_farm_lsu_history,
 )
+from app.modules.grazing.lsu_history import build_farm_lsu_history
 from app.services.grazing_history_service import GrazingHistoryService
 
 
 def register_legacy_routes(bp) -> None:
+    @bp.get("/analytics/grazing-management/lsu-history")
+    def analytics_farm_lsu_history():
+        farms = Farm.query.order_by(Farm.name).all()
+        now = datetime.now(timezone.utc)
+        try:
+            filters = parse_farm_lsu_history_filters(request.args, farms, today=now.date())
+        except ValueError as error:
+            abort(400, description=str(error))
+        selected_farms = [farm for farm in farms if str(farm.id) in filters.farm_ids]
+        report = build_farm_lsu_history(selected_farms, start_date=filters.start_date,
+                                       end_date=filters.end_date, now=now)
+        return render_template(
+            "analytics/farm_lsu_history.html", farms=farms, filters=filters, today=now.date(),
+            presentation=present_farm_lsu_history(report, split_mode=filters.split_mode),
+            return_url=url_for("web.analytics_grazing_management", start_date=filters.start_date,
+                               end_date=filters.end_date,
+                               **({"farm_id": filters.farm_ids[0]} if len(filters.farm_ids) == 1 else {})),
+        )
+
     @bp.get("/analytics/grazing-management")
     def analytics_grazing_management():
         selected_filters = {
@@ -222,4 +244,8 @@ def register_legacy_routes(bp) -> None:
             total_periods=len(timeline_periods),
             selected_paddock_count=len(selected_paddocks),
             visible_paddock_count=len(visible_paddocks),
+            farm_lsu_history_url=url_for(
+                "web.analytics_farm_lsu_history", start_date=start_date, end_date=end_date,
+                **({"farm_id": selected_filters["farm_id"]} if selected_filters["farm_id"] else {}),
+            ),
         )

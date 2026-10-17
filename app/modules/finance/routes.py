@@ -1,6 +1,8 @@
 from datetime import date
+from uuid import uuid4
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, send_file, session, url_for
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db
@@ -8,10 +10,59 @@ from app.models import AnimalGroupType, CashTransaction, Farm, LivestockTrade
 from app.services.cash_flow_service import CashFlowService
 from app.services.finance_service import FinanceService
 from app.services.livestock_trade_service import LivestockTradeService
+from app.services.livestock_trade_attachment_service import LivestockTradeAttachmentService
+from app.services.livestock_trade_calculations import payload_statistics
+from app.services.livestock_trade_payload import (
+    MAX_DOCUMENT_BYTES, check_shape, document_from_form, load_document,
+    normalize_document, public_sex, template_document,
+)
 from app.services.stock_service import StockService
 
 bp = Blueprint("finance", __name__)
 FORM_MINIMUM_LINE_COUNT = 6
+
+
+@bp.before_request
+def _trade_form_limits():
+    # Large weight lists also travel through ordinary form fields during review.
+    # Keep this allowance scoped to trade routes, including manual edits.
+    if request.path.startswith("/cash-flow/livestock-trades"):
+        request.max_form_memory_size = MAX_DOCUMENT_BYTES
+        image_limit = LivestockTradeAttachmentService.MAX_ATTACHMENT_BYTES * LivestockTradeAttachmentService.MAX_ATTACHMENTS
+        request.max_content_length = image_limit + MAX_DOCUMENT_BYTES * 2
+
+
+def _review_identity(payload, images=()):
+    identity = [payload["import_id"], LivestockTradeService.payload_hash(payload)]
+    if images:
+        identity.append(LivestockTradeAttachmentService.fingerprints(images))
+    return identity
+
+
+def _import_image_owner():
+    if "livestock_trade_upload_owner" not in session:
+        session["livestock_trade_upload_owner"] = str(uuid4())
+    return session["livestock_trade_upload_owner"]
+
+
+def _retained_import_images():
+    return LivestockTradeAttachmentService.resolve_tokens(
+        request.form.getlist("attachment_tokens"), _import_image_owner(),
+    )
+
+
+def _update_import_images(existing):
+    owner = _import_image_owner()
+    removed = set(request.form.getlist("remove_attachment_tokens"))
+    retained = [image for image in existing if image["token"] not in removed]
+    images = LivestockTradeAttachmentService.stage_uploads(
+        request.files.getlist("trade_images"), owner, existing=retained,
+    )
+    # Delete removed images only after every newly selected image has been accepted.
+    LivestockTradeAttachmentService.discard_tokens(
+        [image["token"] for image in existing if image["token"] in removed], owner,
+    )
+    return images
 
 
 def _cash_flow_redirect(*, year: int, tab: str):
@@ -105,14 +156,14 @@ def _animal_group_type_options() -> list[AnimalGroupType]:
 
 def _format_rate(value) -> str:
     if value is None:
-        return "-"
+        return "N/A"
     text = f"{float(value):,.4f}".replace(",", " ").replace(".", ",")
     return f"R{text}"
 
 
 def _format_number(value, decimals: int = 3) -> str:
     if value is None:
-        return "-"
+        return "N/A"
     return f"{float(value):,.{decimals}f}"
 
 
@@ -149,7 +200,170 @@ def _livestock_trade_context():
         "format_rate": _format_rate,
         "format_number": _format_number,
         "input_decimal": _input_decimal,
+        "public_sex": public_sex,
     }
+
+
+def _preview_signer():
+    return URLSafeTimedSerializer(current_app.secret_key, salt="livestock-trade-preview-v1")
+
+
+def _import_source():
+    if "group_count" in request.form:
+        document = document_from_form(request.form)
+        check_shape(document)
+        return document
+    upload = request.files.get("trade_file")
+    raw = request.form.get("trade_json", "")
+    if upload and upload.filename:
+        if raw.strip():
+            raise ValueError("Use either a file or pasted JSON, not both")
+        content = upload.read(MAX_DOCUMENT_BYTES + 1)
+        if len(content) > MAX_DOCUMENT_BYTES:
+            raise ValueError("The JSON document must be 2 MiB or smaller")
+        try:
+            raw = content.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Upload a UTF-8 JSON file") from exc
+    return load_document(raw)
+
+
+def _render_import(document=None, *, images=(), error=None, status=200, allow_confirmation=True):
+    selected = request.form.getlist("farm_ids")
+    preview, rows, token = None, [], None
+    if document is not None:
+        try:
+            payload = normalize_document(document, selected, require_details=False)
+            document["species"] = payload["species"]
+            preview = payload_statistics(payload)
+            rows = [(group["label"] or f"Group {index}", stats) for index, (group, stats) in enumerate(zip(payload["groups"], preview["groups"]), 1)]
+            rows.append(("Combined trade", preview["stats"]))
+            complete = normalize_document(document, selected)
+            if allow_confirmation:
+                token = _preview_signer().dumps(_review_identity(complete, images))
+        except ValueError as exc:
+            error = error or str(exc)
+        # Display legacy taxonomy codes as human-readable values without guessing.
+        if document.get("species") in ("Cattle", "Sheep", "Goat"):
+            for group in document["groups"]:
+                if isinstance(group.get("sex"), str):
+                    group["sex"] = public_sex(document["species"], group["sex"])
+    return render_template(
+        "finance/livestock_trade_import.html", trade_document=document, selected_farm_ids=selected,
+        error=error, preview=preview, preview_rows=rows, preview_token=token,
+        import_images=images,
+        raw_json=request.form.get("trade_json", ""), **_livestock_trade_context(),
+    ), status
+
+
+@bp.get("/cash-flow/livestock-trades/import")
+def import_livestock_trade():
+    return _render_import()
+
+
+@bp.get("/cash-flow/livestock-trades/import-id")
+def generate_livestock_trade_import_id():
+    response = jsonify(import_id=str(uuid4()))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@bp.get("/cash-flow/livestock-trades/import/images")
+def preview_livestock_trade_image():
+    try:
+        image = LivestockTradeAttachmentService.describe_token(
+            request.args.get("token", ""), _import_image_owner(),
+        )
+    except ValueError:
+        abort(404)
+    return _send_trade_image(LivestockTradeAttachmentService.staged_path(image), image)
+
+
+def _send_trade_image(path, image):
+    if not path.is_file():
+        abort(404)
+    response = send_file(
+        path, mimetype=image["content_type"], download_name=image["original_filename"],
+        as_attachment=image["content_type"] in ("image/heic", "image/heif"),
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@bp.post("/cash-flow/livestock-trades/import/discard")
+def discard_livestock_trade_import():
+    try:
+        LivestockTradeAttachmentService.discard_tokens(
+            request.form.getlist("attachment_tokens"), _import_image_owner(),
+        )
+    except ValueError:
+        # Never delete another session's images even when a submitted token is invalid.
+        flash("The attachment reference was invalid; no referenced images were removed.", "error")
+    flash("Unsaved trade discarded", "success")
+    return redirect(url_for("finance.import_livestock_trade"))
+
+
+@bp.get("/cash-flow/livestock-trades/template")
+def livestock_trade_template():
+    response = jsonify(template_document())
+    response.headers["Content-Disposition"] = 'attachment; filename="livestock-trade.json"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@bp.get("/cash-flow/livestock-trades/import-instructions")
+def livestock_trade_instructions():
+    return send_file(current_app.root_path + "/modules/finance/import_instructions.txt", as_attachment=True, download_name="livestock-trade-chatgpt-instructions.txt")
+
+
+@bp.post("/cash-flow/livestock-trades/import/preview")
+def preview_livestock_trade_import():
+    document, images = None, []
+    try:
+        images = _retained_import_images()
+        images = _update_import_images(images)
+        document = _import_source()
+    except ValueError as exc:
+        if document is None:
+            try:
+                document = _import_source()
+            except ValueError:
+                pass
+        return _render_import(document, images=images, error=str(exc), status=400, allow_confirmation=False)
+    return _render_import(document, images=images)
+
+
+@bp.post("/cash-flow/livestock-trades/import/confirm")
+def confirm_livestock_trade_import():
+    document, images = None, []
+    images_valid = False
+    try:
+        images = _retained_import_images()
+        images = _update_import_images(images)
+        images_valid = True
+        document = _import_source()
+        payload = normalize_document(document, request.form.getlist("farm_ids"))
+        try:
+            reviewed_hash = _preview_signer().loads(request.form.get("preview_token", ""), max_age=3600)
+        except BadSignature as exc:
+            raise ValueError("Preview the completed trade before saving (previews expire after one hour)") from exc
+        if reviewed_hash != _review_identity(payload, images):
+            raise ValueError("The details changed. Review the updated preview below, then save again.")
+        trade, created = LivestockTradeService.import_document(
+            document, request.form.getlist("farm_ids"), attachments=images,
+        )
+        flash("Livestock trade recorded" if created else "This import is already recorded; no duplicate was created", "success")
+        return redirect(url_for("finance.livestock_trade_detail", trade_id=trade.id))
+    except ValueError as exc:
+        db.session.rollback()
+        if document is None:
+            try:
+                document = _import_source()
+            except ValueError:
+                pass
+        return _render_import(document, images=images, error=str(exc), status=400, allow_confirmation=images_valid)
 
 
 @bp.get("/cash-flow")
@@ -238,6 +452,8 @@ def new_livestock_trade():
         return_year=return_year,
         return_tab=return_tab,
         default_trade_date=date.today().isoformat(),
+        trade_document={**template_document(), "import_id": None, "date": date.today().isoformat()},
+        selected_farm_ids=[],
         **_livestock_trade_context(),
     )
 
@@ -252,6 +468,15 @@ def create_livestock_trade():
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
+
+        if "group_count" in request.form:
+            try:
+                document = document_from_form(request.form)
+                return render_template("finance/livestock_trade_new.html", trade_document=document,
+                    selected_farm_ids=request.form.getlist("farm_ids"), return_year=date.today().year,
+                    return_tab="overall", default_trade_date="", **_livestock_trade_context()), 400
+            except ValueError:
+                pass
 
     try:
         year = FinanceService.parse_year(request.form.get("return_year"), default=date.today().year)
@@ -270,6 +495,8 @@ def livestock_trade_detail(trade_id: str):
         "finance/livestock_trade_detail.html",
         trade=LivestockTradeService.serialize_trade(trade),
         trade_model=trade,
+        trade_document=LivestockTradeService.document_for_trade(trade),
+        selected_farm_ids=[link.farm_id for link in trade.farm_links],
         **_livestock_trade_context(),
     )
 
@@ -284,14 +511,36 @@ def edit_livestock_trade(trade_id: str):
     except ValueError as exc:
         db.session.rollback()
         flash(str(exc), "error")
+        if "group_count" in request.form:
+            try:
+                document = document_from_form(request.form)
+                return render_template("finance/livestock_trade_detail.html", trade=LivestockTradeService.serialize_trade(trade),
+                    trade_model=trade, trade_document=document, selected_farm_ids=request.form.getlist("farm_ids"),
+                    edit_error=True, **_livestock_trade_context()), 400
+            except ValueError:
+                pass
     return redirect(url_for("finance.livestock_trade_detail", trade_id=trade_id))
+
+
+@bp.get("/cash-flow/livestock-trades/<trade_id>/images/<attachment_id>")
+def livestock_trade_image(trade_id: str, attachment_id: str):
+    trade = _get_livestock_trade_or_404(trade_id)
+    attachment = next((image for image in trade.attachments if image.id == attachment_id), None)
+    if attachment is None:
+        abort(404)
+    return _send_trade_image(
+        LivestockTradeAttachmentService.permanent_path(attachment),
+        {"content_type": attachment.content_type, "original_filename": attachment.original_filename},
+    )
 
 
 @bp.post("/cash-flow/livestock-trades/<trade_id>/delete")
 def delete_livestock_trade(trade_id: str):
     trade = _get_livestock_trade_or_404(trade_id)
+    image_paths = [image.storage_path for image in trade.attachments]
     LivestockTradeService.delete_trade(trade)
     db.session.commit()
+    LivestockTradeAttachmentService.delete_files(image_paths)
     flash("Livestock trade deleted", "success")
     return redirect(url_for("finance.livestock_trades"))
 

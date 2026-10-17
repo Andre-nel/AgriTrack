@@ -1,0 +1,98 @@
+.livestock-statistics-table td {
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.livestock-statistics-table th {
+  text-align: right;
+}
+
+.livestock-statistics-table th:first-child {
+  min-width: 8rem;
+  text-align: left;
+}
+
+.livestock-statistics-table tbody tr:last-child {
+  font-weight: 700;
+}
+
+[data-trade-groups] {
+  display: grid;
+  gap: 1rem;
+}
+
+.import-id-generator {
+  margin-bottom: 1rem;
+}
+
+.import-id-generator input {
+  font-family: monospace;
+  width: 100%;
+  min-width: 0;
+}
+
+.import-id-feedback {
+  margin: 0;
+  min-height: 1.5em;
+}
+
+.trade-image-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trade-images {
+  min-width: 0;
+}
+
+.trade-images input[type="file"] {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.trade-image-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.trade-image-card > a {
+  color: var(--accent);
+}
+
+.trade-image-thumbnail {
+  display: block;
+  width: 100%;
+  height: 10rem;
+  margin-bottom: 0.5rem;
+  object-fit: contain;
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.trade-image-filename {
+  overflow-wrap: anywhere;
+}
+
+.trade-image-card .check-row {
+  margin-top: auto;
+}
+
+.trade-image-help {
+  margin: 0;
+}
+
+.trade-discard-actions {
+  padding-top: 1rem;
+  margin-top: 0.3rem;
+  border-top: 1px solid var(--line);
+}

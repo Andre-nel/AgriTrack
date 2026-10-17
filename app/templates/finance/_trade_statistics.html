@@ -1,0 +1,13 @@
+{% macro statistics_table(rows, pricing_model) %}
+<div class="analytics-table-scroll">
+  <table class="livestock-statistics-table">
+    <thead><tr><th>Group / sex</th><th>Head count</th><th>Average kg</th><th>Grand total kg</th><th>{{ 'R/kg' if pricing_model == 'weight' else 'R/head' }} excl VAT</th><th>Average R/head excl VAT</th><th>Total excl VAT</th><th>VAT</th><th>Total incl VAT</th></tr></thead>
+    <tbody>
+      {% for label, stats in rows %}
+      <tr><th>{{ label }}</th><td>{{ stats.count }}</td><td>{{ format_number(stats.average_weight) }}</td><td>{{ format_number(stats.total_weight) }}</td><td>{{ format_rate(stats.unit_price) }}</td><td>{{ format_currency(stats.average_price_per_animal) }}</td><td>{{ format_currency(stats.base_total) }}</td><td>{{ format_currency(stats.vat_amount) }}</td><td>{{ format_currency(stats.gross_total) }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted">Combined prices are effective rates. Averages use total weights, amounts, and head counts. VAT is rounded per group, then summed.</p>
+{% endmacro %}

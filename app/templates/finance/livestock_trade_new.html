@@ -1,11 +1,13 @@
 {% extends "base.html" %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='livestock_trades.css') }}" />{% endblock %}
 {% from "finance/_livestock_trade_form.html" import livestock_trade_form with context %}
 {% block title %}Record Livestock Trade | Cash Flow | AgriTrack{% endblock %}
 {% block content %}
 <section class="hero cash-flow-hero">
   <h1>Record Livestock Trade</h1>
-  <p>Capture lamb and calf trades by individual weights, or goat trades by head count. VAT is added to the cash-flow amount.</p>
+  <p>Record one species with separately priced groups, by individual weights or head count. VAT is added to the cash-flow amount.</p>
   <div class="hero-actions">
+    <a class="btn btn-secondary" href="{{ url_for('finance.import_livestock_trade') }}">Import Livestock Trade</a>
     <a class="btn btn-secondary" href="{{ url_for('finance.cash_flow', year=return_year, tab=return_tab) }}">Back To Cash Flow</a>
     <a class="btn btn-secondary" href="{{ url_for('finance.livestock_trades') }}">Trade Statistics</a>
   </div>

@@ -7,6 +7,8 @@ from sqlalchemy import func, or_
 from app.extensions import db
 from app.models import Farm, Mob, MobileAuthToken, Paddock, User, UserFarmRole
 from app.services.grazing_history_service import GrazingHistoryService
+from app.services.farm_capacity_service import FarmCapacityService
+from app.services.mob_inventory_service import MobInventoryService
 
 
 def _normalize_email(value: str) -> str:
@@ -79,6 +81,8 @@ def init_cli(app: Flask) -> None:
         south = Paddock(farm_id=farm.id, name="South 2", area_ha=9.0, grazeable_area_ha=8.0)
         mob = Mob(farm_id=farm.id, name="Main Mob", status="active")
         db.session.add_all([north, south, mob])
+        MobInventoryService.ensure_baseline(mob, source="created")
+        FarmCapacityService.record(farm, source="created")
         db.session.commit()
 
         print(f"Seed complete for {date.today().isoformat()}")

@@ -233,14 +233,32 @@ def _parse_count_move_allocation_rows(
     ]
 
 
-def parse_transfer_rows(group_ids: list[str], quantities: list[str]) -> list[dict[str, int]]:
-    transfer_totals: dict[str, int] = {}
-    for group_id_raw, qty_raw in zip(group_ids, quantities):
-        group_id = (group_id_raw or "").strip()
-        qty_text = (qty_raw or "").strip()
+def parse_transfer_rows(
+    *,
+    farm_ids: list[str],
+    destination_mob_ids: list[str],
+    group_ids: list[str],
+    quantities: list[str],
+    notes: list[str],
+) -> list[dict]:
+    # Reject truncated fields instead of shifting a destination or note onto another row.
+    if len({len(values) for values in (farm_ids, destination_mob_ids, group_ids, quantities, notes)}) != 1:
+        raise ValueError("Transfer row fields do not match. Refresh the page and try again.")
 
-        if not group_id and not qty_text:
+    transfers = []
+    for index in range(len(group_ids)):
+        farm_id = _form_list_value(farm_ids, index)
+        destination_mob_id = _form_list_value(destination_mob_ids, index)
+        group_id = _form_list_value(group_ids, index)
+        qty_text = _form_list_value(quantities, index)
+        note = _form_list_value(notes, index)
+
+        if not any((farm_id, destination_mob_id, group_id, qty_text, note)):
             continue
+        if not farm_id:
+            raise ValueError("Each transfer row requires a destination farm")
+        if not destination_mob_id:
+            raise ValueError("Each transfer row requires a destination mob")
         if not group_id or not qty_text:
             raise ValueError("Each transfer row requires a group and quantity")
 
@@ -251,15 +269,18 @@ def parse_transfer_rows(group_ids: list[str], quantities: list[str]) -> list[dic
         if quantity <= 0:
             raise ValueError("Transfer quantities must be greater than 0")
 
-        transfer_totals[group_id] = transfer_totals.get(group_id, 0) + quantity
+        transfers.append({
+            "destination_farm_id": farm_id,
+            "destination_mob_id": destination_mob_id,
+            "animal_group_type_id": group_id,
+            "quantity": quantity,
+            "note": note or None,
+        })
 
-    if not transfer_totals:
+    if not transfers:
         raise ValueError("Add at least one transfer row")
 
-    return [
-        {"animal_group_type_id": group_id, "quantity": quantity}
-        for group_id, quantity in transfer_totals.items()
-    ]
+    return transfers
 
 
 def parse_split_rows(

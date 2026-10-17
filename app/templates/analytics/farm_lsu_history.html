@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Farm LSU History | Grazing Management | AgriTrack{% endblock %}
+{% block content %}
+<a class="btn btn-secondary" href="{{ return_url }}">Back To Grazing Management</a>
+<h1>Farm LSU History</h1>
+<p class="muted">Compare farm carrying capacity with livestock registered to each farm, including unlocated animals.</p>
+<section class="card">
+  <h2>Filters</h2>
+  <form method="get" action="{{ url_for('web.analytics_farm_lsu_history') }}" class="grid-form">
+    <label>Farms
+      <select name="farm_id" multiple size="6" class="analytics-multi-select" {% if farms %}required{% endif %}>
+        {% for farm in farms %}
+        <option value="{{ farm.id }}" {% if farm.id|string in filters.farm_ids %}selected{% endif %}>{{ farm.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="muted">Select one or more farms. Use Ctrl (Windows) or Command (Mac) to select several.</p>
+    <div class="grid-two">
+      <label>Start Date<input type="date" name="start_date" value="{{ filters.start_date }}" max="{{ today }}" required /></label>
+      <label>End Date<input type="date" name="end_date" value="{{ filters.end_date }}" max="{{ today }}" required /></label>
+    </div>
+    <label>Display
+      <select name="split_mode">
+        <option value="aggregate" {% if filters.split_mode == 'aggregate' %}selected{% endif %}>Aggregate selected farms</option>
+        <option value="farm" {% if filters.split_mode == 'farm' %}selected{% endif %}>Split by farm</option>
+      </select>
+    </label>
+    <div class="row-actions">
+      <button type="submit" class="btn">Apply</button>
+      <a class="btn btn-secondary" href="{{ url_for('web.analytics_farm_lsu_history') }}">Clear</a>
+    </div>
+  </form>
+</section>
+{% if presentation.coverage %}
+<section class="card" aria-labelledby="coverageHeading">
+  <h2 id="coverageHeading">Historical coverage</h2>
+  <p>Gaps mean unavailable history, not zero LSU. Capacity begins at the first recorded baseline. Livestock history requires reconcilable quantities and farm ownership. An aggregate is unavailable when any selected farm has missing data for that metric.</p>
+  <ul>{% for row in presentation.coverage %}
+    <li>{{ row.name }}: capacity unavailable on {{ row.capacity_missing }} date(s); livestock unavailable on {{ row.livestock_missing }} date(s).</li>
+  {% endfor %}</ul>
+</section>
+{% endif %}
+<section class="card">
+  <h2>Capacity and livestock LSU</h2>
+  <p class="muted">{{ filters.start_date }} to {{ filters.end_date }}, inclusive. Values are UTC closing balances; today stops at the time of this report. Future entries are excluded.</p>
+  {% if presentation.panels %}
+  <div class="grazing-chart-grid">
+    {% for panel in presentation.panels %}
+    <article class="card grazing-chart-card">
+      <h3>{{ panel.title }}</h3>
+      <div class="analytics-chart-wrap"><canvas data-farm-lsu-panel="{{ loop.index0 }}" role="img" aria-label="{{ panel.title }} capacity and livestock LSU history">The closing values are shown in the table below.</canvas></div>
+    </article>
+    {% endfor %}
+  </div>
+  <p id="farmLsuChartUnavailable" hidden>Charts could not load. The closing values remain available below.</p>
+  <h3>Values on {{ filters.end_date }}</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Farm selection</th><th>LSU capacity</th><th>Livestock LSU</th></tr></thead>
+    <tbody>{% for row in presentation.closing_rows %}<tr><th scope="row">{{ row.name }}</th>
+      <td>{{ '%.2f'|format(row.capacity) if row.capacity is not none else 'Unavailable' }}</td>
+      <td>{{ '%.2f'|format(row.livestock) if row.livestock is not none else 'Unavailable' }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p>No farms are available.</p>{% endif %}
+</section>
+{% if presentation.current_rows %}
+<section class="card">
+  <h2>Current recorded livestock balances</h2>
+  <p class="muted">Authoritative balances for active mobs now. These are separate from historical reconstruction and may include stock changes posted with future effective dates.</p>
+  <div class="table-wrap"><table><thead><tr><th>Farm</th><th>Recorded LSU</th></tr></thead>
+    <tbody>{% for row in presentation.current_rows %}<tr><th scope="row">{{ row.name }}</th><td>{{ '%.2f'|format(row.livestock) }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if presentation.panels %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>{% endif %}
+<script id="farmLsuHistoryData" type="application/json">{{ presentation | tojson }}</script>
+<script src="{{ url_for('static', filename='analytics_farm_lsu_history.js') }}"></script>
+{% endblock %}

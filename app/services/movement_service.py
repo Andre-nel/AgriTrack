@@ -1,5 +1,4 @@
 from collections import defaultdict
-from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.extensions import db
@@ -21,6 +20,7 @@ from app.services.cohort_service import CohortService
 from app.services.grazing_history_service import GrazingHistoryService
 from app.services.grazing_service import GrazingService
 from app.services.mob_event_service import MobEventService
+from app.services.mob_inventory_service import MobInventoryService
 from app.services.mob_service import MobService
 from app.services.reporting_service import ReportingService
 from app.services.stock_service import StockService
@@ -485,7 +485,6 @@ class MovementService:
         apply_open_gate_network: bool = True,
         allow_cross_farm_allocations: bool = False,
     ):
-        when = when or datetime.now(timezone.utc)
         allocation_mode = MovementService._normalize_allocation_mode(allocation_mode, allocations)
         allocations = MovementService._normalize_move_allocations(
             mob=mob,
@@ -510,8 +509,15 @@ class MovementService:
             elif allocation_mode == "percentage":
                 allocations = MovementService._normalize_percentage_allocations(mob, allocations)
 
+        MobInventoryService.ensure_baseline(mob)
+        when = MobInventoryService.normalize_timestamp(when)
+        previous_farm_id, previous_active = mob.farm_id, mob.status == "active"
         GrazingService.close_open_session(mob_id=mob.id, end_at=when)
         mob.farm_id = resolved_destination_farm_id
+        MobInventoryService.record_state_change(
+            mob, previous_farm_id=previous_farm_id, previous_active=previous_active,
+            effective_at=when, source="move",
+        )
         session = GrazingService.open_session(
             farm_id=resolved_destination_farm_id,
             mob_id=mob.id,
@@ -571,7 +577,7 @@ class MovementService:
 
         moved_mob_count = 0
         moved_head_count = 0
-        event_time = when or datetime.now(timezone.utc)
+        event_time = MobInventoryService.normalize_timestamp(when)
         for session in sessions:
             counts_by_paddock, species_by_group_id = cls._active_session_count_map(session)
             source_counts = counts_by_paddock.get(source_id, {})
@@ -678,7 +684,7 @@ class MovementService:
         note: str | None = None,
         when=None,
     ) -> None:
-        when = when or datetime.now(timezone.utc)
+        when = MobInventoryService.normalize_timestamp(when)
         if not transfers:
             raise ValueError("At least one transfer row is required")
         if str(source_mob.id) == str(destination_mob.id):
@@ -747,7 +753,8 @@ class MovementService:
         if source_mob.status != "active":
             raise ValueError("Source mob must be active")
         splits = MovementService._normalize_splits(source_mob=source_mob, splits=splits)
-        when = when or datetime.now(timezone.utc)
+        MobInventoryService.ensure_baseline(source_mob)
+        when = MobInventoryService.normalize_timestamp(when)
         event = MovementEvent(farm_id=source_mob.farm_id, event_time=when, event_kind=MovementEventKind.split)
         db.session.add(event)
         db.session.flush()
@@ -764,6 +771,7 @@ class MovementService:
             new_mob = Mob(farm_id=source_mob.farm_id, name=split["name"], status="active")
             db.session.add(new_mob)
             db.session.flush()
+            MobInventoryService.ensure_baseline(new_mob, effective_at=when, source="created")
             created.append(new_mob)
             db.session.add(
                 MovementEventMob(
@@ -817,14 +825,17 @@ class MovementService:
 
     @staticmethod
     def merge_mobs(source_mobs: list[Mob], result_name: str, when=None):
-        when = when or datetime.now(timezone.utc)
         if not source_mobs:
             raise ValueError("At least one source mob is required")
+        for source in source_mobs:
+            MobInventoryService.ensure_baseline(source)
+        when = MobInventoryService.normalize_timestamp(when)
 
         farm_id = source_mobs[0].farm_id
         result_mob = Mob(farm_id=farm_id, name=result_name, status="active")
         db.session.add(result_mob)
         db.session.flush()
+        MobInventoryService.ensure_baseline(result_mob, effective_at=when, source="created")
 
         event = MovementEvent(farm_id=farm_id, event_time=when, event_kind=MovementEventKind.merge)
         db.session.add(event)

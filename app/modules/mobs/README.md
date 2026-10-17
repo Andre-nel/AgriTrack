@@ -40,6 +40,20 @@ The existing female-status POST route redirects back to cohort management.
 Cohort stock forms use `/cohorts/adjust` and `/cohorts/transfer` under the mob URL
 and share stock services with ordinary controls.
 
+## Transfers to existing mobs
+
+The Transfer Stock To Existing Mob card accepts multiple rows, each with its own
+farm, destination mob, animal group, whole-head quantity and optional note. Each
+row's mob choices follow its selected farm and exclude the source and inactive
+mobs. Rows can repeat a group or destination; their notes remain separate.
+
+All rows post in one transaction. Invalid destinations, incomplete rows or a
+combined quantity exceeding the source's available stock reject the entire
+submission, including any ledger, cohort, event and grazing-history changes.
+Each row uses the existing proportional cohort transfer rules against the stock
+remaining after preceding rows. Reload an older open transfer form before use;
+the submitted destination and note fields must now be present for every row.
+
 ## Stock adjustments and open gates
 
 In Adjust Stock, a selected paddock identifies its whole active open-gate network,

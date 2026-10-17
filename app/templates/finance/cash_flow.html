@@ -101,6 +101,7 @@
       <p class="muted">Record lamb and calf trades by weight, goat trades by head count, then review the sale and purchase trends.</p>
     </div>
     <a class="btn" href="{{ url_for('finance.new_livestock_trade', return_year=selected_year, return_tab=selected_tab) }}">Record Livestock Trade</a>
+    <a class="btn btn-secondary" href="{{ url_for('finance.import_livestock_trade') }}">Import Livestock Trade</a>
     <a class="btn btn-secondary" href="{{ url_for('finance.livestock_trades') }}">View Trade Statistics</a>
   </div>
 </section>
@@ -130,7 +131,7 @@
         <tr>
           <td><a href="{{ url_for('finance.livestock_trade_detail', trade_id=row['id']) }}">{{ row["trade_date"] }}</a></td>
           <td>{{ row["trade_type_label"] }}</td>
-          <td>{{ row["animal_group_type"]["label"] }}</td>
+          <td>{{ row["animal_label"] }}</td>
           <td>{{ row["farm_names"]|join(", ") }}</td>
           <td>{{ row["stats"]["count"] }}</td>
           <td>{{ format_number(row["stats"]["average_weight"], 3) }}</td>

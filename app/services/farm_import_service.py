@@ -16,6 +16,7 @@ from app.models import (
     WaterAsset,
 )
 from app.services.paddock_service import PaddockService
+from app.services.farm_capacity_service import FarmCapacityService
 from app.services.fence_service import FenceService
 from app.services.gate_service import GateService
 from app.services.water_network_service import WaterNetworkService
@@ -1406,6 +1407,8 @@ class FarmImportService:
         final_written = False
         previous_map_bytes = map_path.read_bytes() if map_path.exists() else None
         try:
+            # Capture only the import's final state, including retired paddocks.
+            FarmCapacityService.record(farm, source="change" if existing_farm else "created")
             with NamedTemporaryFile(mode="wb", dir=maps_dir, suffix=".kml.tmp", delete=False) as temp_file:
                 temp_file.write(file_bytes)
                 temp_path = Path(temp_file.name)

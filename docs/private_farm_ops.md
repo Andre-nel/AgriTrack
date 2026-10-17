@@ -63,7 +63,13 @@ The backup includes:
 - `instance/agritrack.db`
 - `instance/maps`
 - `instance/task_attachments`
+- `instance/note_attachments`
+- `instance/livestock_trade_attachments` (saved trade reference images)
 - a small `manifest.json`
+
+Temporary livestock import images are excluded. They expire after 24 hours and
+are cleaned up as new import images are uploaded; discard removes the referenced
+draft images immediately. Back up the database and saved image directory together.
 
 By default, the newest 30 backups are kept. Verify the newest backup can boot:
 

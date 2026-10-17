@@ -1,0 +1,34 @@
+{% macro trade_image_gallery(images, trade_id=None, editable=False) %}
+{% if images %}
+<ul class="trade-image-gallery">
+  {% for image in images %}
+  {% set image_url = url_for('finance.livestock_trade_image', trade_id=trade_id, attachment_id=image.id) if trade_id is not none else url_for('finance.preview_livestock_trade_image', token=image.token) %}
+  <li class="trade-image-card">
+    {% if image.content_type in ('image/jpeg', 'image/png', 'image/webp') %}
+    <a href="{{ image_url }}" target="_blank" rel="noopener">
+      <img src="{{ image_url }}" alt="Reference image: {{ image.original_filename }}" loading="lazy" class="trade-image-thumbnail" />
+      <span class="trade-image-filename">{{ image.original_filename }}</span>
+    </a>
+    {% else %}
+    <a href="{{ image_url }}" download class="trade-image-filename">Download {{ image.original_filename }}</a>
+    <span class="muted">HEIC / HEIF reference image</span>
+    {% endif %}
+    {% if editable %}
+    <input type="hidden" name="attachment_tokens" value="{{ image.token }}" />
+    <label class="check-row"><input type="checkbox" name="remove_attachment_tokens" value="{{ image.token }}" aria-label="Remove image: {{ image.original_filename }}" />Remove image</label>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endmacro %}
+
+{% macro trade_image_uploads(images) %}
+<fieldset class="livestock-trade-fieldset trade-images">
+  <legend>Reference images (optional)</legend>
+  <p class="muted trade-image-help" id="trade-image-help">Attach up to 10 images: JPEG, PNG, WebP, HEIC or HEIF. Maximum 12 MiB per image. Selected images are uploaded when you preview and saved with the trade.</p>
+  {{ trade_image_gallery(images, editable=True) }}
+  {% if images %}<p class="muted trade-image-help">To remove an image, select “Remove image” and preview again.</p>{% endif %}
+  <label>{{ 'Attach more images' if images else 'Attach images' }}<input type="file" name="trade_images" multiple accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif" aria-describedby="trade-image-help" /></label>
+</fieldset>
+{% endmacro %}

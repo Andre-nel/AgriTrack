@@ -160,3 +160,38 @@ def grazing_uncovered_paddocks_in_range(
         if start_date < earliest_history.date() and earliest_session < earliest_history:
             uncovered.append(paddock.name)
     return uncovered
+
+
+def present_farm_lsu_history(report: dict, *, split_mode: str) -> dict:
+    """Convert Decimal calculations into chart values and a compact closing table."""
+    def total(values):
+        return None if any(value is None for value in values) else sum(values)
+
+    def number(value):
+        return round(float(value), 4) if value is not None else None
+
+    farms = report["farms"]
+    labels = report["labels"]
+    if split_mode == "aggregate" and farms:
+        groups = [{"id": "aggregate", "name": "All selected farms", **{
+            metric: [total([farm[metric][index] for farm in farms.values()]) for index in range(len(labels))]
+            for metric in ("capacity", "livestock")
+        }}]
+    else:
+        groups = [{"id": farm_id, **farm} for farm_id, farm in farms.items()]
+    panels = [{"id": group["id"], "title": group["name"], "datasets": [
+        {"key": metric, "label": label, "values": [number(value) for value in group[metric]]}
+        for metric, label in (("capacity", "LSU capacity"), ("livestock", "Livestock LSU"))
+    ]} for group in groups]
+    maximum = max((value for panel in panels for dataset in panel["datasets"]
+                   for value in dataset["values"] if value is not None), default=0)
+    return {
+        "labels": labels, "panels": panels, "y_max": max(1, maximum * 1.1),
+        "closing_rows": [{"name": group["name"], "capacity": number(group["capacity"][-1]),
+                          "livestock": number(group["livestock"][-1])} for group in groups],
+        "current_rows": [{"name": farm["name"], "livestock": number(farm["current_livestock"])}
+                         for farm in farms.values()],
+        "coverage": [{"name": farm["name"], "capacity_missing": farm["capacity"].count(None),
+                      "livestock_missing": farm["livestock"].count(None)} for farm in farms.values()
+                     if None in farm["capacity"] or None in farm["livestock"]],
+    }

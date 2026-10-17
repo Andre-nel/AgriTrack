@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import Paddock, PaddockEvent
+from app.services.farm_capacity_service import FarmCapacityService
 from app.services.paddock_event_service import PaddockEventService
 from app.services.paddock_service import PaddockService
 from app.services.reporting_service import ReportingService
@@ -66,6 +67,7 @@ def create_paddock():
     )
     db.session.add(paddock)
     try:
+        FarmCapacityService.record(paddock.farm_id)
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
@@ -189,28 +191,27 @@ def update_paddock(paddock_id):
                 return jsonify({"error": "stocking_rate_ha_per_lsu_override must be greater than 0"}), 400
             paddock.stocking_rate_ha_per_lsu_override = value
 
-    renamed = False
-    if "name" in payload:
-        try:
+    try:
+        # rename_paddock commits internally to coordinate its map-file update.
+        # Include this request's completed capacity edits in that transaction.
+        FarmCapacityService.record(paddock.farm_id)
+        renamed = False
+        if "name" in payload:
             rename_result = PaddockService.rename_paddock(
                 paddock,
                 payload.get("name"),
                 instance_path=current_app.instance_path,
             )
             renamed = rename_result["changed"]
-        except ValueError as exc:
-            db.session.rollback()
-            return jsonify({"error": str(exc)}), 400
-        except IntegrityError:
-            db.session.rollback()
-            return jsonify({"error": "A paddock with this name already exists on this farm"}), 400
 
-    if not renamed:
-        try:
+        if not renamed:
             db.session.commit()
-        except IntegrityError:
-            db.session.rollback()
-            return jsonify({"error": "A paddock with this name already exists on this farm"}), 400
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 400
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "A paddock with this name already exists on this farm"}), 400
 
     return jsonify({"id": str(paddock.id), "name": paddock.name})
 

@@ -6,6 +6,7 @@
   <p>Review sale and purchase trends by trade, using VAT-exclusive prices and totals.</p>
   <div class="hero-actions">
     <a class="btn" href="{{ url_for('finance.new_livestock_trade') }}">Record Livestock Trade</a>
+    <a class="btn btn-secondary" href="{{ url_for('finance.import_livestock_trade') }}">Import Livestock Trade</a>
     <a class="btn btn-secondary" href="{{ url_for('finance.cash_flow') }}">Back To Cash Flow</a>
   </div>
 </section>
@@ -131,7 +132,7 @@
           <td>{{ row.trade_type_label }}</td>
           <td>{{ row.counterparty }}</td>
           <td>{{ row.farm_names|join(", ") }}</td>
-          <td>{{ row.animal_group_type.label }}</td>
+          <td>{{ row.animal_label }}</td>
           <td>{{ row.stats.count }}</td>
           <td>{{ format_number(row.stats.average_weight, 3) }}</td>
           <td>

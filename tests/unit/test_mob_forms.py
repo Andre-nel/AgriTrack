@@ -129,15 +129,79 @@ def test_parse_count_move_allocations_requires_type_and_count_per_row():
         )
 
 
-def test_parse_transfer_rows_combines_duplicate_groups():
-    assert parse_transfer_rows(["ewes", "ewes", ""], ["3", "2", ""]) == [
-        {"animal_group_type_id": "ewes", "quantity": 5}
+def test_parse_transfer_rows_preserves_destinations_and_notes_for_repeated_groups():
+    assert parse_transfer_rows(
+        farm_ids=[" farm-a ", "farm-b", "farm-a", ""],
+        destination_mob_ids=[" north ", "south", "north", ""],
+        group_ids=[" ewes ", "ewes", "ewes", ""],
+        quantities=[" 3 ", "2", "1", ""],
+        notes=[" First transfer ", "", "Separate note", ""],
+    ) == [
+        {
+            "destination_farm_id": "farm-a", "destination_mob_id": "north",
+            "animal_group_type_id": "ewes", "quantity": 3, "note": "First transfer",
+        },
+        {
+            "destination_farm_id": "farm-b", "destination_mob_id": "south",
+            "animal_group_type_id": "ewes", "quantity": 2, "note": None,
+        },
+        {
+            "destination_farm_id": "farm-a", "destination_mob_id": "north",
+            "animal_group_type_id": "ewes", "quantity": 1, "note": "Separate note",
+        },
     ]
 
 
-def test_parse_transfer_rows_rejects_non_integer_quantities():
-    with pytest.raises(ValueError, match="Transfer quantities must be whole numbers"):
-        parse_transfer_rows(["ewes"], ["2.5"])
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("farm_ids", "", "requires a destination farm"),
+        ("destination_mob_ids", "", "requires a destination mob"),
+        ("group_ids", "", "requires a group and quantity"),
+        ("quantities", "", "requires a group and quantity"),
+        ("quantities", "2.5", "Transfer quantities must be whole numbers"),
+        ("quantities", "invalid", "Transfer quantities must be whole numbers"),
+        ("quantities", "0", "Transfer quantities must be greater than 0"),
+        ("quantities", "-1", "Transfer quantities must be greater than 0"),
+    ],
+)
+def test_parse_transfer_rows_rejects_invalid_row(field, value, message):
+    fields = {
+        "farm_ids": ["farm-a"], "destination_mob_ids": ["north"],
+        "group_ids": ["ewes"], "quantities": ["3"], "notes": [""],
+    }
+    fields[field] = [value]
+    with pytest.raises(ValueError, match=message):
+        parse_transfer_rows(**fields)
+
+
+@pytest.mark.parametrize("field", ["farm_ids", "destination_mob_ids", "group_ids", "quantities", "notes"])
+@pytest.mark.parametrize("length", [0, 1, 3])
+def test_parse_transfer_rows_rejects_misaligned_fields(field, length):
+    fields = {
+        "farm_ids": ["farm-a", "farm-b"], "destination_mob_ids": ["north", "south"],
+        "group_ids": ["ewes", "ewes"], "quantities": ["3", "2"], "notes": ["First", "Second"],
+    }
+    fields[field] = [fields[field][0]] * length
+    with pytest.raises(ValueError, match="Transfer row fields do not match"):
+        parse_transfer_rows(**fields)
+
+
+@pytest.mark.parametrize("values", [[], [""], [" ", ""]])
+def test_parse_transfer_rows_requires_a_nonempty_row(values):
+    with pytest.raises(ValueError, match="Add at least one transfer row"):
+        parse_transfer_rows(
+            farm_ids=values, destination_mob_ids=values, group_ids=values,
+            quantities=values, notes=values,
+        )
+
+
+def test_parse_transfer_rows_does_not_discard_a_note_without_a_destination():
+    with pytest.raises(ValueError, match="requires a destination farm"):
+        parse_transfer_rows(
+            farm_ids=[""], destination_mob_ids=[""], group_ids=[""],
+            quantities=[""], notes=["Unassigned note"],
+        )
 
 
 def test_parse_split_rows_groups_quantities_by_new_mob_name():

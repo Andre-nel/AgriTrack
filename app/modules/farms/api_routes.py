@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 
 from app.extensions import db
 from app.models import Farm, RainfallRecord
+from app.services.farm_capacity_service import FarmCapacityService
 
 bp = Blueprint("farms", __name__)
 
@@ -47,6 +48,7 @@ def create_farm():
         default_stocking_rate_ha_per_lsu=default_stocking_rate,
     )
     db.session.add(farm)
+    FarmCapacityService.record(farm, source="created")
     db.session.commit()
     return jsonify({"id": str(farm.id), "name": farm.name}), 201
 
@@ -83,6 +85,7 @@ def update_farm(farm_id):
             return jsonify({"error": "default_stocking_rate_ha_per_lsu must be greater than 0"}), 400
         farm.default_stocking_rate_ha_per_lsu = value
 
+    FarmCapacityService.record(farm)
     db.session.commit()
     return jsonify({"id": str(farm.id), "name": farm.name})
 

@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.models import Farm, GrazingAllocation, GrazingSession, Mob, Paddock, PaddockEvent
 from app.modules.tasks.entity_links import linked_task_rows_for_entity
+from app.services.farm_capacity_service import FarmCapacityService
 from app.services.gate_service import GateService
 from app.services.fence_service import FenceService
 from app.services.grazing_history_service import GrazingHistoryService
@@ -117,6 +118,7 @@ def register_legacy_routes(bp) -> None:
         override_raw = (request.form.get("stocking_rate_ha_per_lsu_override") or "").strip()
         if not override_raw:
             paddock.stocking_rate_ha_per_lsu_override = None
+            FarmCapacityService.record(paddock.farm_id)
             db.session.commit()
             flash("Paddock carrying capacity override cleared. Farm default now applies.", "success")
             return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
@@ -130,6 +132,7 @@ def register_legacy_routes(bp) -> None:
             return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))
 
         paddock.stocking_rate_ha_per_lsu_override = override_value
+        FarmCapacityService.record(paddock.farm_id)
         db.session.commit()
         flash("Paddock carrying capacity override updated", "success")
         return redirect(url_for("web.paddock_detail", paddock_id=paddock_id))

@@ -5,6 +5,7 @@ from app.extensions import db
 from app.models import Mob, MobEvent
 from app.models.stock_ledger import StockEventType
 from app.services.mob_event_service import MobEventService
+from app.services.mob_inventory_service import MobInventoryService
 from app.services.mob_service import MobService
 from app.services.movement_service import MovementService
 from app.services.stock_service import StockService
@@ -35,6 +36,7 @@ def create_mob():
     mob = Mob(farm_id=payload["farm_id"], name=payload["name"], status=payload.get("status", "active"))
     db.session.add(mob)
     try:
+        MobInventoryService.ensure_baseline(mob, source="created")
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
@@ -53,7 +55,6 @@ def update_mob(mob_id):
     mob = _get_active_mob_or_404(mob_id)
     payload = request.get_json() or {}
 
-    mob.name = payload.get("name", mob.name)
     requested_status = payload.get("status", mob.status)
     if requested_status == "archived":
         total_head_count = sum(int(balance.head_count) for balance in mob.balances)
@@ -61,7 +62,8 @@ def update_mob(mob_id):
             return jsonify({"error": "Mob cannot be deactivated while it still contains stock"}), 400
         MobService.archive_mob(mob)
     else:
-        mob.status = requested_status
+        MobService.set_status(mob, requested_status)
+    mob.name = payload.get("name", mob.name)
     mob.origin_note = payload.get("origin_note", mob.origin_note)
 
     try:
