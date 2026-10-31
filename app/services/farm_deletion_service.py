@@ -33,6 +33,8 @@ from app.models import (
     MovementEventMob,
     NoteAttachment,
     OffspringAssessment,
+    Orchard,
+    OrchardPlant,
     Paddock,
     PaddockEvent,
     PaddockGate,
@@ -97,6 +99,10 @@ class FarmDeletionService:
     @classmethod
     def delete_farm_records(cls, farm: Farm) -> None:
         farm_id = str(farm.id)
+        orchard_ids = cls._ids_for(Orchard, Orchard.farm_id, farm_id)
+        # Occupied spaces deliberately restrict deletion. Remove owned plants first;
+        # orchard foreign-key cascades then remove rows, spaces, lines and emitters.
+        cls._delete_where(OrchardPlant, cls._in_if_any(OrchardPlant.orchard_id, orchard_ids))
         mob_ids = cls._ids_for(Mob, Mob.farm_id, farm_id)
         paddock_ids = cls._ids_for(Paddock, Paddock.farm_id, farm_id)
         fence_section_ids = cls._ids_for(FenceSection, FenceSection.farm_id, farm_id)

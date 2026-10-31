@@ -255,7 +255,7 @@
       <ul class="link-list-clean">
         {% for asset in local_water_assets %}
         <li>
-          <strong>{{ asset.name }}</strong>
+          <strong><a href="{{ url_for('web.farm_water_workspace', farm_id=paddock.farm_id, open_asset_id=asset.id) }}">{{ asset.name }}</a></strong>
           <span class="muted">{{ water_asset_type_labels[asset.asset_type] }}</span>
           {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
         </li>
@@ -269,7 +269,7 @@
       <ul class="link-list-clean">
         {% for asset in serving_water_assets %}
         <li>
-          <strong>{{ asset.name }}</strong>
+          <strong><a href="{{ url_for('web.farm_water_workspace', farm_id=paddock.farm_id, open_asset_id=asset.id) }}">{{ asset.name }}</a></strong>
           <span class="muted">{{ water_asset_type_labels[asset.asset_type] }}</span>
           {% if asset.location_paddock %}<span class="muted">Located in {{ asset.location_paddock.name }}</span>{% endif %}
           {% if asset.needs_review %}<span class="badge warn">Needs Review</span>{% endif %}
@@ -337,6 +337,18 @@
 
 <details class="card">
   <summary><strong>Grazing History (Session Intensity)</strong></summary>
+  {% if history %}
+  <p class="muted">Allocated LSU per grazing session, oldest first. Each bar represents one mob session; bar width does not represent duration. Open sessions are marked in the labels.</p>
+  <p class="muted">Values match the table's current LSU estimates and may change as mob stock changes.</p>
+  <div class="analytics-chart-wrap">
+    <canvas id="paddockGrazingHistoryChart" role="img" aria-label="Grazing session intensity in allocated LSU, oldest first. Exact values are in the table below.">Grazing session values are listed in the table below.</canvas>
+  </div>
+  <p id="paddockGrazingChartUnavailable" class="muted" hidden>The graph could not be loaded. Grazing history is available in the table below.</p>
+  <noscript><p>The graph requires JavaScript. Grazing history is available in the table below.</p></noscript>
+  <script id="paddockGrazingHistoryData" type="application/json">{{ grazing_history_chart | tojson }}</script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>
+  <script src="{{ url_for('static', filename='paddock_grazing_history.js') }}" defer></script>
+  {% endif %}
   <table>
     <thead><tr><th>Mob</th><th>Start</th><th>End</th><th>Fraction</th><th>Allocated LSU</th></tr></thead>
     <tbody>

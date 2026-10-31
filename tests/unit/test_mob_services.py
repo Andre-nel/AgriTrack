@@ -11,7 +11,7 @@ from app.models import (
     Paddock,
     StockLedgerEntry,
 )
-from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_balance_line_from_form
+from app.modules.mobs.services import adjust_mob_stock_from_form, reclassify_mob_stock_from_form
 from app.services.grazing_service import GrazingService
 from app.services.movement_service import MovementService
 
@@ -130,18 +130,18 @@ def test_adjust_mob_stock_from_form_records_log_note_with_event_type_tags(app):
         assert "Predator loss confirmed" in event.description
 
 
-def test_update_mob_balance_line_from_form_updates_balance_and_records_event(app):
+def test_reclassify_mob_stock_from_form_updates_balance_and_records_event(app):
     with app.app_context():
         mob, group_type = _create_mob_with_balance(head_count=5)
 
-        message = update_mob_balance_line_from_form(
+        message = reclassify_mob_stock_from_form(
             mob,
             {
                 "source_animal_group_type_id": str(group_type.id),
-                "head_count": "7",
+                "quantity": "2",
                 "sex": "ewe",
-                "age_class": "adult",
-                "note": "body condition improved",
+                "age_class": "old",
+                "note": "Age class corrected",
             },
         )
 
@@ -151,13 +151,13 @@ def test_update_mob_balance_line_from_form_updates_balance_and_records_event(app
         ).all()
         event = MobEvent.query.filter_by(mob_id=mob.id).first()
 
-        assert message == "Balance line updated"
-        assert sorted(balance.head_count for balance in balances) == [2, 5]
-        assert sum(balance.head_count for balance in balances) == 7
-        assert StockLedgerEntry.query.count() == 1
+        assert message == "Reclassified 2 head. Total head count unchanged."
+        assert [balance.head_count for balance in balances] == [3]
+        assert sum(balance.head_count for balance in mob.balances) == 5
+        assert StockLedgerEntry.query.count() == 2
         assert event is not None
-        assert event.tags_csv == "stock,balance edit,head adjustment,adjustment in,stock adjustment"
-        assert "body condition improved" in event.description
+        assert event.tags_csv == "stock,reclassification,adjustment out,adjustment in,stock adjustment"
+        assert "Age class corrected" in event.description
 
 
 def test_transfer_stock_between_mobs_records_log_notes_for_both_mobs(app):

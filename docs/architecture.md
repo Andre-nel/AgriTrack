@@ -64,7 +64,7 @@ Second-pass decomposition now started:
   filtering, timeline shaping, and chart payloads.
 - `mobs.forms`: mob movement, transfer, and split form parsing.
 - `mobs.presenters`: mob detail template payload assembly.
-- `mobs.services`: stock adjustment and balance-line edit business rules and transactions.
+- `mobs.services`: stock adjustment and partial/full reclassification business rules and transactions.
 
 ## Farm capacity and inventory history
 
@@ -150,9 +150,11 @@ a cohort. Exact cohort actions remain available on the mob's Manage Cohorts page
 Unspecified stock additions and upward recounts create fresh unrecorded cohorts.
 They must not inherit another population's observed state or breeding enrollment.
 Known transfers preserve identity/state and create lineage for partial transfers.
-Whole-type reclassification creates correction children rather than changing
-historical parent types. Female-state caches are cleared on non-female children;
-the original observations remain on their historical cohorts.
+Partial and whole-type reclassification allocate the requested quantity across
+source cohorts with the same proportional rounding rule and record that assumption
+in audit notes. Correction children preserve historical parent types, observations
+and any parent populations in other mobs. Female children inherit cached state;
+non-female children clear it. Existing destination cohorts remain intact.
 
 Each stock operation is atomic. Allocation distributions are updated per animal
 type alongside its cohort postings, followed by one grazing-history refresh per
@@ -166,11 +168,21 @@ the old grazing session is closed and its allocations retained, because deleting
 an allocation cascades to its LSU history. Remaining assignments enter a new
 session without a movement event; history is refreshed after stock posting.
 
-Existing history limitation outside this adjustment path: reclassification still
-rewrites allocations in place. A simultaneous head-count reduction that empties a
-camp can therefore delete that camp's allocation history. When this path is next
-changed, extend the timestamped session replacement to reclassification and cover
-depletion; changing cohort identity rules or rebuilding old history is not needed.
+The mob detail reclassification form accepts an explicit quantity and changes only
+sex or age class. Count corrections remain separate stock adjustments. It posts
+equal outgoing and incoming ledger quantities, plus one mob event, at the current
+timestamp. The inventory baseline is captured before mutation and grazing history
+is refreshed once after all postings, preserving the timing of classification and
+LSU changes. Validation or posting failures roll back the complete transaction.
+
+Reclassification allocates the quantity once across the source's paddock counts,
+then subtracts and adds identical shares within each paddock. Exact assignments
+retain each paddock's total animals and unrelated stock. Legacy percentage
+allocation normalization can round an empty paddock away; stock adjustments and
+reclassification share the timestamped session replacement helper so this retains
+historical sessions and allocations instead of deleting their history. The obsolete
+balance-edit route rejects stale forms without mutation. No REST/mobile schema
+change is involved.
 
 Android retains detailed v1 snapshots for compatibility but shows animal-type
 totals. Its offline cohort fragments are provisional: totals and head conservation
@@ -182,3 +194,21 @@ commands preserve their original meaning. Deploy the server before Android.
 Compatibility follow-up:
 
 - Split the compatibility `web` blueprint into domain blueprints once endpoint naming can change.
+
+## Orchard workspace
+
+The standalone `orchards` module owns the web layout editor and farm-scoped JSON
+endpoints. It uses the existing Flask/Jinja and Leaflet stack with local metre
+coordinates (`CRS.Simple`), independent of geographical maps and the water network.
+Rows generate stable spaces from an origin, orientation, spacing and signed
+position indices; extending either end preserves existing space and plant IDs.
+Individual plants are unassigned, planned or planted. Unknown historical planting
+dates stay unknown. Irrigation polylines and attached emitters are separate records.
+
+Each mutation claims an orchard revision with a conditional update, then validates
+and applies its changes in the same transaction. Constraints protect occupancy;
+farm deletion removes owned plants before cascading through orchard geometry.
+The initial owner-supplied layout and purchase observations live in a versioned
+fixture, imported explicitly and idempotently rather than during schema migration.
+See the [orchard module documentation](../app/modules/orchards/README.md) for the
+workflow, interfaces, provenance, deployment and verification instructions.

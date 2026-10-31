@@ -36,7 +36,9 @@ class WaterNetworkService:
     IMPORT_DEFAULT_TROUGH_CONNECTION_SOURCE_TYPES = {"cement_dam", "tank"}
     STORAGE_ASSET_TYPES = {"cement_dam", "tank", "ground_dam"}
     WATER_LEVEL_TYPES = {"pit", "cement_dam", "tank", "ground_dam", "weir", "trough"}
-    WATER_LEVEL_OPTIONS = ("empty", "low", "half", "high", "full")
+    LEGACY_WATER_LEVEL_OPTIONS = ("empty", "low", "half", "high", "full")
+    WATER_LEVEL_OPTIONS = (*LEGACY_WATER_LEVEL_OPTIONS, "overflowing")
+    OVERFLOWING_ASSET_TYPES = {"weir", "ground_dam"}
     WATER_LEVEL_ALERT_EXCLUDED_TYPES = {"weir"}
     CAPACITY_TYPES = WATER_LEVEL_TYPES
     SERVED_PADDOCK_TYPES = {"ground_dam", "weir", "trough"}
@@ -75,6 +77,14 @@ class WaterNetworkService:
     TRANSFER_SOURCE_TYPES = {"borehole", "cement_dam", "ground_dam", "pit", "tank", "weir"}
     TRANSFER_DESTINATION_TYPES = {"borehole", "cement_dam", "pit", "tank"}
     STATE_HISTORY_FIELDS = ("active", "status", "water_level")
+
+    @classmethod
+    def water_level_options_for_type(cls, asset_type: str) -> tuple[str, ...]:
+        if asset_type not in cls.WATER_LEVEL_TYPES:
+            return ()
+        if asset_type in cls.OVERFLOWING_ASSET_TYPES:
+            return cls.WATER_LEVEL_OPTIONS
+        return cls.LEGACY_WATER_LEVEL_OPTIONS
 
     @staticmethod
     def normalize_name(value: str | None) -> str:
@@ -268,7 +278,14 @@ class WaterNetworkService:
         )
         status_options = cls.STATUS_OPTIONS_BY_TYPE[asset_type]
         material_options = cls.MATERIAL_OPTIONS_BY_TYPE.get(asset_type)
-        water_level_options = set(cls.WATER_LEVEL_OPTIONS)
+        water_level_options = set(cls.water_level_options_for_type(asset_type))
+        if (
+            asset is not None
+            and asset.water_level == "overflowing"
+            and asset_type not in cls.OVERFLOWING_ASSET_TYPES
+            and "water_level" not in payload
+        ):
+            raise ValueError("Choose a valid water_level when changing an overflowing asset's type")
         windmill_size_options = set(cls.WINDMILL_SIZE_OPTIONS)
         weir_size_options = set(cls.WEIR_SIZE_OPTIONS)
         trough_size_options = set(cls.TROUGH_SIZE_OPTIONS)
@@ -859,7 +876,10 @@ class WaterNetworkService:
                     )
                 mirrored_water_level = cls._highest_known_water_level(source_water_levels)
                 if mirrored_water_level is not None:
-                    effective_water_levels[asset_id] = mirrored_water_level
+                    # Overflow describes the source, not the supplied trough.
+                    effective_water_levels[asset_id] = (
+                        "full" if mirrored_water_level == "overflowing" else mirrored_water_level
+                    )
 
             upstream_paths = cls._upstream_supply_paths(
                 asset_id,

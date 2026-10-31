@@ -27,6 +27,7 @@ from app.models.mobile import MobileAuthToken, MobileSyncCommand
 from app.models.mob import Mob
 from app.models.mob_inventory import MobInventoryBaselineGroup, MobInventoryStateHistory
 from app.models.mob_event import MobEvent
+from app.models.orchard import Orchard, OrchardEmitter, OrchardLine, OrchardPlant, OrchardRow, OrchardSpace
 from app.models.movement import MobLineage, MovementEvent, MovementEventMob
 from app.models.note_attachment import NoteAttachment
 from app.models.paddock import Paddock
@@ -76,6 +77,12 @@ from app.models.water import WaterAsset, WaterAssetServedPaddock, WaterAssetStat
 from app.models.water_asset_event import WaterAssetEvent
 
 __all__ = [
+    "Orchard",
+    "OrchardEmitter",
+    "OrchardLine",
+    "OrchardPlant",
+    "OrchardRow",
+    "OrchardSpace",
     "AnimalGroupBalance",
     "AnimalGroupType",
     "AnimalCohort",

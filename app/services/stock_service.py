@@ -135,75 +135,72 @@ class StockService:
     @classmethod
     def reclassify_group_stock(
         cls, mob: Mob, source_group_id: str, target_group: AnimalGroupType,
-        target_head_count: int, note: str | None = None, event_time: datetime | None = None,
+        *, quantity: int, note: str | None = None, event_time: datetime | None = None,
     ) -> list[StockLedgerEntry]:
-        """Reclassify this mob's entire type without rewriting cohort history."""
+        """Change classification without changing heads; callers own the transaction."""
         from app.services.allocation_distribution_service import AllocationDistributionService
         from app.services.cohort_service import CohortService
         from app.services.grazing_history_service import GrazingHistoryService
 
-        if isinstance(target_head_count, bool) or not isinstance(target_head_count, int):
-            raise ValueError("Head count must be a whole number")
-        if target_head_count < 0:
-            raise ValueError("Head count must be greater than or equal to 0")
-        if mob.status != "active":
+        if isinstance(quantity, bool) or not isinstance(quantity, int):
+            raise ValueError("Number to reclassify must be a whole number")
+        if quantity <= 0:
+            raise ValueError("Number to reclassify must be greater than 0")
+        if mob is None or db.session.get(Mob, str(mob.id)) is None or mob.status != "active":
             raise ValueError("Selected mob must be active")
         if target_group is None or db.session.get(AnimalGroupType, str(target_group.id)) is None:
             raise ValueError("Selected animal group type is invalid")
-        if str(source_group_id) == str(target_group.id):
-            return cls.adjust_group_stock(
-                mob_id=mob.id, farm_id=mob.farm_id, animal_group_type_id=source_group_id,
-                event_type=StockEventType.count, quantity=target_head_count,
-                note=note, event_time=event_time,
-            )
         balances = cls.group_balances(mob.id, source_group_id)
         if not balances:
             raise ValueError("Selected balance line is no longer available. Refresh and try again.")
+        source_group = balances[0].animal_group_type
+        if (target_group.species, target_group.breed) != (source_group.species, source_group.breed):
+            raise ValueError("Reclassification must keep the selected species and breed")
+        species = cls.normalize_species(target_group.species)
+        cls.normalize_sex(species, target_group.sex)
+        cls.normalize_age_class(species, target_group.age_class)
+        if (target_group.sex, target_group.age_class) == (source_group.sex, source_group.age_class):
+            raise ValueError("Choose a different sex or age class to reclassify animals")
         current = sum(int(row.head_count) for row in balances)
-        removals = apportion_counts(
-            max(0, current - target_head_count),
+        if quantity > current:
+            raise ValueError("Number to reclassify exceeds the available balance")
+        shares = apportion_counts(
+            quantity,
             [(str(row.id), int(row.head_count)) for row in balances],
         )
         posted_at = MobInventoryService.normalize_timestamp(event_time)
-        if target_head_count < current and len(balances) > 1:
+        if len(balances) > 1:
             note = cls.proportional_note(note)
+        # Capture the original composition before allocations or cohorts change.
+        MobInventoryService.ensure_baseline(mob)
         AllocationDistributionService.apply_reclassification(
             mob, source_group_id=str(source_group_id), target_group_id=str(target_group.id),
-            target_head_count=target_head_count,
+            quantity=quantity, effective_at=posted_at,
         )
         entries = []
         for balance in balances:
+            amount = shares[str(balance.id)]
+            if not amount:
+                continue
             parent = CohortService.ensure_balance_cohort(balance)
-            original_count = int(balance.head_count)
-            retained_count = original_count - removals[str(balance.id)]
-            child = None
-            if retained_count:
-                state = {} if CohortService.is_female_group(target_group) else {
-                    "reproductive_state": "not_recorded", "expected_litter_size": "not_recorded",
-                    "lactation_state": "not_recorded", "offspring_at_foot": "not_recorded",
-                }
-                child = CohortService.child_cohort(
-                    parent, quantity=retained_count, reason="correction",
-                    animal_group_type_id=str(target_group.id), **state,
-                )
+            state = {} if CohortService.is_female_group(target_group) else {
+                "reproductive_state": "not_recorded", "expected_litter_size": "not_recorded",
+                "lactation_state": "not_recorded", "offspring_at_foot": "not_recorded",
+            }
+            child = CohortService.child_cohort(
+                parent, quantity=amount, reason="correction",
+                animal_group_type_id=str(target_group.id), **state,
+            )
             entries.append(cls.adjust_stock(
                 mob_id=mob.id, farm_id=mob.farm_id, animal_group_type_id=source_group_id,
                 cohort_id=parent.id, event_type=StockEventType.adjustment_out,
-                quantity=original_count, note=note, event_time=posted_at,
+                quantity=amount, note=note, event_time=posted_at,
                 sync_grazing_history=False, sync_allocation_distribution=False,
             ))
-            if child is not None:
-                entries.append(cls.adjust_stock(
-                    mob_id=mob.id, farm_id=mob.farm_id, animal_group_type_id=target_group.id,
-                    cohort_id=child.id, event_type=StockEventType.adjustment_in,
-                    quantity=retained_count, note=note, event_time=posted_at,
-                    sync_grazing_history=False, sync_allocation_distribution=False,
-                ))
-        if target_head_count > current:
-            entries.extend(cls.adjust_group_stock(
+            entries.append(cls.adjust_stock(
                 mob_id=mob.id, farm_id=mob.farm_id, animal_group_type_id=target_group.id,
-                event_type=StockEventType.adjustment_in, quantity=target_head_count - current,
-                note=note, event_time=posted_at,
+                cohort_id=child.id, event_type=StockEventType.adjustment_in,
+                quantity=amount, note=note, event_time=posted_at,
                 sync_grazing_history=False, sync_allocation_distribution=False,
             ))
         GrazingHistoryService.sync_live_history_for_mob(mob, effective_at=posted_at)

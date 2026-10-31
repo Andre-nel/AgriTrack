@@ -1014,8 +1014,15 @@ def bootstrap():
                 "water_level_asset_types": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
                 "water_level_options": [
                     {"value": option, "label": option.replace("_", " ").title()}
-                    for option in WaterNetworkService.WATER_LEVEL_OPTIONS
+                    for option in WaterNetworkService.LEGACY_WATER_LEVEL_OPTIONS
                 ],
+                "water_level_options_by_type": {
+                    asset_type: [
+                        {"value": option, "label": option.replace("_", " ").title()}
+                        for option in WaterNetworkService.water_level_options_for_type(asset_type)
+                    ]
+                    for asset_type in sorted(WaterNetworkService.WATER_LEVEL_TYPES)
+                },
             },
         }
     )

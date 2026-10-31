@@ -161,6 +161,7 @@ def test_build_water_asset_state_report_carries_baseline_and_summarizes(app):
             "2": "Half",
             "3": "High",
             "4": "Full",
+            "5": "Overflowing",
         }
         assert water_level_panel["datasets"] == [
             {"label": "History Tank", "values": [1, 2, 2, 2, 2]},

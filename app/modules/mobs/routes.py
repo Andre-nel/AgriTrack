@@ -15,7 +15,7 @@ from app.modules.mobs.forms import (
     parse_transfer_rows,
 )
 from app.modules.mobs.presenters import build_mob_cohorts_context, build_mob_detail_context
-from app.modules.mobs.services import adjust_mob_stock_from_form, update_mob_balance_line_from_form
+from app.modules.mobs.services import adjust_mob_stock_from_form, reclassify_mob_stock_from_form
 from app.services.cohort_service import CohortService
 from app.services.mob_event_service import MobEventService
 from app.services.mob_service import MobService
@@ -134,9 +134,22 @@ def register_legacy_routes(bp) -> None:
 
     @bp.post("/mobs/<mob_id>/balances/edit")
     def mob_edit_balance_form(mob_id):
+        _get_active_mob_or_404(mob_id)
+        flash(
+            "Balance editing has changed. Refresh the page to reclassify animals; "
+            "use Adjust Stock for count corrections.",
+            "error",
+        )
+        return redirect(url_for("web.mob_detail", mob_id=mob_id))
+
+    @bp.post("/mobs/<mob_id>/balances/reclassify")
+    def mob_reclassify_form(mob_id):
         mob = _get_active_mob_or_404(mob_id)
         try:
-            flash(update_mob_balance_line_from_form(mob, request.form), "success")
+            flash(reclassify_mob_stock_from_form(mob, request.form), "success")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Reclassification failed due to a concurrent stock update. Refresh and retry.", "error")
         except ValueError as exc:
             flash(str(exc), "error")
 

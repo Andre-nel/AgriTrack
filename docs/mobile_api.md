@@ -212,12 +212,22 @@ Important response fields:
     "task_priorities": [],
     "water_status_options_by_type": {},
     "water_level_asset_types": [],
-    "water_level_options": []
+    "water_level_options": [],
+    "water_level_options_by_type": {}
   }
 }
 ```
 
 ## Farm Snapshot
+
+Water editors should use `form_options.water_level_options_by_type[asset_type]`,
+whose entries have the existing `{ "value": "...", "label": "..." } shape.
+Weirs and ground dams include `{ "value": "overflowing", "label": "Overflowing" }`
+after Full. Other asset types cannot record Overflowing. For older servers that
+omit the type-specific entry, fall back to `water_level_options`; this legacy
+field retains Empty, Low, Half, High, and Full for older clients. The
+`water_asset_status.update` command uses the same server-side restrictions.
+Supplied troughs display Full when their source is Overflowing.
 
 `GET /api/mobile/v1/farms/<farm_id>/snapshot`
 

@@ -70,6 +70,7 @@
   const storageWaterAssetTypes = new Set(["cement_dam", "tank", "ground_dam", "weir", "trough"]);
   const levelOutlineWaterAssetTypes = new Set(["cement_dam", "tank", "trough"]);
   const waterLevelVisuals = {
+    overflowing: { ratio: 1, outline: "#1d4ed8" },
     full: { ratio: 1, outline: "#2563eb" },
     high: { ratio: 0.75, outline: "#3b82f6" },
     half: { ratio: 0.5, outline: "#60a5fa" },

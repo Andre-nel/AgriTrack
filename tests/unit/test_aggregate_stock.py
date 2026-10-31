@@ -5,11 +5,13 @@ import pytest
 from app.extensions import db
 from app.models import (
     AnimalCohort, AnimalCohortLineage, AnimalGroupBalance, AnimalGroupType,
-    Farm, GrazingSession, Mob, MovementEvent, Paddock, StockLedgerEntry,
+    Farm, FemaleStatusObservation, GrazingSession, Mob, MobInventoryStateHistory,
+    MovementEvent, Paddock, StockLedgerEntry,
 )
 from app.models.stock_ledger import StockEventType
 from app.services.allocation_distribution_service import AllocationDistributionService
 from app.services.cohort_service import CohortService
+from app.services.grazing_history_service import GrazingHistoryService
 from app.services.movement_service import MovementService
 from app.services.stock_groups import apportion_counts
 from app.services.stock_service import StockService
@@ -277,8 +279,8 @@ def test_reclassification_preserves_shared_parent_and_existing_target(stock):
     ])
     db.session.commit()
     source_ids = {row.id for row in parents}
-    StockService.reclassify_group_stock(source, group.id, target, 8)
-    assert StockService.group_head_count(source.id, group.id) == 0
+    StockService.reclassify_group_stock(source, group.id, target, quantity=8)
+    assert StockService.group_head_count(source.id, group.id) == 2
     assert StockService.group_head_count(source.id, target.id) == 13
     assert StockService.group_head_count(other_mob.id, group.id) == 2
     assert all(row.animal_group_type_id == group.id for row in parents)
@@ -286,26 +288,174 @@ def test_reclassification_preserves_shared_parent_and_existing_target(stock):
     assert sorted(row.quantity for row in children) == [3, 5]
     assert all(row.reason == "correction" for row in children)
     assert all(row.child_cohort.animal_group_type_id == target.id for row in children)
+    assert counts_by_state(source, group) == {"pregnant": 1, "not_pregnant": 1}
+    baseline = MobInventoryStateHistory.query.filter_by(mob_id=source.id).one()
+    assert {row.animal_group_type_id: row.head_count for row in baseline.baseline_groups} == {
+        group.id: 10, target.id: 5,
+    }
+    assert all(row.ledger_net == 0 for row in baseline.baseline_groups)
 
 
-def test_reclassification_increase_adds_unrecorded_excess_and_zero_removes(stock):
+@pytest.mark.parametrize("quantity,expected_source,expected_target", [
+    (1, {"pregnant": 5, "not_pregnant": 4}, {"pregnant": 1}),
+    (10, {}, {"pregnant": 6, "not_pregnant": 4}),
+])
+def test_reclassification_only_creates_children_for_selected_shares(
+    stock, quantity, expected_source, expected_target,
+):
+    _farm, source, _other, group, parents = stock
+    target = StockService.get_or_create_group_type("Sheep", "Merino", "ewe", "old")
+    entries = StockService.reclassify_group_stock(source, group.id, target, quantity=quantity)
+    assert counts_by_state(source, group) == expected_source
+    assert counts_by_state(source, target) == expected_target
+    assert sum(row.quantity for row in AnimalCohortLineage.query.all()) == quantity
+    assert AnimalCohortLineage.query.count() == len(expected_target)
+    assert AnimalCohort.query.count() == 2 + len(expected_target)
+    assert all(row.animal_group_type_id == group.id for row in parents)
+    assert sum(row.quantity for row in entries if row.event_type == StockEventType.adjustment_in) == quantity
+    assert sum(row.quantity for row in entries if row.event_type == StockEventType.adjustment_out) == quantity
+    assert all("proportionally" in row.note for row in entries)
+
+
+def test_reclassify_26_of_100_preserves_total_and_syncs_final_state_once(stock, monkeypatch):
+    _farm, source, _other, group, _parents = stock
+    for balance in StockService.group_balances(source.id, group.id):
+        balance.head_count *= 10
+    target = StockService.get_or_create_group_type("Sheep", "Merino", "ewe", "old")
+    db.session.commit()
+    posted_at = datetime(2026, 10, 17, 10, 0, tzinfo=timezone.utc)
+    sync_calls = []
+
+    def sync_final_state(mob, *, effective_at):
+        sync_calls.append(effective_at)
+        assert mob.id == source.id
+        assert StockService.group_head_count(source.id, group.id) == 74
+        assert StockService.group_head_count(source.id, target.id) == 26
+
+    monkeypatch.setattr(GrazingHistoryService, "sync_live_history_for_mob", sync_final_state)
+    entries = StockService.reclassify_group_stock(
+        source, group.id, target, quantity=26, note="Age corrected", event_time=posted_at,
+    )
+    assert counts_by_state(source, group) == {"pregnant": 44, "not_pregnant": 30}
+    assert counts_by_state(source, target) == {"pregnant": 16, "not_pregnant": 10}
+    assert sync_calls == [posted_at]
+    assert all(row.event_time == posted_at for row in entries)
+    assert all(row.note == "Age corrected Cohort quantities allocated proportionally." for row in entries)
+
+
+@pytest.mark.parametrize("sex,clears_state", [("ewe", False), ("ram", True), ("mixed", True)])
+def test_reclassification_preserves_observations_and_parent_state(stock, sex, clears_state):
+    farm, source, _other, group, parents = stock
+    parent = parents[0]
+    parent.expected_litter_size = "twins"
+    parent.lactation_state = "lactating"
+    parent.offspring_at_foot = "single"
+    fields = ("reproductive_state", "expected_litter_size", "lactation_state", "offspring_at_foot")
+    original_state = {field: getattr(parent, field) for field in fields}
+    observation = FemaleStatusObservation(
+        farm_id=farm.id, mob_id=source.id, source_cohort_id=parent.id,
+        result_cohort_id=parent.id, observed_on=datetime(2026, 10, 1).date(), quantity=6,
+        **original_state,
+    )
+    db.session.add(observation)
+    target = StockService.get_or_create_group_type("Sheep", "Merino", sex, "old")
+    db.session.commit()
+    original_observation = {column.name: getattr(observation, column.name) for column in observation.__table__.columns}
+
+    StockService.reclassify_group_stock(source, group.id, target, quantity=1)
+    db.session.flush()
+    db.session.expire_all()
+    child = StockService.group_balances(source.id, target.id)[0].cohort
+    assert {field: getattr(child, field) for field in fields} == (
+        dict.fromkeys(fields, "not_recorded") if clears_state else original_state
+    )
+    assert {field: getattr(parent, field) for field in fields} == original_state
+    assert parent.animal_group_type_id == group.id
+    assert {column.name: getattr(observation, column.name) for column in observation.__table__.columns} == original_observation
+
+
+@pytest.mark.parametrize("quantity", [0, -1, 11, 1.5, True, "3"])
+def test_reclassification_rejects_invalid_quantity_before_writing(stock, quantity):
     _farm, source, _other, group, _parents = stock
     target = StockService.get_or_create_group_type("Sheep", "Merino", "ewe", "old")
-    StockService.reclassify_group_stock(source, group.id, target, 12)
-    assert counts_by_state(source, target) == {"pregnant": 6, "not_pregnant": 4, "not_recorded": 2}
-    assert sum(row.quantity for row in AnimalCohortLineage.query.all()) == 10
-    StockService.reclassify_group_stock(source, target.id, group, 0)
+    db.session.commit()
+    with pytest.raises(ValueError):
+        StockService.reclassify_group_stock(source, group.id, target, quantity=quantity)
+    assert StockService.group_head_count(source.id, group.id) == 10
     assert StockService.group_head_count(source.id, target.id) == 0
-    assert StockService.group_head_count(source.id, group.id) == 0
-    assert AnimalCohortLineage.query.count() == 2
+    assert StockLedgerEntry.query.count() == 0
+    assert AnimalCohortLineage.query.count() == 0
+    assert AnimalCohort.query.count() == 2
+    assert MobInventoryStateHistory.query.count() == 0
 
 
-def test_reclassification_to_nonfemale_clears_only_child_current_state(stock):
-    _farm, source, _other, group, parents = stock
-    target = StockService.get_or_create_group_type("Sheep", "Merino", "ram", "adult")
-    StockService.reclassify_group_stock(source, group.id, target, 10)
-    assert all(row.cohort.reproductive_state == "not_recorded" for row in StockService.group_balances(source.id, target.id))
-    assert parents[0].reproductive_state == "pregnant"
+@pytest.mark.parametrize("target_changes", [
+    {"species": "Goat"}, {"breed": "Dorper"}, {"sex": "invalid"}, {"age_class": "invalid"},
+])
+def test_reclassification_rejects_changed_taxonomy_and_invalid_classification(stock, target_changes):
+    _farm, source, _other, group, _parents = stock
+    attributes = dict(species="Sheep", breed="Merino", sex="ewe", age_class="old")
+    attributes.update(target_changes)
+    target = AnimalGroupType(**attributes)
+    db.session.add(target)
+    db.session.commit()
+    with pytest.raises(ValueError):
+        StockService.reclassify_group_stock(source, group.id, target, quantity=2)
+    assert StockService.group_head_count(source.id, group.id) == 10
+    assert StockLedgerEntry.query.count() == 0
+    assert AnimalCohortLineage.query.count() == 0
+    assert MobInventoryStateHistory.query.count() == 0
+
+
+@pytest.mark.parametrize("invalid_selection", ["unchanged", "missing_source", "empty_source", "archived", "missing_mob", "missing_target"])
+def test_reclassification_rejects_unavailable_or_unchanged_selection(stock, invalid_selection):
+    farm, source, other, group, _parents = stock
+    target = StockService.get_or_create_group_type("Sheep", "Merino", "ewe", "old")
+    source_group_id = group.id
+    if invalid_selection == "unchanged":
+        target = group
+    elif invalid_selection == "missing_source":
+        source_group_id = "missing"
+    elif invalid_selection == "empty_source":
+        source = other
+    elif invalid_selection == "archived":
+        source.status = "archived"
+    elif invalid_selection == "missing_mob":
+        source = Mob(id="missing", farm_id=farm.id, status="active")
+    elif invalid_selection == "missing_target":
+        target = AnimalGroupType(id="missing", species="Sheep", breed="Merino", sex="ewe", age_class="old")
+    db.session.commit()
+    with pytest.raises(ValueError):
+        StockService.reclassify_group_stock(source, source_group_id, target, quantity=2)
+    assert StockLedgerEntry.query.count() == 0
+    assert AnimalCohortLineage.query.count() == 0
+    assert MobInventoryStateHistory.query.count() == 0
+
+
+def test_reclassification_posting_failure_is_reverted_by_caller_rollback(stock, monkeypatch):
+    _farm, source, _other, group, _parents = stock
+    target = StockService.get_or_create_group_type("Sheep", "Merino", "ewe", "old")
+    db.session.commit()
+    real_adjust = StockService.adjust_stock
+    calls = 0
+
+    def fail_second(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ValueError("Simulated posting failure")
+        return real_adjust(**kwargs)
+
+    monkeypatch.setattr(StockService, "adjust_stock", fail_second)
+    with pytest.raises(ValueError, match="Simulated"):
+        StockService.reclassify_group_stock(source, group.id, target, quantity=3)
+    db.session.rollback()
+    assert counts_by_state(source, group) == {"pregnant": 6, "not_pregnant": 4}
+    assert StockService.group_head_count(source.id, target.id) == 0
+    assert StockLedgerEntry.query.count() == 0
+    assert AnimalCohortLineage.query.count() == 0
+    assert AnimalCohort.query.count() == 2
+    assert MobInventoryStateHistory.query.count() == 0
 
 
 def test_transfer_sync_keeps_all_types_and_paddock_totals(stock):

@@ -445,7 +445,21 @@ class AllocationDistributionService:
             session.mob,
             overrides={group_id: int(final_head_count or 0)},
         )
-        payloads = cls.allocations_from_count_map(session.mob, counts_by_paddock, context=final_context)
+        cls._rewrite_assignments_preserving_history(
+            session, counts_by_paddock, context=final_context, effective_at=effective_at,
+        )
+
+    @classmethod
+    def _rewrite_assignments_preserving_history(
+        cls,
+        session: GrazingSession,
+        counts_by_paddock: dict[str, dict[str, int]],
+        *,
+        context: dict[str, dict],
+        effective_at: datetime | None,
+    ) -> None:
+        """Keep retired allocations so their past LSU intervals remain intact."""
+        payloads = cls.allocations_from_count_map(session.mob, counts_by_paddock, context=context)
         remaining_paddocks = {str(row["paddock_id"]) for row in payloads}
         if any(str(row.paddock_id) not in remaining_paddocks for row in session.allocations):
             from app.services.grazing_history_service import GrazingHistoryService
@@ -466,7 +480,7 @@ class AllocationDistributionService:
                 for boundary in history_boundaries
             ):
                 raise ValueError(
-                    "Stock adjustment time precedes the current grazing allocation history. "
+                    "Stock change time precedes the current grazing allocation history. "
                     "Use a current event time or review the historical correction separately."
                 )
             session.end_at = changed_at
@@ -479,7 +493,7 @@ class AllocationDistributionService:
             )
             db.session.add(session)
             db.session.flush()
-        cls.rewrite_session_assignments(session, counts_by_paddock, context=final_context)
+        cls.rewrite_session_assignments(session, counts_by_paddock, context=context)
 
     @classmethod
     def apply_reclassification(
@@ -488,7 +502,8 @@ class AllocationDistributionService:
         *,
         source_group_id: str,
         target_group_id: str,
-        target_head_count: int,
+        quantity: int,
+        effective_at: datetime | None = None,
     ) -> None:
         session = cls.active_session_for_mob(mob)
         if session is None:
@@ -503,30 +518,39 @@ class AllocationDistributionService:
             for paddock_id, group_counts in counts_by_paddock.items()
             if group_counts.get(source_id, 0) > 0
         }
-        for group_counts in counts_by_paddock.values():
-            group_counts.pop(source_id, None)
+        source_count = int(old_context.get(source_id, {}).get("head_count", 0))
+        if source_id == target_id:
+            raise ValueError("Choose a different classification")
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= source_count:
+            raise ValueError("Reclassification quantity must be within the available source count")
+        if sum(source_distribution.values()) != source_count:
+            raise ValueError("Source paddock assignments do not match its available count")
 
-        weights = (
-            [(paddock_id, count) for paddock_id, count in source_distribution.items()]
-            if source_distribution
-            else cls._session_split_weights(session, counts_by_paddock, old_context)
-        )
-        additions = cls.split_count(int(target_head_count or 0), weights)
-        for paddock_id, addition in additions.items():
-            if addition <= 0:
+        # Apportion once: independently rounding removals and additions could
+        # silently move an animal to a different paddock.
+        transfers = cls.split_count(quantity, list(source_distribution.items()))
+        for paddock_id, transferred in transfers.items():
+            if transferred <= 0:
                 continue
-            paddock_counts = counts_by_paddock.setdefault(paddock_id, {})
-            paddock_counts[target_id] = paddock_counts.get(target_id, 0) + addition
+            paddock_counts = counts_by_paddock[paddock_id]
+            remaining = paddock_counts[source_id] - transferred
+            if remaining > 0:
+                paddock_counts[source_id] = remaining
+            else:
+                paddock_counts.pop(source_id)
+            paddock_counts[target_id] = paddock_counts.get(target_id, 0) + transferred
 
         existing_target_count = int(old_context.get(target_id, {}).get("head_count", 0))
         final_context = cls.balance_context(
             mob,
             overrides={
-                source_id: 0,
-                target_id: existing_target_count + int(target_head_count or 0),
+                source_id: source_count - quantity,
+                target_id: existing_target_count + quantity,
             },
         )
-        cls.rewrite_session_assignments(session, counts_by_paddock, context=final_context)
+        cls._rewrite_assignments_preserving_history(
+            session, counts_by_paddock, context=final_context, effective_at=effective_at,
+        )
 
     @classmethod
     def _session_split_weights(

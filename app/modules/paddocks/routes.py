@@ -349,6 +349,19 @@ def register_legacy_routes(bp) -> None:
             paddock=paddock,
             stock_summary=stock_summary,
             history=history,
+            grazing_history_chart=[
+                {
+                    "mob_name": row["mob_name"],
+                    "start": row["allocation"].grazing_session.start_at.isoformat(sep=" "),
+                    "end": (
+                        row["allocation"].grazing_session.end_at.isoformat(sep=" ")
+                        if row["allocation"].grazing_session.end_at else None
+                    ),
+                    "allocated_lsu": row["allocated_lsu"],
+                    "allocation_pct": row["allocation_pct"],
+                }
+                for row in reversed(history)
+            ],
             area_ha=area_ha,
             current_lsu=current_lsu,
             current_activity=current_activity,

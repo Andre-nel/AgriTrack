@@ -31,7 +31,7 @@
   const assetTypeLabels = config.assetTypeLabels || {};
   const statusOptionsByType = config.statusOptionsByType || {};
   const materialOptionsByType = config.materialOptionsByType || {};
-  const waterLevelOptions = Array.isArray(config.waterLevelOptions) ? config.waterLevelOptions : [];
+  const waterLevelOptionsByType = config.waterLevelOptionsByType || {};
   const windmillSizeOptions = Array.isArray(config.windmillSizeOptions) ? config.windmillSizeOptions : [];
   const weirSizeOptions = Array.isArray(config.weirSizeOptions) ? config.weirSizeOptions : [];
   const troughSizeOptions = Array.isArray(config.troughSizeOptions) ? config.troughSizeOptions : [];
@@ -271,7 +271,7 @@
     if (showWaterLevel) {
       rebuildSingleSelect(
         fieldControls.water_level,
-        waterLevelOptions,
+        waterLevelOptionsByType[assetType] || [],
         selectedValues.water_level !== undefined
           ? selectedValues.water_level
           : fieldControls.water_level.value
@@ -528,6 +528,19 @@
     activeRequestId += 1;
     resetModalState();
     clearOpenAssetQueryParam();
+  }
+
+  const createForm = document.querySelector("#add-water-asset-panel form");
+  if (createForm) {
+    const createType = createForm.querySelector('[name="asset_type"]');
+    const createLevel = createForm.querySelector('[name="water_level"]');
+    const syncCreateWaterLevel = () => {
+      const options = waterLevelOptionsByType[normalizeKey(createType.value)] || [];
+      rebuildSingleSelect(createLevel, options, createLevel.value);
+      createLevel.disabled = options.length === 0;
+    };
+    createType.addEventListener("change", syncCreateWaterLevel);
+    syncCreateWaterLevel();
   }
 
   if (assetTypeSelect) {

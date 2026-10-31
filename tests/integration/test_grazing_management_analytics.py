@@ -189,12 +189,12 @@ def test_balance_reclassification_updates_grazing_history_once(client, app):
         paddock_id = str(north.id)
 
     response = client.post(
-        f"/mobs/{mob_id}/balances/edit",
+        f"/mobs/{mob_id}/balances/reclassify",
         data={
             "source_animal_group_type_id": source_group_id,
             "sex": "wether",
             "age_class": "young",
-            "head_count": "6",
+            "quantity": "6",
             "note": "Adjusted classification while grazing",
         },
     )

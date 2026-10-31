@@ -85,6 +85,13 @@ def test_mobile_api_documented_commands_match_bootstrap_contract(client, app):
     assert "water_status_options_by_type" in form_options
     assert "water_level_asset_types" in form_options
     assert "water_level_options" in form_options
+    assert [option["value"] for option in form_options["water_level_options"]] == [
+        "empty", "low", "half", "high", "full",
+    ]
+    for asset_type, options in form_options["water_level_options_by_type"].items():
+        assert ({"value": "overflowing", "label": "Overflowing"} in options) == (
+            asset_type in {"weir", "ground_dam"}
+        )
 
 
 def test_mobile_api_error_shape_matches_documentation(client):

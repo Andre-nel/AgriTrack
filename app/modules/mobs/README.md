@@ -40,6 +40,37 @@ The existing female-status POST route redirects back to cohort management.
 Cohort stock forms use `/cohorts/adjust` and `/cohorts/transfer` under the mob URL
 and share stock services with ordinary controls.
 
+## Reclassifying animals
+
+Select a balance line in the mob detail page, then use **Reclassify animals** to
+change the sex or age class of some or all of its animals. Species and breed stay
+fixed. Enter a whole-head quantity or use **All animals**; the preview shows the
+source remainder and the destination total, including animals already classified
+there. The mob's total head count stays unchanged. Use **Adjust Stock** for count
+corrections; selecting a line also populates that form.
+
+`POST /mobs/<mob_id>/balances/reclassify` accepts
+`source_animal_group_type_id`, `quantity`, `sex`, `age_class` and an optional
+`note`. It rejects unchanged classifications and quantities outside the current
+source balance. The obsolete `/balances/edit` route only asks the user to refresh
+and never interprets an old final head count as a reclassification quantity.
+
+Reclassification posts at the current time in one transaction. Whole animals are
+allocated proportionally across the source cohorts with deterministic rounding;
+the audit notes record this allocation assumption. Reclassified shares become
+correction children. Remaining parents, historical observations and populations
+in other mobs are preserved. Female children inherit female state; non-female
+children clear those cached fields. Existing destination cohorts remain intact.
+
+The same quantity is removed and added within each source paddock, preserving its
+total animals and unrelated stock. Legacy percentage allocations are normalized
+with whole-head rounding; if this removes an empty paddock, a shared session
+replacement helper retains its historical allocation records. Equal outgoing and
+incoming ledger postings and one mob event share a timestamp. Inventory baselines
+are captured before mutation, and grazing history refreshes after all postings so
+the classification and LSU change starts at that timestamp. Failures roll back the
+entire operation. This web form requires no REST/mobile schema or database change.
+
 ## Transfers to existing mobs
 
 The Transfer Stock To Existing Mob card accepts multiple rows, each with its own

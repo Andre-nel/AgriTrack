@@ -11,6 +11,7 @@ class Farm(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     default_stocking_rate_ha_per_lsu = db.Column(db.Numeric(8, 2), nullable=False, default=6)
 
     paddocks = db.relationship("Paddock", back_populates="farm", cascade="all, delete-orphan")
+    orchards = db.relationship("Orchard", back_populates="farm", cascade="all, delete-orphan", passive_deletes=True)
     mobs = db.relationship("Mob", back_populates="farm", cascade="all, delete-orphan")
     rainfall_records = db.relationship(
         "RainfallRecord", back_populates="farm", cascade="all, delete-orphan"

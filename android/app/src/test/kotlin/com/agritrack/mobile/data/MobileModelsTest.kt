@@ -7,6 +7,26 @@ import org.junit.Test
 
 class MobileModelsTest {
     @Test
+    fun waterLevelsUseTypeSpecificOptionsWithLegacyFallback() {
+        val legacy = JSONArray().put(JSONObject().put("value", "full").put("label", "Full"))
+        val extended = JSONArray(legacy.toString()).put(
+            JSONObject().put("value", "overflowing").put("label", "Overflowing")
+        )
+        val json = JSONObject().put("water_level_options", legacy)
+        val olderServer = MobileFormOptions.fromJson(json)
+        assertEquals(listOf("full"), olderServer.waterLevelOptionsForType("weir").map { it.value })
+        json.put("water_level_options_by_type", JSONObject()
+            .put("weir", extended).put("ground_dam", extended).put("tank", legacy))
+        val currentServer = MobileFormOptions.fromJson(json)
+        for (type in listOf("weir", "ground_dam")) {
+            assertEquals(listOf("full", "overflowing"), currentServer.waterLevelOptionsForType(type).map { it.value })
+        }
+        for (type in listOf("tank", "trough")) {
+            assertEquals(listOf("full"), currentServer.waterLevelOptionsForType(type).map { it.value })
+        }
+    }
+
+    @Test
     fun snapshotParserKeepsFarmCountsAndMobs() {
         val snapshot = FarmSnapshot.fromJson(
             JSONObject()

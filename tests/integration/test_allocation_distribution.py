@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from app.extensions import db
 from app.models import AnimalGroupBalance, AnimalGroupType, Farm, GrazingSession, Mob, Paddock
 from app.models.stock_ledger import StockEventType
-from app.modules.mobs.services import update_mob_balance_line_from_form
+from app.modules.mobs.services import reclassify_mob_stock_from_form
 from app.services.gate_service import GateService
 from app.services.movement_service import MovementService
 from app.services.stock_service import StockService
@@ -168,13 +168,13 @@ def test_reclassification_preserves_source_paddock_distribution(app):
     )
     db.session.commit()
 
-    update_mob_balance_line_from_form(
+    reclassify_mob_stock_from_form(
         mob,
         {
             "source_animal_group_type_id": str(ram.id),
             "sex": "wether",
             "age_class": "adult",
-            "head_count": "8",
+            "quantity": "8",
         },
     )
 
@@ -185,8 +185,8 @@ def test_reclassification_preserves_source_paddock_distribution(app):
         age_class="adult",
     ).one()
     counts = _active_counts(str(mob.id))
-    assert counts[str(north.id)] == {str(wether.id): 6}
-    assert counts[str(south.id)] == {str(wether.id): 2}
+    assert counts[str(north.id)] == {str(ram.id): 1, str(wether.id): 6}
+    assert counts[str(south.id)] == {str(ram.id): 1, str(wether.id): 2}
 
 
 def test_new_animal_type_distributes_by_current_mob_split(app):

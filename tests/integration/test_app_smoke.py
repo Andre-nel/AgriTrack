@@ -2182,7 +2182,7 @@ def test_paddock_rename_rejects_blank_and_duplicate_names(client, app, tmp_path)
     assert "<name>South Camp</name>" not in kml_text
 
 
-def test_mob_balance_edit_reclassifies_and_records_change(client, app):
+def test_mob_balance_reclassification_records_partial_change(client, app):
     with app.app_context():
         farm = Farm(name="Reclass Farm", timezone="SAST")
         db.session.add(farm)
@@ -2209,12 +2209,12 @@ def test_mob_balance_edit_reclassifies_and_records_change(client, app):
         source_group_id = str(source_group.id)
 
     response = client.post(
-        f"/mobs/{mob_id}/balances/edit",
+        f"/mobs/{mob_id}/balances/reclassify",
         data={
             "source_animal_group_type_id": source_group_id,
             "sex": "wether",
             "age_class": "young",
-            "head_count": "10",
+            "quantity": "10",
             "note": "Castrated and aged up",
         },
     )
@@ -2225,7 +2225,7 @@ def test_mob_balance_edit_reclassifies_and_records_change(client, app):
             mob_id=mob_id,
             animal_group_type_id=source_group_id,
         ).first()
-        assert source_balance is None
+        assert source_balance.head_count == 2
 
         target_group = AnimalGroupType.query.filter_by(
             species="Sheep",
@@ -2245,13 +2245,13 @@ def test_mob_balance_edit_reclassifies_and_records_change(client, app):
         ledger_rows = StockLedgerEntry.query.filter_by(mob_id=mob_id).all()
         assert len(ledger_rows) == 2
         posted = {(row.event_type, str(row.animal_group_type_id), row.quantity) for row in ledger_rows}
-        assert (StockEventType.adjustment_out, source_group_id, 12) in posted
+        assert (StockEventType.adjustment_out, source_group_id, 10) in posted
         assert (StockEventType.adjustment_in, str(target_group.id), 10) in posted
 
         mob_event = MobEvent.query.filter_by(mob_id=mob_id).first()
         assert mob_event is not None
         assert mob_event.tags_csv == (
-            "stock,balance edit,reclassification,adjustment out,adjustment in,stock adjustment"
+            "stock,reclassification,adjustment out,adjustment in,stock adjustment"
         )
         assert "ram" in mob_event.description
         assert "wether" in mob_event.description
@@ -2420,9 +2420,13 @@ def test_mob_detail_shows_and_prefills_exact_count_allocations(client, app):
     assert 'aria-controls="mob-name-modal"' in body
     assert 'value="Detail Count Mob"' in body
     assert body.index('class="mob-species-totals"') < body.index(
-        "Select a balance line, then edit its sex, age class, and head count."
+        "Select a balance line"
     )
-    assert "Its animal type is also loaded into Adjust Stock." in body
+    assert "selecting a line also loads its animal type there." in body
+    assert f'action="/mobs/{mob_id}/balances/reclassify"' in body
+    assert 'id="reclassifyQuantity"' in body
+    assert "All animals" in body
+    assert 'id="reclassifyPreview" role="status"' in body
     assert "<span>Sheep</span><strong>12</strong> head" in body
     assert "Animal Groups" in body
     assert "Sheep | Merino | ewe | adult:" in body

@@ -278,7 +278,6 @@ class LivestockTradeService:
             "farm_names": cls.farm_names(trade), "groups": groups,
             "stats": calculations["stats"],
             "stat_rows": [(group["label"] or group["animal_type_label"], group["stats"]) for group in groups]
-                + [(f"Sex: {public_sex(trade.species, key)}", value) for key, value in calculations["sex_stats"].items()]
                 + [("Combined trade", calculations["stats"])],
             "sex_stats": {public_sex(trade.species, key): value for key, value in calculations["sex_stats"].items()},
             "category_code": cls.cash_category_and_direction(trade)[0],

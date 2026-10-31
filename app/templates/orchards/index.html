@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Orchards | AgriTrack{% endblock %}
+{% block content %}
+<h1>{{ farm.name ~ ' · ' if farm else '' }}Orchards</h1>
+<p class="muted">Planting spaces, available plants and irrigation in one local layout.</p>
+<div class="cards">
+{% for orchard in orchards %}
+<article class="card">
+  <h2><a href="{{ url_for('orchards.workspace', farm_id=orchard.farm_id, orchard_id=orchard.id) }}">{{ orchard.name }}</a></h2>
+  <p>{{ orchard.farm.name }}</p>
+</article>
+{% else %}<p>No orchards here yet. Create an empty orchard below.</p>{% endfor %}
+</div>
+<section class="card">
+  <h2>Create an orchard</h2>
+  <form id="create-orchard">
+    <label>Farm <select name="farm_id" required>{% for item in farms %}<option value="{{ item.id }}" {% if farm and farm.id == item.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+    <label>Name <input name="name" required maxlength="120" placeholder="Orchard name"></label>
+    <button type="submit">Create orchard</button>
+    <p id="create-status" role="status"></p>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='orchard_index.js') }}"></script>{% endblock %}

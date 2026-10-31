@@ -1,0 +1,72 @@
+.container:has(.orchard-workspace) { max-width: 1680px; }
+.orchard-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.orchard-heading h1 { margin: .35rem 0; font-size: 1.9rem; }
+.orchard-heading p { margin: .4rem 0 1rem; }
+.orchard-summary { display: flex; gap: 1.4rem; }
+.orchard-summary div { display: flex; flex-direction: column; font-size: .8rem; color: var(--muted); }
+.orchard-summary strong { font-size: 1.7rem; font-weight: 650; color: var(--text); }
+.orchard-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin: .7rem 0; }
+.orchard-workspace button, .orchard-workspace select, .orchard-workspace input:not([type=checkbox]) { min-height: 42px; }
+.orchard-workspace button { cursor: pointer; }
+.orchard-workspace button:disabled { cursor: wait; opacity: .6; }
+.orchard-status { padding: .65rem .8rem; border-left: 3px solid #7eaa93; background: #e9f1e9; font-size: .9rem; min-height: 2.5rem; }
+.orchard-status.error { border-color: #b94636; background: #fff0eb; color: #8a2b1d; }
+.orchard-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }
+.orchard-map-card { border: 1px solid var(--line); border-radius: 12px; background: #fff; overflow: hidden; min-width: 0; }
+.orchard-map-options { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; padding: .55rem .85rem; }
+.orchard-map-options label { display: flex; align-items: center; gap: .4rem; font-size: .85rem; margin: 0; }
+.orchard-map-options input { width: auto; }
+.orchard-map-options button { margin-left: auto; padding: .4rem .65rem; }
+#orchard-map { height: clamp(480px, 66vh, 800px); background: #f5f3e9; z-index: 0; }
+.orchard-legend { display: flex; gap: 1rem; flex-wrap: wrap; padding: .65rem .85rem 0; font-size: .8rem; }
+.orchard-legend b { font-size: 1.2rem; vertical-align: middle; }
+.legend-planted { color: #35724f; }.legend-planned { color: #9d650e; }.legend-empty { color: #6e7871; }.legend-water { color: #2275a7; }
+.orchard-map-note { padding: 0 .85rem; font-size: .8rem; color: var(--muted); }
+.orchard-panel { margin: 0; min-width: 0; padding: 1rem; }
+.orchard-panel-heading { display: flex; justify-content: space-between; align-items: start; gap: .5rem; }
+.orchard-panel-heading h2 { margin: 0 0 .75rem; font-size: 1.15rem; }
+#orchard-unsaved { color: #975c05; font-size: .8rem; white-space: nowrap; }
+.orchard-panel label { display: block; margin: .7rem 0; font-size: .85rem; }
+.orchard-panel input, .orchard-panel select, .orchard-panel textarea { width: 100%; margin-top: .25rem; }
+.orchard-panel input[type=checkbox] { width: auto; }
+.orchard-panel textarea { min-height: 120px; font-family: monospace; resize: vertical; }
+.orchard-panel .orchard-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+.orchard-panel .orchard-help { font-size: .82rem; color: var(--muted); line-height: 1.5; }
+.orchard-panel .orchard-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .7rem 0; }
+.orchard-panel .orchard-danger { background: #fff; color: #943b2c; border: 1px solid #cfb4ac; }
+.orchard-panel button[type=submit] { margin-top: .5rem; }
+.orchard-panel dl { font-size: .85rem; }.orchard-panel dd { margin: .1rem 0 .55rem; }
+.orchard-stock-list { list-style: none; padding: 0; margin: .6rem 0; }
+.orchard-stock-list li { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .45rem 0; border-bottom: 1px solid #e5e9e1; font-size: .85rem; }
+.orchard-stock-list button { padding: .3rem .6rem; }
+.orchard-stock-actions { display: flex; gap: .35rem; flex-shrink: 0; }
+.orchard-marker { background: transparent; border: 0; pointer-events: none; }
+.orchard-marker .orchard-space-symbol { pointer-events: auto; transform: scale(var(--orchard-symbol-scale, 1)); }
+.orchard-space-symbol { display: block; width: 25px; height: 25px; margin: 9px; border-radius: 50%; background: #35724f; border: 2px solid #fff; box-shadow: 0 1px 3px #0003; text-align: center; line-height: 21px; color: white; font-size: 17px; }
+.orchard-marker.planned .orchard-space-symbol { border-radius: 6px; color: #7e4d00; border-color: #ac741c; background: #ffe5a9; }
+.orchard-marker.empty .orchard-space-symbol { background: #f8f6ec; color: #667266; border: 2px dashed #7d897c; box-shadow: none; }
+.orchard-marker.selected .orchard-space-symbol { outline: 3px solid #1b2529; outline-offset: 3px; }
+.orchard-space-name { position: absolute; left: 22px; top: 35px; transform: translateX(-50%); width: var(--orchard-label-width, 75px); text-align: center; font: 10px/1.1 "Segoe UI", sans-serif; color: #253b28; text-shadow: 0 1px #fff, 1px 0 #fff, -1px 0 #fff, 0 -1px #fff; pointer-events: none; overflow-wrap: anywhere; }
+.orchard-hide-labels .orchard-space-name { display: none; }
+.orchard-row-label { position: absolute; right: 0; top: 0; transform: translateY(-50%); width: max-content; max-width: 180px; overflow-wrap: anywhere; padding: 6px 10px; border-radius: 3px; background: #fffD; border: 0; box-shadow: none; font: 600 12px/18px "Segoe UI", sans-serif; color: #52624c; cursor: pointer; }
+.orchard-row-label-marker.editing .orchard-row-label { display: block; cursor: move; outline: 2px solid #2275a7; background: #fff; }
+.orchard-row-label:before { display: none; }
+.orchard-overview .orchard-row-label { display: none; }
+.orchard-handle { background: #fff; color: #135c87; border: 2px solid #2275a7; border-radius: 4px; text-align: center; font-size: 15px; line-height: 23px; }
+.orchard-emitter { text-align: center; line-height: 26px; font-size: 20px; color: #145f96; text-shadow: 0 1px #fff, 1px 0 #fff, -1px 0 #fff; }
+.orchard-emitter.sprinkler { color: #8540a2; }
+#orchard-discard { margin-top: .75rem; }
+@media (max-width: 1000px) {
+  .orchard-grid { grid-template-columns: minmax(0, 1fr) 310px; }
+  .orchard-summary { gap: 1rem; }
+}
+@media (max-width: 760px) {
+  body:has(.orchard-workspace) .topbar { position: static; }
+  .orchard-grid { grid-template-columns: 1fr; }
+  #orchard-map { height: 480px; }
+  .orchard-toolbar button { flex: 1 1 140px; }
+  .orchard-heading h1 { font-size: 1.55rem; }
+  .orchard-panel { scroll-margin-top: 15px; }
+  .orchard-map-options { gap: .7rem; }
+  .orchard-workspace { overflow-wrap: anywhere; }
+}

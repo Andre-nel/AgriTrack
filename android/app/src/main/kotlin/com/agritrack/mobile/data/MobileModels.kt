@@ -1523,7 +1523,11 @@ data class MobileFormOptions(
     val waterStatusOptionsByType: Map<String, List<MobileOption>> = emptyMap(),
     val waterLevelAssetTypes: Set<String> = emptySet(),
     val waterLevelOptions: List<MobileOption> = emptyList(),
+    val waterLevelOptionsByType: Map<String, List<MobileOption>> = emptyMap(),
 ) {
+    fun waterLevelOptionsForType(assetType: String): List<MobileOption> =
+        waterLevelOptionsByType[assetType] ?: waterLevelOptions
+
     companion object {
         fun fromJson(json: JSONObject): MobileFormOptions {
             return MobileFormOptions(
@@ -1535,6 +1539,7 @@ data class MobileFormOptions(
                 waterStatusOptionsByType = parseOptionMap(json.optJSONObject("water_status_options_by_type") ?: JSONObject()),
                 waterLevelAssetTypes = json.optJSONArray("water_level_asset_types").strings().toSet(),
                 waterLevelOptions = parseOptions(json.optJSONArray("water_level_options") ?: JSONArray()),
+                waterLevelOptionsByType = parseOptionMap(json.optJSONObject("water_level_options_by_type") ?: JSONObject()),
             )
         }
 

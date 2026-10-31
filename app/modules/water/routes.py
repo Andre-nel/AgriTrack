@@ -153,6 +153,10 @@ def register_legacy_routes(bp) -> None:
                 for asset_type, options in WaterNetworkService.MATERIAL_OPTIONS_BY_TYPE.items()
             },
             "waterLevelOptions": list(WaterNetworkService.WATER_LEVEL_OPTIONS),
+            "waterLevelOptionsByType": {
+                asset_type: list(WaterNetworkService.water_level_options_for_type(asset_type))
+                for asset_type in sorted(WaterNetworkService.WATER_LEVEL_TYPES)
+            },
             "waterLevelTypes": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
             "capacityTypes": sorted(WaterNetworkService.CAPACITY_TYPES),
             "windmillSizeOptions": list(WaterNetworkService.WINDMILL_SIZE_OPTIONS),

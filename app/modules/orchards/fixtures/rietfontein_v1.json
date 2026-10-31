@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "seed_key": "rietfontein-orchard-2026-10-21-v1",
+  "name": "Rietfontein Orchard",
+  "observed_on": "2026-10-21",
+  "source": "Farm owner's supplied orchard array and purchase invoice dated 21 October 2026. Row alignment confirmed by owner: leading empty spaces in rows 7 and 8 are in column 5.",
+  "row_spacing_m": 3,
+  "tree_spacing_m": 4,
+  "start_columns": [1, 1, 1, 1, 1, 1, 5, 5],
+  "rows": [
+    ["Turkey Valencia", "Turkey Valencia", "Turkey Valencia", "Turkey Valencia", "Turkey Valencia", "Nules Clementine", "Nules Clementine", "Nules Clementine", "Nules Clementine", "Nules Clementine", "Nules Clementine"],
+    ["Perske goudmyn", "Perske goudmyn", "Perske goudmyn", "Nectarine sunlight", "Perske goudmyn", "Perske goudmyn", "Perske Sunsweet", "Perske", "Perske Sunsweet", "Perske goudmyn", "Perske Sunsweet"],
+    ["Vy Adams", "Vy Adams", "Vy violet Firas", "Vy Adams", "Vy Evita", "Vy white Genoa", "Vy Southern Black", "Vy Parisian", "Vy kaapse wit", "Vy king", null],
+    [null, "Cherry", "Almond Texas mission", "Almond non pareil", "Almond non pareil", "Almond peerless", "Almond Texas mission", "Almond non pareil", "Almond peerless", "Almond Texas mission", "Almond peerless"],
+    ["Guava", "Guava", null, "Pear packhams triumph", "Pear", "Pear packhams triumph", "Pear Forelle", "Pear Bon Chiretien", "Appel origin red", "Appel golden delicious", "Appel"],
+    ["Mulberry", "Mulberry", "Vy Adams", "Vy Avignon", "Vy kadota", "Vy white Genoa", "Vy kaapse bruin", "Vy Adams", "Vy groen", "Vy black mission", null],
+    [null, "Pruim fortune kakamas", "Pruim", "Pruim", "Pruim songold kakamas", "Pruim", null],
+    [null, "Pecan", "Pecan", null, null, null, null]
+  ],
+  "purchase": {
+    "purchased_on": "2026-10-21",
+    "supplier": "The Pot & Barrel",
+    "items": [
+      {"name": "Apricot", "quantity": 3},
+      {"name": "Apple", "quantity": 2},
+      {"name": "Nectarine", "quantity": 1},
+      {"name": "Plum", "quantity": 1},
+      {"name": "Peach", "quantity": 2},
+      {"name": "Blackberry", "quantity": 1},
+      {"name": "Strawberry", "quantity": 1},
+      {"name": "Pomegranate", "quantity": 4},
+      {"name": "Grape", "quantity": 8}
+    ],
+    "note": "Varieties unspecified. Two bags of mulch excluded. No accounting transaction created."
+  }
+}

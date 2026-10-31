@@ -185,103 +185,64 @@ def adjust_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
         raise
 
 
-def update_mob_balance_line_from_form(mob: Mob, form: Mapping[str, str]) -> str:
-    source_group_type_id = (form.get("source_animal_group_type_id") or "").strip()
-    if not source_group_type_id:
-        raise ValueError("Select a balance line to edit")
-    if (form.get("source_cohort_id") or "").strip():
-        raise ValueError("Balance lines now combine cohorts. Refresh the mob page before editing.")
-
-    source_balances = StockService.group_balances(str(mob.id), source_group_type_id)
-    if not source_balances:
-        raise ValueError("Selected balance line is no longer available. Refresh and try again.")
-
-    source_group = source_balances[0].animal_group_type
-    source_head = sum(int(balance.head_count) for balance in source_balances)
-    head_count_raw = (form.get("head_count") or "").strip()
+def reclassify_mob_stock_from_form(mob: Mob, form: Mapping[str, str]) -> str:
+    """Move a counted population between classifications in one transaction."""
     try:
-        target_head = int(head_count_raw)
-    except ValueError:
-        raise ValueError("Head count must be a whole number")
+        if mob.status != "active":
+            raise ValueError("Selected mob must be active")
+        source_group_type_id = (form.get("source_animal_group_type_id") or "").strip()
+        if not source_group_type_id:
+            raise ValueError("Select a balance line to reclassify")
+        if "head_count" in form or (form.get("source_cohort_id") or "").strip():
+            raise ValueError("Balance editing has changed. Refresh the mob page before reclassifying.")
+        source_balances = StockService.group_balances(str(mob.id), source_group_type_id)
+        if not source_balances:
+            raise ValueError("Selected balance line is no longer available. Refresh and try again.")
+        source_group = source_balances[0].animal_group_type
+        source_head = sum(int(balance.head_count) for balance in source_balances)
+        quantity = ValidationService.parse_whole_number(form.get("quantity"), "Number to reclassify")
+        if quantity < 1 or quantity > source_head:
+            raise ValueError(f"Number to reclassify must be between 1 and {source_head}")
 
-    if target_head < 0:
-        raise ValueError("Head count must be greater than or equal to 0")
-
-    note_text = " ".join((form.get("note") or "").strip().split())
-
-    try:
         target_group = StockService.get_or_create_group_type(
             species=source_group.species,
             breed=source_group.breed,
-            sex=(form.get("sex") or source_group.sex).strip(),
-            age_class=(form.get("age_class") or source_group.age_class).strip(),
+            sex=(form.get("sex") or "").strip(),
+            age_class=(form.get("age_class") or "").strip(),
         )
-
+        if str(target_group.id) == str(source_group.id):
+            raise ValueError("Choose a different sex or age class to reclassify animals")
+        target_head = StockService.group_head_count(str(mob.id), str(target_group.id))
         source_label = _animal_group_label(source_group)
         target_label = _animal_group_label(target_group)
-        unchanged = str(target_group.id) == str(source_group.id) and target_head == source_head
-        if unchanged:
-            return "No changes detected for the selected balance line"
-
-        if str(target_group.id) == str(source_group.id):
-            delta = target_head - source_head
-            event_type = StockEventType.adjustment_in if delta > 0 else StockEventType.adjustment_out
-            quantity = abs(delta)
-            description = (
-                f"Balance head updated for {source_label}: {source_head} -> {target_head}."
-            )
-            event_tags = _stock_adjustment_tags(
-                event_type,
-                event_type,
-                "balance edit",
-                "head adjustment",
-            )
-            change_time = datetime.now(timezone.utc)
-            StockService.adjust_group_stock(
-                mob_id=mob.id,
-                farm_id=mob.farm_id,
-                animal_group_type_id=source_group.id,
-                event_type=event_type,
-                quantity=quantity,
-                note=f"{description} Note: {note_text}" if note_text else description,
-                event_time=change_time,
-            )
-        else:
-            description = (
-                f"Balance reclassified from {source_label} (head: {source_head}) "
-                f"to {target_label} (head: {target_head})."
-            )
-            event_tags = _join_tags(
-                [
-                    "stock",
-                    "balance edit",
-                    "reclassification",
-                    _stock_event_label(StockEventType.adjustment_out),
-                    _stock_event_label(StockEventType.adjustment_in),
-                    "stock adjustment",
-                ]
-            )
-            ledger_note = f"{description} Note: {note_text}" if note_text else description
-            change_time = datetime.now(timezone.utc)
-            StockService.reclassify_group_stock(
-                mob,
-                source_group_id=str(source_group.id),
-                target_group=target_group,
-                target_head_count=target_head,
-                note=ledger_note,
-                event_time=change_time,
-            )
-
-        event_description = f"{description} Note: {note_text}" if note_text else description
+        description = (
+            f"Reclassified {quantity} head from {source_label} to {target_label}. "
+            f"Source balance {source_head} -> {source_head - quantity}; "
+            f"destination balance {target_head} -> {target_head + quantity}. "
+            "Total head count unchanged."
+        )
+        ledger_note = _description_with_note(description, form.get("note"))
+        change_time = datetime.now(timezone.utc)
+        StockService.reclassify_group_stock(
+            mob,
+            source_group_id=str(source_group.id),
+            target_group=target_group,
+            quantity=quantity,
+            note=ledger_note,
+            event_time=change_time,
+        )
+        if len(source_balances) > 1:
+            description = StockService.proportional_note(description)
+        description = _description_with_note(description, form.get("note"))
         MobEventService.create_event(
             mob_id=mob.id,
             farm_id=mob.farm_id,
-            description=event_description,
-            raw_tags=event_tags,
+            description=description,
+            raw_tags="stock,reclassification,adjustment out,adjustment in,stock adjustment",
             event_at=change_time,
         )
         db.session.commit()
-        return "Balance line updated"
-    except ValueError:
+        return f"Reclassified {quantity} head. Total head count unchanged."
+    except Exception:
         db.session.rollback()
         raise

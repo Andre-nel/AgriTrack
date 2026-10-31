@@ -164,7 +164,10 @@ def water_mass_update_field_specs(selected_asset_types: list[str]) -> list[dict]
             "label": "Water Level",
             "kind": "select",
             "asset_types": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
-            "options": list(WaterNetworkService.WATER_LEVEL_OPTIONS),
+            "options_by_type": {
+                asset_type: list(WaterNetworkService.water_level_options_for_type(asset_type))
+                for asset_type in sorted(WaterNetworkService.WATER_LEVEL_TYPES)
+            },
         },
         {
             "name": "capacity_m3",

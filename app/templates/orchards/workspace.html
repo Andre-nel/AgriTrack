@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ orchard.name }} | AgriTrack{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<link rel="stylesheet" href="{{ url_for('static', filename='orchard.css') }}">
+{% endblock %}
+{% block content %}
+<div class="orchard-workspace" id="orchard-workspace" data-api="{{ url_for('orchards.data', farm_id=orchard.farm_id, orchard_id=orchard.id) }}" data-today="{{ today }}">
+  <header class="orchard-heading">
+    <div><a href="{{ url_for('orchards.index', farm_id=orchard.farm_id) }}">{{ orchard.farm.name }} / Orchards</a><h1>{{ orchard.name }}</h1><p class="muted">Local layout in metres · Row 1 at the bottom · No compass direction assigned</p></div>
+    <div id="orchard-summary" class="orchard-summary" aria-live="polite"></div>
+  </header>
+  <div class="orchard-toolbar" aria-label="Orchard tools">
+    <button type="button" data-open="browse">Inspect orchard</button>
+    <button type="button" data-open="row">Add row / column</button>
+    <button type="button" data-open="stock">Plant stock</button>
+    <button type="button" data-open="line">Draw irrigation line</button>
+    <button type="button" id="orchard-refresh" class="btn-secondary">Refresh</button>
+  </div>
+  <p id="orchard-status" class="orchard-status" role="status" aria-live="polite">Loading orchard…</p>
+  <div class="orchard-grid">
+    <section class="orchard-map-card" aria-label="Orchard layout">
+      <div class="orchard-map-options">
+        <label><input type="checkbox" id="orchard-labels" checked> Plant labels</label>
+        <label><input type="checkbox" id="orchard-irrigation" checked> Irrigation</label>
+        <button type="button" id="orchard-fit" class="btn-secondary">Fit layout</button>
+      </div>
+      <div id="orchard-map" role="region" aria-label="Interactive orchard. Use Inspect orchard for a keyboard-accessible list of all positions."></div>
+      <div class="orchard-legend"><span><b class="legend-planted">●</b> Planted</span><span><b class="legend-planned">◇</b> Planned</span><span><b class="legend-empty">＋</b> Empty space</span><span><b class="legend-water">—</b> Irrigation</span><span><b class="legend-water">◆</b> Emitter</span></div>
+      <p class="orchard-map-note">Seeded dripper routes are schematic. Select a tree or empty space to inspect it. Select a row or column name to move its label. Zoom in for full labels.</p>
+    </section>
+    <aside class="orchard-panel card" aria-label="Orchard editor">
+      <div class="orchard-panel-heading"><h2 id="orchard-panel-title">Inspect orchard</h2><span id="orchard-unsaved" hidden>Unsaved</span></div>
+      <div id="orchard-panel-body"></div>
+      <button type="button" id="orchard-discard" class="btn-secondary" hidden>Discard edits</button>
+    </aside>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="{{ url_for('static', filename='orchard.js') }}"></script>
+{% endblock %}

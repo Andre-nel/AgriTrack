@@ -23,6 +23,7 @@ MODULES: tuple[ModuleSpec, ...] = (
     ModuleSpec("reproduction", "app.modules.reproduction", "Breeding cycles and reproductive analytics"),
     ModuleSpec("wiki", "app.modules.wiki", "Private farm knowledge wiki pages"),
     ModuleSpec("ops", "app.modules.ops", "Private farm operations pages"),
+    ModuleSpec("orchards", "app.modules.orchards", "Orchard planting and schematic irrigation workspace"),
     ModuleSpec("api_v1", "app.modules.api_v1", "Versioned API entrypoints"),
     ModuleSpec("mobile_api", "app.modules.mobile_api", "Android mobile API entrypoints"),
     ModuleSpec("farms", "app.modules.farms", "Farm API routes"),

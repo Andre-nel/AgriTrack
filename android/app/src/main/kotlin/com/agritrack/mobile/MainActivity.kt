@@ -4750,7 +4750,7 @@ private fun WaterEditScreen(
         val statusOptions = state.formOptions.waterStatusOptionsByType[asset?.assetType.orEmpty()].orEmpty()
         OptionPicker("Status", state.waterStatus, statusOptions, onWaterStatusChange)
         if (asset?.assetType in state.formOptions.waterLevelAssetTypes) {
-            OptionPicker("Water level", state.waterLevel, state.formOptions.waterLevelOptions, onWaterLevelChange)
+            OptionPicker("Water level", state.waterLevel, state.formOptions.waterLevelOptionsForType(asset?.assetType.orEmpty()), onWaterLevelChange)
         }
         Button(onClick = onQueueWaterUpdate, enabled = state.selectedWaterAssetId.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
             Text("Queue Water Update")
@@ -6570,5 +6570,9 @@ private fun defaultMobileFormOptions(): MobileFormOptions {
         ),
         waterLevelAssetTypes = setOf("pit", "cement_dam", "tank", "ground_dam", "weir", "trough"),
         waterLevelOptions = waterLevels,
+        waterLevelOptionsByType = mapOf(
+            "weir" to (waterLevels + MobileOption("overflowing", "Overflowing")),
+            "ground_dam" to (waterLevels + MobileOption("overflowing", "Overflowing")),
+        ),
     )
 }
