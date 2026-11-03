@@ -1,6 +1,15 @@
 from app.services.water_network_service import WaterNetworkService
 
 
+def _level_fields(form, suffix=""):
+    if "water_level_percent" + suffix in form:
+        overflow = form.get("is_overflowing" + suffix, "0")
+        return {"water_level_percent": form.get("water_level_percent" + suffix), "is_overflowing": overflow}
+    if "water_level" + suffix in form:
+        return {"water_level": form.get("water_level" + suffix)}
+    return {}
+
+
 def water_asset_form_payload(form, *, farm_id: str) -> dict:
     return {
         "farm_id": farm_id,
@@ -13,7 +22,7 @@ def water_asset_form_payload(form, *, farm_id: str) -> dict:
         "longitude": form.get("longitude"),
         "altitude_m": form.get("altitude_m"),
         "status": form.get("status"),
-        "water_level": form.get("water_level"),
+        **_level_fields(form),
         "capacity_m3": form.get("capacity_m3"),
         "material": form.get("material"),
         "windmill_size_ft": form.get("windmill_size_ft"),
@@ -67,7 +76,7 @@ def water_asset_mass_update_form_payload(form, *, farm_id: str, asset_id: str) -
         "longitude": water_asset_mass_update_form_value(form, "longitude", asset_id),
         "altitude_m": water_asset_mass_update_form_value(form, "altitude_m", asset_id),
         "status": water_asset_mass_update_form_value(form, "status", asset_id),
-        "water_level": water_asset_mass_update_form_value(form, "water_level", asset_id),
+        **_level_fields(form, f"__{asset_id}"),
         "capacity_m3": water_asset_mass_update_form_value(form, "capacity_m3", asset_id),
         "material": water_asset_mass_update_form_value(form, "material", asset_id),
         "windmill_size_ft": water_asset_mass_update_form_value(form, "windmill_size_ft", asset_id),

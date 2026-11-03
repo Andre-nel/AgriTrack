@@ -31,7 +31,7 @@ def test_api_overflowing_is_restricted_to_weirs_and_ground_dams(client, farm_id,
     assert response.status_code == 201
     asset_id = response.get_json()["id"]
     assert response.get_json()["water_level"] == "overflowing"
-    assert WaterAssetStateHistory.query.one().water_level == "overflowing"
+    assert WaterNetworkService.serialize_asset_state_history(WaterAssetStateHistory.query.one())["water_level"] == "overflowing"
     assert client.patch(f"/api/water-assets/{asset_id}", json={"asset_type": "tank"}).status_code == 400
     assert client.patch(f"/api/water-assets/{asset_id}", json={"asset_type": "borehole"}).status_code == 400
     response = client.patch(f"/api/water-assets/{asset_id}", json={"asset_type": "tank", "water_level": "full"})
@@ -46,7 +46,7 @@ def test_import_validation_uses_type_specific_levels(farm_id, asset_type):
         with pytest.raises(ValueError, match="water_level"):
             WaterNetworkService.create_asset(payload, imported=True)
     else:
-        assert WaterNetworkService.create_asset(payload, imported=True).water_level == "overflowing"
+        assert WaterNetworkService.create_asset(payload, imported=True).level_token == "overflowing"
 
 
 @pytest.mark.parametrize("asset_type", ["weir", "ground_dam", "tank"])
@@ -67,8 +67,12 @@ def test_web_create_edit_and_bulk_options(client, farm_id, asset_type):
     config = json.loads(re.search(r'<script id="water-asset-editor-config" type="application/json">(.*?)</script>', page, re.S)[1])
     assert ("overflowing" in config["waterLevelOptionsByType"][asset_type]) == valid
     bulk_page = client.get(f"/farms/{farm_id}/water/mass-update?filters_applied=1&asset_type={asset_type}").get_data(as_text=True)
-    options = re.search(rf'<select name="water_level__{asset_id}">(.*?)</select>', bulk_page, re.S)[1]
-    assert ('value="overflowing"' in options) == valid
+    if asset_type == "weir":
+        assert f'name="water_level_percent__{asset_id}"' in bulk_page
+        assert f'name="is_overflowing__{asset_id}"' in bulk_page
+    else:
+        options = re.search(rf'<select name="water_level__{asset_id}">(.*?)</select>', bulk_page, re.S)[1]
+        assert ('value="overflowing"' in options) == valid
     for endpoint, data in [
         (f"/farms/{farm_id}/water/assets/{asset_id}", {
             "name": "Source", "asset_type": asset_type, "active": "1", "water_level": "overflowing",
@@ -80,7 +84,7 @@ def test_web_create_edit_and_bulk_options(client, farm_id, asset_type):
     ]:
         assert client.post(endpoint, data=data).status_code == 302
         db.session.expire_all()
-        assert db.session.get(WaterAsset, asset_id).water_level == ("overflowing" if valid else "full")
+        assert db.session.get(WaterAsset, asset_id).level_token == ("overflowing" if valid else "full")
 
 
 @pytest.mark.parametrize("asset_type", ["weir", "ground_dam"])
@@ -98,10 +102,10 @@ def test_overflowing_source_supplies_full_trough_and_map(client, farm_id, asset_
     db.session.commit()
     state = WaterNetworkService.network_state_for_farm(farm_id)
     assert state["effective_water_levels"][source.id] == "overflowing"
-    assert state["effective_water_levels"][trough.id] == "full"
+    assert state["effective_water_levels"][trough.id] == ("low" if asset_type == "weir" else "full")
     assert WaterNetworkService._asset_supply_state(source) == "available"
     payload = client.get(f"/api/water-assets/{trough.id}").get_json()
-    assert payload["water_level"] == "full"
+    assert payload["water_level"] == ("low" if asset_type == "weir" else "full")
     assert payload["reported_water_level"] == "low"
     response = client.get(f"/farms/{farm_id}/map-data")
     assert response.status_code == 200
@@ -126,10 +130,10 @@ def test_mobile_commands_accept_only_supported_assets(client, farm_id):
     assert response.status_code == 200
     assert [row["status"] for row in response.get_json()["results"]] == ["applied", "applied", "failed"]
     db.session.expire_all()
-    assert [asset.water_level for asset in assets] == ["overflowing", "overflowing", "full"]
+    assert [asset.level_token for asset in assets] == ["overflowing", "overflowing", "full"]
 
 
-def test_analytics_places_overflowing_above_full(farm_id):
+def test_analytics_marks_overflowing_at_100_percent(farm_id):
     asset = WaterNetworkService.create_asset(dict(farm_id=farm_id, name="Weir", asset_type="weir", water_level="overflowing"))
     db.session.flush()
     WaterAssetStateHistory.query.one().changed_at = datetime(2025, 1, 1)
@@ -137,5 +141,6 @@ def test_analytics_places_overflowing_above_full(farm_id):
     report = build_water_asset_state_report(assets=[asset], start_date=date(2025, 1, 1),
         end_date=date(2025, 1, 2), state_fields=["water_level"], plot_mode="overlay", include_farm_name=False)
     panel = report["chart_payload"]["panels"][0]
-    assert panel["value_labels"]["5"] == "Overflowing"
-    assert panel["datasets"][0]["values"] == [5, 5]
+    assert panel["y_max"] == 100
+    assert panel["datasets"][0]["values"] == [100, 100]
+    assert panel["datasets"][0]["overflowing"] == [True, True]

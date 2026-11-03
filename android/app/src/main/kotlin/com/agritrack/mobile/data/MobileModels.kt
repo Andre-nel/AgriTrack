@@ -210,6 +210,12 @@ data class WaterAssetSummary(
     val locationPaddockName: String?,
     val servedPaddockIds: List<String>,
     val networkWarning: String?,
+    val waterLevelPercent: Double? = null,
+    val isOverflowing: Boolean = false,
+    val waterLevelLabel: String? = null,
+    val capacityM3: Double? = null,
+    val estimatedVolumeM3: Double? = null,
+    val volumeEstimateStatus: String? = null,
 )
 
 data class GateSummary(
@@ -876,6 +882,12 @@ data class FarmSnapshot(
                         locationPaddockName = asset.optNullableString("location_paddock_name"),
                         servedPaddockIds = asset.optJSONArray("served_paddock_ids").strings(),
                         networkWarning = asset.optNullableString("network_warning"),
+                        waterLevelPercent = asset.optNullableDouble("water_level_percent"),
+                        isOverflowing = asset.optBoolean("is_overflowing", false),
+                        waterLevelLabel = asset.optNullableString("water_level_label"),
+                        capacityM3 = asset.optNullableDouble("capacity_m3"),
+                        estimatedVolumeM3 = asset.optNullableDouble("estimated_volume_m3"),
+                        volumeEstimateStatus = asset.optNullableString("volume_estimate_status"),
                     )
                 )
             }
@@ -1077,10 +1089,10 @@ data class FarmSnapshot(
                         changedAt = row.optNullableString("changed_at"),
                         previousActive = row.optNullableBoolean("previous_active"),
                         previousStatus = row.optNullableString("previous_status"),
-                        previousWaterLevel = row.optNullableString("previous_water_level"),
+                        previousWaterLevel = row.optNullableString("previous_water_level_label") ?: row.optNullableString("previous_water_level"),
                         active = row.optBoolean("active", true),
                         status = row.optNullableString("status"),
-                        waterLevel = row.optNullableString("water_level"),
+                        waterLevel = row.optNullableString("water_level_label") ?: row.optNullableString("water_level"),
                     )
                 )
             }
@@ -1522,6 +1534,7 @@ data class MobileFormOptions(
     val taskPriorities: List<MobileOption> = emptyList(),
     val waterStatusOptionsByType: Map<String, List<MobileOption>> = emptyMap(),
     val waterLevelAssetTypes: Set<String> = emptySet(),
+    val percentageWaterLevelTypes: Set<String> = emptySet(),
     val waterLevelOptions: List<MobileOption> = emptyList(),
     val waterLevelOptionsByType: Map<String, List<MobileOption>> = emptyMap(),
 ) {
@@ -1538,6 +1551,7 @@ data class MobileFormOptions(
                 taskPriorities = parseOptions(json.optJSONArray("task_priorities") ?: JSONArray()),
                 waterStatusOptionsByType = parseOptionMap(json.optJSONObject("water_status_options_by_type") ?: JSONObject()),
                 waterLevelAssetTypes = json.optJSONArray("water_level_asset_types").strings().toSet(),
+                percentageWaterLevelTypes = json.optJSONArray("percentage_water_level_types").strings().toSet(),
                 waterLevelOptions = parseOptions(json.optJSONArray("water_level_options") ?: JSONArray()),
                 waterLevelOptionsByType = parseOptionMap(json.optJSONObject("water_level_options_by_type") ?: JSONObject()),
             )

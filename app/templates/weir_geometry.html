@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ asset.name }} Geometry | AgriTrack{% endblock %}
+{% block content %}
+<a class="btn btn-secondary" href="{{ url_for('web.water_asset_detail', farm_id=farm.id, asset_id=asset.id) }}">Back to asset</a>
+<h1>{{ asset.name }} — storage estimate</h1>
+<p>The outline is the full-water boundary. When a weir point is available, the suggested wall is the closest point on the outline. The suggested centreline runs between the two banks to the outline point furthest from the wall. Review it and drag points to adjust them before saving. The amber dot is the weir-location hint.</p>
+<p class="muted">To trace a line yourself, choose Start new line, click the wall, follow the bends upstream, and finish at the upstream boundary.</p>
+<p class="muted">This estimate assumes vertical banks and a bed rising linearly along your centreline. Percentage measures water depth at the wall, not percentage of volume.</p>
+{% if not asset.weir_polygon %}
+<p>Import a WR polygon for this weir to configure its storage estimate. Point-only weirs remain supported.</p>
+{% else %}
+<svg id="weir-geometry-map" style="width:100%; height:480px; background:#edf5f4; border:1px solid #a1b8b1; touch-action:none;" role="img" aria-label="Weir centreline editor, north is up"></svg>
+<p id="weir-water-status" class="muted" aria-live="polite"></p>
+<div class="row-actions">
+  <button type="button" class="btn btn-secondary" id="weir-clear">Start new line</button>
+  <button type="button" class="btn btn-secondary" id="weir-undo">Undo point</button>
+  <button type="button" class="btn btn-secondary" id="weir-finish">Finish line</button>
+  <button type="button" class="btn btn-secondary" id="weir-fit">Fit outline</button>
+</div>
+<p class="muted">North is up. Scroll to zoom; hold Shift and drag to pan. Focus a point and use arrow keys to adjust it.</p>
+<p id="weir-drawing-status" aria-live="polite"></p>
+<form id="weir-geometry-form" class="card grid-form">
+  <label>Full-water depth at wall (m)<input name="height" type="number" min="0.001" step="0.001" value="{{ asset.weir_wall_height_m if asset.weir_wall_height_m is not none else 1 }}" required /></label>
+  <p class="muted">Measure from the bed at the wall to the overflow level. The preliminary testing value is 1 m.</p>
+  <label class="analytics-checkbox"><input name="assumed" type="checkbox" {% if asset.weir_height_assumed %}checked{% endif %} /> Height is a preliminary assumption</label>
+  <label>Preview water depth (%) <input name="preview_level" type="number" min="0" max="100" step="0.01" value="{{ asset.water_level_percent if asset.water_level_percent is not none else 100 }}" /></label>
+  <div class="row-actions"><button class="btn btn-secondary" type="button" id="weir-preview">Preview estimate</button><button class="btn" type="submit">Save geometry</button></div>
+  <p class="muted">Dark blue shows estimated water coverage at the preview depth; pale blue shows the full-water outline. Changing the preview updates the shading without recording a water-level observation.</p>
+  <p id="weir-result" role="status" aria-live="polite"></p>
+</form>
+{% endif %}
+<script id="weir-geometry-config" type="application/json">{{ {"asset": asset, "defaults": defaults}|tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='weir_geometry.js') }}"></script>{% endblock %}

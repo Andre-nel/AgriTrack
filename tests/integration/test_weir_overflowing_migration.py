@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from flask_migrate import downgrade, upgrade
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import MetaData, Table
+from sqlalchemy.orm import registry
 
 from app import create_app
 from app.config import TestingConfig
@@ -97,13 +99,21 @@ def test_aware_times_normalize_to_utc():
 
 
 @pytest.fixture
-def migration_app(tmp_path):
+def migration_app(tmp_path, monkeypatch):
     class MigrationConfig(TestingConfig):
         SQLALCHEMY_DATABASE_URI = "sqlite:///" + (tmp_path / "weir.sqlite").as_posix()
 
     application = create_app(MigrationConfig)
     with application.app_context():
         upgrade(revision=PARENT)
+        # Migration tests use the schema at their revision, not today's models.
+        mapper = registry()
+        metadata = MetaData()
+        for model_name, table_name in [("WaterAsset", "water_assets"), ("WaterAssetStateHistory", "water_asset_state_history")]:
+            legacy_model = type(model_name, (), {})
+            mapper.map_imperatively(legacy_model, Table(table_name, metadata, autoload_with=db.engine))
+            legacy_model.query = db.session.query_property()
+            monkeypatch.setitem(globals(), model_name, legacy_model)
         yield application
         db.session.remove()
         db.engine.dispose()
@@ -113,7 +123,7 @@ def seed_history(asset_type="weir", ongoing=False):
     farm = Farm(name=f"History farm {uuid.uuid4()}")
     db.session.add(farm)
     db.session.flush()
-    asset = WaterAsset(farm_id=farm.id, name="Asset", asset_type=asset_type,
+    asset = WaterAsset(id=str(uuid.uuid4()), farm_id=farm.id, name="Asset", asset_type=asset_type, needs_review=False,
                        active=False, status="damaged", water_level="full" if ongoing else "low")
     db.session.add(asset)
     db.session.flush()

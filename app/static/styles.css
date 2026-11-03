@@ -2102,6 +2102,7 @@ tr.is-selected-fence {
 }
 
 .water-asset-button {
+  text-decoration: none;
   width: 100%;
   display: flex;
   justify-content: space-between;
@@ -2115,6 +2116,25 @@ tr.is-selected-fence {
   text-align: left;
   cursor: pointer;
   transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.analytics-section > summary {
+  cursor: pointer;
+  padding: 0.35rem 0;
+}
+
+.analytics-section > summary > h2,
+.analytics-section > summary > h3 {
+  display: inline;
+  margin: 0;
+}
+
+.analytics-section[open] > summary {
+  margin-bottom: 0.85rem;
+}
+
+.grazing-chart-grid.asset-chart-stack {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .water-asset-button:hover,

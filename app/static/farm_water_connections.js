@@ -383,6 +383,11 @@
     openAssetInput.name = "open_asset_id";
     openAssetInput.value = String(asset.id);
     form.appendChild(openAssetInput);
+    if (dialog.dataset.inlineAssetId) {
+      const returnInput = document.createElement("input");
+      returnInput.type = "hidden"; returnInput.name = "return_to"; returnInput.value = "asset";
+      form.appendChild(returnInput);
+    }
 
     let roleSelect = null;
     if (!connection) {
@@ -537,6 +542,11 @@
       deleteButton.className = "btn btn-secondary";
       deleteButton.textContent = "Delete Connection";
       deleteForm.append(deleteAssetInput, deleteButton);
+      if (dialog.dataset.inlineAssetId) {
+        const returnInput = document.createElement("input");
+        returnInput.type = "hidden"; returnInput.name = "return_to"; returnInput.value = "asset";
+        deleteForm.appendChild(returnInput);
+      }
       card.appendChild(deleteForm);
     }
 

@@ -14,6 +14,7 @@
 
   const apiBase = String(dialog.dataset.assetApiBase || "").replace(/\/+$/, "");
   const updateUrlBase = String(dialog.dataset.updateUrlBase || "");
+  const inlineAssetId = dialog.dataset.inlineAssetId || "";
   const form = dialog.querySelector("[data-water-asset-modal-form]");
   const titleElement = dialog.querySelector("[data-water-asset-modal-title]");
   const subtitleElement = dialog.querySelector("[data-water-asset-modal-subtitle]");
@@ -266,7 +267,13 @@
       selectedValues.status !== undefined ? selectedValues.status : fieldControls.status.value
     );
 
-    const showWaterLevel = waterLevelTypes.has(assetType);
+    const showWaterLevel = waterLevelTypes.has(assetType) && assetType !== "weir";
+    setFieldVisibility("water_level_percent", assetType === "weir");
+    setFieldVisibility("is_overflowing", assetType === "weir");
+    if (assetType === "weir" && fieldControls.is_overflowing.value !== "1") {
+      fieldControls.is_overflowing.value = "0";
+      fieldControls.is_overflowing.dispatchEvent(new Event("change", { bubbles: true }));
+    }
     setFieldVisibility("water_level", showWaterLevel);
     if (showWaterLevel) {
       rebuildSingleSelect(
@@ -279,6 +286,9 @@
     }
 
     setFieldVisibility("capacity_m3", capacityTypes.has(assetType));
+    const polygonCapacity = assetType === "weir" && currentAsset && currentAsset.weir_polygon;
+    fieldControls.capacity_m3.readOnly = Boolean(polygonCapacity);
+    fieldControls.capacity_m3.title = polygonCapacity ? "Calculated from the weir geometry" : "";
 
     const materialOptions = materialOptionsByType[assetType] || [];
     setFieldVisibility("material", materialOptions.length > 0);
@@ -353,6 +363,7 @@
   }
 
   function setOpenAssetQueryParam(assetId) {
+    if (inlineAssetId) return;
     const url = new URL(window.location.href);
     url.searchParams.set("open_asset_id", assetId);
     window.history.replaceState(null, "", url.toString());
@@ -450,13 +461,16 @@
       trough_size: asset.trough_size,
       served_paddock_ids: asset.served_paddock_ids || [],
     });
+    fieldControls.water_level_percent.value = valueOrBlank(asset.water_level_percent);
+    fieldControls.is_overflowing.value = asset.is_overflowing ? "1" : "0";
+    fieldControls.is_overflowing.dispatchEvent(new Event("change", { bubbles: true }));
     updateImportNote(asset);
     setStatus("", "");
     form.hidden = false;
     renderTaskLinks(asset);
     setOpenAssetQueryParam(String(asset.id));
 
-    if (fieldControls.name && typeof fieldControls.name.focus === "function") {
+    if (!inlineAssetId && fieldControls.name && typeof fieldControls.name.focus === "function") {
       fieldControls.name.focus();
       if (typeof fieldControls.name.select === "function") {
         fieldControls.name.select();
@@ -466,6 +480,7 @@
   }
 
   function openDialog() {
+    if (inlineAssetId) return;
     if (dialog.open) {
       return;
     }
@@ -537,7 +552,12 @@
     const syncCreateWaterLevel = () => {
       const options = waterLevelOptionsByType[normalizeKey(createType.value)] || [];
       rebuildSingleSelect(createLevel, options, createLevel.value);
-      createLevel.disabled = options.length === 0;
+      const isWeir = normalizeKey(createType.value) === "weir";
+      createLevel.disabled = options.length === 0 || isWeir;
+      createLevel.closest("label").hidden = isWeir;
+      const group = createForm.querySelector("[data-create-weir-level]");
+      group.hidden = !isWeir;
+      group.querySelectorAll("input,select").forEach(control => { control.disabled = !isWeir; });
     };
     createType.addEventListener("change", syncCreateWaterLevel);
     syncCreateWaterLevel();
@@ -567,6 +587,7 @@
   });
 
   dialog.addEventListener("click", (event) => {
+    if (inlineAssetId) return;
     const rect = dialog.getBoundingClientRect();
     const clickedBackdrop =
       event.clientX < rect.left ||
@@ -596,7 +617,7 @@
     }
   });
 
-  const initialAssetId = new URLSearchParams(window.location.search).get("open_asset_id");
+  const initialAssetId = inlineAssetId || new URLSearchParams(window.location.search).get("open_asset_id");
   if (initialAssetId) {
     loadAsset(initialAssetId);
   }

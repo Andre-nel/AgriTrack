@@ -314,6 +314,8 @@ def test_farm_deletion_removes_owned_orchard_without_orphans(app, client, orchar
 
 
 def test_migration_existing_data_and_schema_match(tmp_path):
+    # Limit this round trip to the reversible orchard revisions. Later weir
+    # percentage migration intentionally blocks lossy downgrade.
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
 
@@ -328,11 +330,11 @@ def test_migration_existing_data_and_schema_match(tmp_path):
         farm = Farm(name="Rietfontein")
         db.session.add(farm); db.session.commit()
         farm_id = farm.id
-    result = runner.invoke(args=["db", "upgrade"])
+    result = runner.invoke(args=["db", "upgrade", "f9b2d4e6a810"])
     assert result.exit_code == 0, result.output
     result = runner.invoke(args=["import-orchard"])
     assert result.exit_code == 0, result.output
-    assert runner.invoke(args=["db", "upgrade"]).exit_code == 0
+    assert runner.invoke(args=["db", "upgrade", "f9b2d4e6a810"]).exit_code == 0
     with application.app_context():
         assert db.session.get(Farm, farm_id).name == "Rietfontein"
         assert OrchardPlant.query.count() == 92
@@ -374,7 +376,7 @@ def test_label_migration_preserves_existing_orchard_records(tmp_path):
 
     with application.app_context():
         before = existing_records()
-    result = runner.invoke(args=["db", "upgrade"])
+    result = runner.invoke(args=["db", "upgrade", "f9b2d4e6a810"])
     assert result.exit_code == 0, result.output
     with application.app_context():
         row = db.session.get(OrchardRow, "row")
@@ -388,7 +390,7 @@ def test_label_migration_preserves_existing_orchard_records(tmp_path):
     with application.app_context():
         assert existing_records() == before
         assert db.session.execute(text("PRAGMA foreign_key_check")).all() == []
-    result = runner.invoke(args=["db", "upgrade"])
+    result = runner.invoke(args=["db", "upgrade", "f9b2d4e6a810"])
     assert result.exit_code == 0, result.output
     with application.app_context():
         assert existing_records() == before

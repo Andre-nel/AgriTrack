@@ -60,6 +60,7 @@
   </form>
   <div
     id="farm-map"
+    data-water-asset-navigation="detail"
     data-url="{{ url_for('web.farm_map_data', farm_id=farm.id) }}"
     data-cow-icon="{{ url_for('static', filename='cow.png') }}"
     data-sheep-icon="{{ url_for('static', filename='sheep.png') }}"
@@ -197,6 +198,10 @@
         <label class="check-row"><input type="checkbox" name="active" value="1" checked /> Active</label>
         <label class="check-row"><input type="checkbox" name="needs_review" value="1" /> Needs Review</label>
       </div>
+      <div data-create-weir-level hidden>
+        <label>Water depth at wall (%)<input type="number" name="water_level_percent" min="0" max="100" step="0.01" value="0" disabled /></label>
+        <label>Overflowing<select name="is_overflowing" data-weir-overflow data-percent-name="water_level_percent" disabled><option value="0">No</option><option value="1">Overflowing (100%)</option></select></label>
+      </div>
       <button type="submit" class="btn">Create Asset</button>
     </form>
     </div>
@@ -333,12 +338,9 @@
     {% set linked_tasks = linked_tasks_by_water_asset_id.get(asset.id|string, []) %}
     {% set asset_events = water_asset_events_by_asset_id.get(asset.id|string, []) %}
     <article class="water-asset-card" id="asset-{{ asset.id }}">
-      <button
-        type="button"
+      <a
+        href="{{ url_for('web.water_asset_detail', farm_id=farm.id, asset_id=asset.id) }}"
         class="water-asset-button"
-        data-open-water-asset-modal="{{ asset.id }}"
-        aria-controls="water-asset-modal"
-        aria-haspopup="dialog"
       >
         <span class="water-asset-button-main">
           <span class="water-asset-button-topline">
@@ -351,8 +353,17 @@
             {% if asset.import_placemark_name %} | Imported from {{ asset.import_placemark_name }}{% endif %}
           </span>
         </span>
-        <span class="water-asset-button-action">Edit Asset</span>
-      </button>
+        <span class="water-asset-button-action">Open Asset</span>
+      </a>
+      {% if asset.asset_type == 'weir' %}
+      {% set info = asset_payloads[asset.id|string] %}
+      <div class="card">
+        <strong>{{ asset.level_label }}</strong> depth at wall
+        <p>Capacity: {{ info.capacity_m3 if info.capacity_m3 is not none else 'Unavailable' }} m³ · Current volume: {{ info.estimated_volume_m3 if info.estimated_volume_m3 is not none else 'Unknown' }} m³</p>
+        <p class="muted">{{ info.volume_estimate_status.replace('_', ' ')|title }}{% if info.weir_height_assumed %} · Preliminary wall height {{ info.weir_wall_height_m if info.weir_wall_height_m is not none else 1 }} m{% endif %}</p>
+        <a class="btn btn-secondary" href="{{ info.weir_geometry_url }}">Configure weir geometry</a>
+      </div>
+      {% endif %}
       <div class="water-asset-task-links">
         <div class="row-actions">
           <a class="btn btn-secondary" href="{{ url_for('tasks.new_task_page', water_asset_id=asset.id) }}">Create Task</a>
@@ -370,54 +381,7 @@
         </ul>
         {% endif %}
       </div>
-      <div class="water-asset-notes">
-        <h3>Asset Notes</h3>
-        <form
-          method="post"
-          action="{{ url_for('web.water_asset_event_create_form', farm_id=farm.id, asset_id=asset.id) }}"
-          class="grid-form"
-          enctype="multipart/form-data"
-        >
-          <label>Tags / Keywords
-            <input name="event_tags" placeholder="e.g. leak, pump, inspection" />
-          </label>
-          <label>Note
-            <textarea
-              name="event_description"
-              rows="3"
-              placeholder="Record water observations, maintenance notes, or follow-up items."
-              required
-            ></textarea>
-          </label>
-          <label>Images
-            <input type="file" name="event_images" accept="image/*" multiple />
-          </label>
-          <button type="submit" class="btn">Record Note</button>
-        </form>
-        <div class="water-asset-note-list">
-          {% for row in asset_events %}
-          <article class="comment-card">
-            <div class="task-card-topline">
-              <span class="muted">{{ row.event_at }}</span>
-              <span class="tag-pill">{{ row.tags | join(", ") }}</span>
-            </div>
-            <p class="text-body">{{ row.description }}</p>
-            {% if row.attachments %}
-            <div class="note-attachment-grid">
-              {% for attachment in row.attachments %}
-              <a class="note-attachment-card" href="{{ url_for('web.note_attachment_file', attachment_id=attachment.id) }}" target="_blank" rel="noopener">
-                <img src="{{ url_for('web.note_attachment_file', attachment_id=attachment.id) }}" alt="{{ attachment.caption or attachment.original_filename }}" />
-                <span>{{ attachment.original_filename }}</span>
-              </a>
-              {% endfor %}
-            </div>
-            {% endif %}
-          </article>
-          {% else %}
-          <p class="task-empty-state">No water asset notes recorded yet.</p>
-          {% endfor %}
-        </div>
-      </div>
+      {% include "water/_asset_notes.html" %}
     </article>
     {% else %}
     {% if assets %}
@@ -429,150 +393,7 @@
   </div>
 </section>
 
-<dialog
-  id="water-asset-modal"
-  class="entity-edit-modal water-asset-modal"
-  data-asset-api-base="{{ url_for('water_api.list_water_assets') }}"
-  data-update-url-base="{{ url_for('web.create_water_asset_form', farm_id=farm.id) }}/"
-  data-create-connection-url="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}"
-  data-update-connection-url-base="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}/"
-  data-delete-connection-url-base="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}/"
->
-  <div class="entity-edit-modal-header">
-    <div>
-      <p class="space-key">Water Asset</p>
-      <h2 data-water-asset-modal-title>Edit Asset</h2>
-      <p class="muted" data-water-asset-modal-subtitle>Load an asset from the map or the list to edit only the fields that apply to that asset type.</p>
-    </div>
-    <button type="button" class="btn btn-secondary" data-close-water-asset-modal>Close</button>
-  </div>
-  <p class="muted water-asset-modal-status" data-water-asset-modal-status hidden></p>
-  <form method="post" class="grid-form" data-water-asset-modal-form hidden>
-    <div class="grid-two">
-      <label data-water-asset-field="name">Name
-        <input name="name" maxlength="120" required />
-      </label>
-      <label data-water-asset-field="asset_type">Asset Type
-        <select name="asset_type" required>
-          {% for asset_type in water_asset_types %}
-          <option value="{{ asset_type }}">{{ water_asset_type_labels[asset_type] }}</option>
-          {% endfor %}
-        </select>
-      </label>
-    </div>
-    <div class="grid-two">
-      <label data-water-asset-field="latitude">Latitude
-        <input type="number" step="0.0000001" name="latitude" />
-      </label>
-      <label data-water-asset-field="longitude">Longitude
-        <input type="number" step="0.0000001" name="longitude" />
-      </label>
-    </div>
-    <div class="grid-two">
-      <label data-water-asset-field="altitude_m">Altitude (m)
-        <input type="number" step="0.01" name="altitude_m" />
-      </label>
-      <label data-water-asset-field="location_paddock_id">Location Paddock
-        <select name="location_paddock_id">
-          <option value="">None</option>
-          {% for paddock in paddocks %}
-          <option value="{{ paddock.id }}">{{ paddock.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-    </div>
-    <div class="grid-two">
-      <label data-water-asset-field="status">Status
-        <select name="status">
-          <option value="">None</option>
-        </select>
-      </label>
-      <label data-water-asset-field="water_level">Water Level
-        <select name="water_level">
-          <option value="">None</option>
-        </select>
-      </label>
-    </div>
-    <div class="grid-two">
-      <label data-water-asset-field="capacity_m3">Capacity (m3)
-        <input type="number" step="0.01" min="0" name="capacity_m3" />
-      </label>
-      <label data-water-asset-field="material">Material
-        <select name="material">
-          <option value="">None</option>
-        </select>
-      </label>
-    </div>
-    <div class="grid-two">
-      <label data-water-asset-field="windmill_size_ft">Windmill Size (ft)
-        <select name="windmill_size_ft">
-          <option value="">None</option>
-        </select>
-      </label>
-      <label data-water-asset-field="trough_size">Trough Size
-        <select name="trough_size">
-          <option value="">None</option>
-        </select>
-      </label>
-    </div>
-    <label data-water-asset-field="weir_size">Weir Size
-      <select name="weir_size">
-        <option value="">None</option>
-      </select>
-    </label>
-    <div class="grid-two">
-      <label data-water-asset-field="solar_brand">Solar Brand
-        <input name="solar_brand" />
-      </label>
-      <label data-water-asset-field="source_system">Source System
-        <input name="source_system" />
-      </label>
-    </div>
-    <div class="grid-two">
-      <label data-water-asset-field="solar_kw">Solar kW
-        <input type="number" step="0.01" min="0" name="solar_kw" />
-      </label>
-      <label data-water-asset-field="solar_head_m">Solar Head (m)
-        <input type="number" step="0.01" min="0" name="solar_head_m" />
-      </label>
-    </div>
-    <label data-water-asset-field="served_paddock_ids">Served Paddocks
-      <select name="served_paddock_ids" multiple size="4">
-        {% for paddock in paddocks %}
-        <option value="{{ paddock.id }}">{{ paddock.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <p class="muted water-asset-import-note" data-water-asset-import-note hidden></p>
-    <div class="row-actions">
-      <label class="check-row" data-water-asset-field="active"><input type="checkbox" name="active" value="1" /> Active</label>
-      <label class="check-row" data-water-asset-field="needs_review"><input type="checkbox" name="needs_review" value="1" /> Needs Review</label>
-    </div>
-    <div class="row-actions">
-      <button type="submit" class="btn">Save Asset</button>
-      <button type="button" class="btn btn-secondary" data-close-water-asset-modal>Cancel</button>
-    </div>
-  </form>
-  <section class="water-asset-task-panel" data-water-asset-task-panel hidden>
-    <div class="water-asset-connection-panel-header">
-      <h3>Linked Tasks</h3>
-    </div>
-    <div class="row-actions">
-      <a class="btn btn-secondary" href="#" data-water-asset-create-task>Create Task</a>
-    </div>
-    <div class="water-asset-task-list" data-water-asset-task-list></div>
-  </section>
-  <section class="water-asset-connection-panel" data-water-asset-connections hidden>
-    <div class="water-asset-connection-panel-header">
-      <div>
-        <h3>Asset Connections</h3>
-        <p class="muted" data-water-asset-connections-summary>Relevant source, destination, and pump links load here for this asset.</p>
-      </div>
-    </div>
-    <div class="water-asset-connection-add" data-water-asset-connection-add></div>
-    <div class="water-asset-connection-list" data-water-asset-connection-list></div>
-  </section>
-</dialog>
+{% include "water/_asset_editor.html" %}
 
 <section class="card">
   <h2>Water Connections</h2>
@@ -655,6 +476,7 @@
 <script id="water-asset-editor-config" type="application/json">{{ water_asset_editor_config | tojson }}</script>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='weir_level_inputs.js') }}"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script src="{{ url_for('static', filename='farm_map.js') }}"></script>
 <script src="{{ url_for('static', filename='farm_water.js') }}"></script>

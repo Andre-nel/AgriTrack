@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ asset.name }} | Water Asset | AgriTrack{% endblock %}
+{% block content %}
+<a class="btn btn-secondary" href="{{ url_for('web.farm_water_workspace', farm_id=farm.id) }}">Back to Water Network</a>
+<section class="paddock-page-header">
+  <div>
+    <p class="space-key">{{ farm.name }} · {{ info.asset_type_label }}</p>
+    <h1>{{ asset.name }}</h1>
+    <p>{{ 'Active' if asset.active else 'Inactive' }}{% if asset.needs_review %} · Needs review{% endif %}{% if asset.location_paddock %} · {{ asset.location_paddock.name }}{% endif %}</p>
+  </div>
+  <div class="row-actions">
+    <a class="btn" href="{{ analytics_url }}">Asset analytics</a>
+    {% if info.weir_geometry_url %}<a class="btn btn-secondary" href="{{ info.weir_geometry_url }}">Configure weir geometry</a>{% endif %}
+  </div>
+</section>
+<section class="card">
+  <h2>Current information</h2>
+  <div class="task-summary-grid">
+    <div><span>Status</span><strong>{{ (asset.status or 'Unknown').replace('_', ' ')|title }}</strong></div>
+    <div><span>{{ 'Water depth at wall' if asset.asset_type == 'weir' else 'Water level' }}</span><strong>{{ info.water_level_label }}</strong></div>
+    <div><span>Capacity (m³)</span><strong>{{ info.capacity_m3 if info.capacity_m3 is not none else 'Unknown' }}</strong></div>
+    {% if asset.asset_type == 'weir' %}
+    <div><span>Estimated volume (m³)</span><strong>{{ info.estimated_volume_m3 if info.estimated_volume_m3 is not none else 'Unknown' }}</strong></div>
+    <div><span>Wall depth (m)</span><strong>{{ info.weir_wall_height_m if info.weir_wall_height_m is not none else 'Not configured' }}{% if info.weir_height_assumed %} · Preliminary{% endif %}</strong></div>
+    <div><span>Geometry</span><strong>{{ info.volume_estimate_status.replace('_', ' ')|title }}</strong></div>
+    {% endif %}
+  </div>
+  {% if info.network_warning %}<p class="error-text">{{ info.network_warning }}</p>{% endif %}
+  {% if asset.asset_type == 'weir' %}
+  <p class="muted">Storage estimates use the configured outline, centreline and wall depth. Depth percentage is not percentage of stored volume.</p>
+  {% if info.volume_estimate_message %}<p>{{ info.volume_estimate_message }}</p>{% endif %}
+  {% endif %}
+  {% if asset.import_placemark_name %}<p class="muted">Imported placemark: {{ asset.import_placemark_name }}</p>{% endif %}
+</section>
+{% include "water/_asset_editor.html" %}
+<section class="card" id="asset-notes">
+  {% include "water/_asset_notes.html" %}
+</section>
+<details class="card analytics-section">
+  <summary><h2>Recent observations</h2></summary>
+  <p class="muted">Latest 50 recorded state changes. Open asset analytics to explore the history by date.</p>
+  <div class="analytics-table-scroll">
+    <table>
+      <thead><tr><th>Recorded at (UTC)</th><th>Change</th><th>Active</th><th>Status</th><th>Water level</th></tr></thead>
+      <tbody>
+        {% for row in history %}
+        <tr><td>{{ row.changed_at }}</td><td>{{ row.change_type|title }}</td><td>{{ 'Yes' if row.active else 'No' }}</td><td>{{ (row.status or 'Unknown').replace('_', ' ')|title }}</td><td>{{ row.level_label }}</td></tr>
+        {% else %}<tr><td colspan="5">No state observations recorded yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+<script id="water-asset-editor-config" type="application/json">{{ water_asset_editor_config|tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='weir_level_inputs.js') }}"></script>
+<script src="{{ url_for('static', filename='farm_water.js') }}"></script>
+<script src="{{ url_for('static', filename='farm_water_connections.js') }}"></script>
+{% endblock %}

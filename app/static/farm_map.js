@@ -704,6 +704,10 @@
   }
 
   function waterAssetLevelVisual(waterLevel) {
+    const numeric = Number(waterLevel);
+    if (waterLevel !== null && waterLevel !== "" && Number.isFinite(numeric)) {
+      return waterLevelVisuals[numeric === 0 ? "empty" : numeric < 37.5 ? "low" : numeric < 62.5 ? "half" : numeric < 100 ? "high" : "full"];
+    }
     return waterLevelVisuals[normalizeKey(waterLevel)] || null;
   }
 
@@ -730,7 +734,7 @@
     const name = String(props.name || "").trim();
     const assetTypeLabel = String(props.asset_type_label || "Water Asset").trim();
     const status = normalizeKey(props.status).replace(/_/g, " ");
-    const waterLevel = normalizeKey(props.water_level).replace(/_/g, " ");
+    const waterLevel = props.water_level_label || normalizeKey(props.water_level).replace(/_/g, " ");
 
     if (name) {
       bits.push(name);
@@ -863,6 +867,9 @@
       };
     }
 
+    if (props.feature_type === "water_asset") {
+      return { color: waterAssetOutlineColor(props.asset_type, props.status, props.water_level), weight: 2.5, fillColor: "#3b9fc4", fillOpacity: 0.3 };
+    }
     if (props.feature_type === "water_connection") {
       const gravity = props.flow_type === "gravity";
       return {
@@ -1031,12 +1038,8 @@
         const reviewText = props.needs_review ? "Yes" : "No";
         const networkText = props.network_warning ? escapeHtml(props.network_warning) : "-";
         const openAssetLink =
-          props.asset_workspace_url && props.id
-            ? '<a href="' +
-              escapeHtml(props.asset_workspace_url + "?open_asset_id=" + encodeURIComponent(String(props.id)) + "#water-assets") +
-              '" data-open-water-asset-modal="' +
-              escapeHtml(String(props.id)) +
-              '">Open asset</a>'
+          props.asset_detail_url
+            ? '<a href="' + escapeHtml(props.asset_detail_url) + '">Open asset</a>'
             : "";
         return [
           farmLine,
@@ -1045,13 +1048,16 @@
           '<table class="map-popup-table">',
           "<tr><td>Location Paddock</td><td>" + locationText + "</td></tr>",
           "<tr><td>Status</td><td>" + escapeHtml(props.status || "-") + "</td></tr>",
-          "<tr><td>Water Level</td><td>" + escapeHtml(props.water_level || "-") + "</td></tr>",
+          "<tr><td>Water Level</td><td>" + escapeHtml(props.water_level_label || props.water_level || "-") + "</td></tr>",
           "<tr><td>Network</td><td>" + networkText + "</td></tr>",
-          "<tr><td>Capacity (m3)</td><td>" + formatNumber(props.capacity_m3, 2) + "</td></tr>",
+          "<tr><td>Capacity (m³)</td><td>" + formatNumber(props.capacity_m3, 2) + "</td></tr>",
+          props.asset_type === "weir" ? "<tr><td>Estimated volume (m³)</td><td>" + formatNumber(props.estimated_volume_m3, 2) + "</td></tr>" : "",
+          props.asset_type === "weir" ? "<tr><td>Estimate</td><td>" + escapeHtml((props.volume_estimate_status || "").replace(/_/g, " ")) + "</td></tr>" : "",
           "<tr><td>Needs Review</td><td>" + reviewText + "</td></tr>",
           "</table>",
           "<strong>Served Paddocks</strong><br>" + servedText,
           openAssetLink ? "<br>" + openAssetLink : "",
+          props.weir_geometry_url ? '<br><a href="' + escapeHtml(props.weir_geometry_url) + '">Configure weir geometry</a>' : "",
         ].join("");
       }
 
@@ -2687,7 +2693,11 @@
       const passiveFenceContext =
         fenceFocusMode && (props.feature_type === "paddock" || props.feature_type === "farm_boundary");
       if (!passiveFenceContext) {
-        geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
+        if (props.feature_type === "water_asset" && props.asset_detail_url && mapElement.dataset.waterAssetNavigation === "detail") {
+          geoLayer.on("click", () => { window.location.href = props.asset_detail_url; });
+        } else {
+          geoLayer.bindPopup(popupHtml(feature.properties || {}), { maxWidth: 360 });
+        }
         bindWaterAlertTooltip(feature, geoLayer);
       }
       addPaddockNameLabel(feature, geoLayer, paddockLabelLayer);

@@ -30,6 +30,8 @@
     if (value === null || value === undefined) {
       return "N/A";
     }
+    if (panel.numeric_percentage) return String(value) + "%";
+    if (panel.numeric_value) return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " " + (panel.unit || "");
     const key = String(value);
     return (panel.value_labels || {})[key] || key;
   }
@@ -39,6 +41,11 @@
     if (!canvas || !panel) {
       return;
     }
+    for (let section = canvas.closest("details"); section; section = section.parentElement.closest("details")) {
+      if (!section.open) return;
+    }
+    const existing = Chart.getChart(canvas);
+    if (existing) { existing.resize(); return; }
 
     const datasets = (panel.datasets || []).map((series, seriesIndex) => {
       const color = colors[seriesIndex % colors.length];
@@ -48,7 +55,10 @@
         borderColor: color,
         backgroundColor: color,
         borderWidth: 2,
-        pointRadius: 0,
+        borderDash: series.reference ? [6, 4] : [],
+        overflowing: series.overflowing || [],
+        pointRadius: series.reference ? 0 : (series.overflowing || []).map(value => value ? 4 : 0),
+        pointStyle: (series.overflowing || []).map(value => value ? "triangle" : "circle"),
         pointHoverRadius: 4,
         stepped: true,
         spanGaps: false,
@@ -62,6 +72,7 @@
         datasets,
       },
       options: {
+        animation: false,
         responsive: true,
         maintainAspectRatio: false,
         interaction: {
@@ -76,7 +87,7 @@
             callbacks: {
               label: function (context) {
                 const seriesLabel = context.dataset.label || "";
-                return seriesLabel + ": " + valueLabel(panel, context.parsed.y);
+                return seriesLabel + ": " + valueLabel(panel, context.parsed.y) + (context.dataset.overflowing[context.dataIndex] ? " — Overflowing" : "");
               },
             },
           },
@@ -84,9 +95,9 @@
         scales: {
           y: {
             min: panel.y_min || 0,
-            max: panel.y_max || 0,
+            max: panel.y_max == null ? undefined : panel.y_max,
             ticks: {
-              stepSize: 1,
+              stepSize: panel.numeric_percentage ? 25 : panel.numeric_value ? undefined : 1,
               callback: function (value) {
                 return valueLabel(panel, value);
               },
@@ -107,4 +118,7 @@
   }
 
   panels.forEach(renderPanel);
+  document.addEventListener("toggle", event => {
+    if (event.target.matches("details.analytics-section") && event.target.open) panels.forEach(renderPanel);
+  }, true);
 })();

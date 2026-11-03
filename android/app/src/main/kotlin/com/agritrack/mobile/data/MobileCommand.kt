@@ -326,6 +326,7 @@ data class MobileCommand(
             status: String,
             waterLevel: String,
             active: Boolean = true,
+            percentageLevel: Boolean = false,
         ): MobileCommand {
             val payload = JSONObject()
                 .put("water_asset_id", waterAssetId)
@@ -333,7 +334,21 @@ data class MobileCommand(
             if (status.isNotBlank()) {
                 payload.put("status", status.trim())
             }
-            if (waterLevel.isNotBlank()) {
+            if (percentageLevel) {
+                val reading = waterLevel.trim()
+                val overflowing = reading.equals("overflowing", ignoreCase = true)
+                val percent = when {
+                    overflowing -> java.math.BigDecimal("100")
+                    reading.isBlank() -> null
+                    else -> reading.toBigDecimalOrNull()
+                        ?: throw IllegalArgumentException("Water depth must be a percentage from 0 to 100.")
+                }
+                require(percent == null || (percent >= java.math.BigDecimal.ZERO && percent <= java.math.BigDecimal("100") && percent.stripTrailingZeros().scale() <= 2)) {
+                    "Water depth must be between 0 and 100, with at most two decimal places."
+                }
+                payload.put("water_level_percent", percent?.toDouble() ?: JSONObject.NULL)
+                payload.put("is_overflowing", overflowing)
+            } else if (waterLevel.isNotBlank()) {
                 payload.put("water_level", waterLevel.trim())
             }
             return MobileCommand(

@@ -11,6 +11,7 @@ from app.services.grazing_history_service import GrazingHistoryService
 from app.services.paddock_service import PaddockService
 from app.services.reporting_service import ReportingService
 from app.services.water_network_service import WaterNetworkService
+from app.services.kml_features import is_weir_polygon
 
 
 def _normalize_name(value: str | None) -> str:
@@ -69,6 +70,8 @@ def _load_farm_kml_features(farm_name: str) -> tuple[list[dict], str]:
     root = ET.parse(kml_path).getroot()
     features = []
     for placemark in root.findall(".//k:Placemark", namespace):
+        if is_weir_polygon(placemark):
+            continue
         name = placemark.findtext("k:name", default="", namespaces=namespace).strip()
         geometry = _placemark_geometry(placemark, namespace)
         if not name or geometry is None:

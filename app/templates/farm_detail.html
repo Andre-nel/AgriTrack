@@ -6,7 +6,10 @@
 {% block content %}
 <h1>{{ farm.name }}</h1>
 <p class="muted">Timezone: {{ farm.timezone }}</p>
-<p><a class="btn btn-secondary" href="{{ url_for('orchards.index', farm_id=farm.id) }}">Open Orchards</a></p>
+<p class="row-actions">
+  <a class="btn btn-secondary" href="{{ url_for('orchards.index', farm_id=farm.id) }}">Open Orchards</a>
+  <a class="btn btn-secondary" href="{{ url_for('web.farm_water_workspace', farm_id=farm.id) }}">Open Water Workspace</a>
+</p>
 
 <div class="cards">
   <article class="card stat"><h2>Paddocks</h2><p>{{ paddocks|length }}</p></article>

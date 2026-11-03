@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+from types import SimpleNamespace
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
@@ -28,6 +29,8 @@ from app.modules.analytics.constants import (
 from app.services.mob_event_service import MobEventService
 from app.services.shearing_service import ShearingService
 from app.services.water_network_service import WaterNetworkService
+from app.services.water_level import level_label
+from app.services import weir_volume_service
 
 
 def create_journal_entry(
@@ -104,6 +107,9 @@ def _water_asset_state_from_row(row: WaterAssetStateHistory) -> dict:
         "active": bool(row.active),
         "status": row.status,
         "water_level": row.water_level,
+        "water_level_percent": float(row.water_level_percent) if row.water_level_percent is not None else None,
+        "is_overflowing": bool(row.is_overflowing),
+        "water_level_label": level_label(row),
     }
 
 
@@ -277,7 +283,7 @@ def _water_asset_summary_row(
     latest_active = latest_state.get("active") if latest_state else None
     latest_status = latest_state.get("status") if latest_state else None
     latest_water_level = latest_state.get("water_level") if latest_state else None
-    return {
+    result = {
         "asset_name": _water_asset_label(asset, include_farm_name),
         "asset_type_label": WaterNetworkService.ASSET_TYPE_LABELS.get(
             asset.asset_type,
@@ -314,6 +320,24 @@ def _water_asset_summary_row(
             if value in {"half", "high", "full"}
         ),
     }
+
+    if asset.asset_type == "weir":
+        observed = [state for state in daily_states if state and state.get("water_level_percent") is not None]
+        counts = defaultdict(int)
+        for state in observed:
+            counts[(state["water_level_percent"], state["is_overflowing"])] += 1
+        dominant = max(counts, key=lambda key: (counts[key], key)) if counts else None
+        result.update(
+            latest_water_level_label=latest_state["water_level_label"] if latest_state else "Unknown",
+            dominant_water_level_label=("Overflowing (100%)" if dominant[1] else f"{dominant[0]:g}%") if dominant else "Unknown",
+            water_level_change_count=sum(
+                (row.previous_water_level_percent, bool(row.previous_is_overflowing)) != (row.water_level_percent, bool(row.is_overflowing))
+                for row in in_range_rows if row.change_type == "updated"
+            ),
+            empty_low_days=sum(state["water_level_percent"] <= 25 for state in observed),
+            half_or_better_days=sum(state["water_level_percent"] >= 50 for state in observed),
+        )
+    return result
 
 
 def _water_asset_chart_values(
@@ -357,6 +381,86 @@ def _water_asset_chart_panel(
     }
 
 
+def _water_asset_storage_values(asset, daily_states, *, include_volume):
+    """Project depth observations through today's model without changing history.
+
+    Capacity and geometry have no historical snapshots. Capacity is therefore a
+    current reference, and volumes must remain explicitly labelled estimates
+    using current geometry. Calculate each distinct depth once per report.
+    """
+    current = weir_volume_service.estimate(asset)
+    capacity = current["capacity_m3"]
+    if asset.asset_type != "weir" or not asset.weir_polygon:
+        capacity = float(asset.capacity_m3) if asset.capacity_m3 is not None else None
+    values = [None] * len(daily_states)
+    message = None
+    if include_volume:
+        if current["capacity_m3"] is None:
+            message = current["volume_estimate_message"] or current["volume_estimate_status"].replace("_", " ")
+        else:
+            # Use a detached input object: assigning an old depth to the ORM
+            # asset would dirty current farm data during a read-only report.
+            model = SimpleNamespace(**{name: getattr(asset, name) for name in (
+                "asset_type", "weir_polygon", "weir_centerline", "weir_wall_height_m",
+                "weir_height_assumed", "weir_geometry_review_required",
+            )}, water_level_percent=None)
+            volumes = {}
+            for index, state in enumerate(daily_states):
+                depth = state.get("water_level_percent") if state else None
+                if depth is None:
+                    continue
+                if depth not in volumes:
+                    model.water_level_percent = depth
+                    estimate = weir_volume_service.estimate(model)
+                    volumes[depth] = estimate["estimated_volume_m3"]
+                    if volumes[depth] is None:
+                        message = estimate["volume_estimate_message"] or "Volume estimate unavailable"
+                values[index] = volumes[depth]
+            if not volumes:
+                message = "No recorded depth is available in this period"
+    return {"capacity_m3": capacity, "estimated_volume_m3": values, "message": message}
+
+
+def _water_storage_panels(field, assets, state_series, storage_values, labels, plot_mode, include_farm_name):
+    capacity_reference = field == "capacity_m3"
+    eligible = assets if capacity_reference else [asset for asset in assets if asset.asset_type == "weir"]
+    groups = [[asset] for asset in eligible] if plot_mode == "asset" else [eligible]
+    panels = []
+    for group in groups:
+        if not group:
+            continue
+        datasets, messages = [], []
+        for asset in group:
+            label = _water_asset_label(asset, include_farm_name)
+            storage = storage_values[str(asset.id)]
+            values = [storage[field]] * len(labels) if capacity_reference else storage[field]
+            if any(value is not None for value in values):
+                series = {"label": label, "values": values, "reference": capacity_reference}
+                if not capacity_reference:
+                    series["overflowing"] = [bool(s and s["is_overflowing"]) for s in state_series[str(asset.id)]["daily_states"]]
+                datasets.append(series)
+                if not capacity_reference and storage["message"]:
+                    messages.append(f"{label}: {storage['message']}")
+            else:
+                messages.append(f"{label}: " + ("Current capacity unavailable" if capacity_reference else storage["message"] or "Volume estimate unavailable"))
+            if asset.asset_type == "weir" and asset.weir_polygon and asset.weir_height_assumed:
+                messages.append(f"{label}: wall depth is a preliminary assumption")
+        heading = WATER_ASSET_STATE_FIELD_LABELS[field]
+        title = f"{_water_asset_label(group[0], include_farm_name)} | {heading}" if plot_mode == "asset" else heading + ("" if capacity_reference else " Over Time")
+        panels.append({
+            "id": f"{field}:{title}", "field": field, "title": title,
+            "y_axis_label": "Capacity (m³)" if capacity_reference else "Estimated volume (m³)",
+            "y_min": 0, "y_max": None, "unit": "m³", "numeric_value": True,
+            "datasets": datasets, "messages": messages,
+            "description": (
+                "Today's capacity shown across the selected dates for reference. Historical capacity changes were not recorded."
+                if capacity_reference else
+                "Recalculated from recorded depths using the current outline, centreline and wall depth. These are estimates, not recorded volumes. Changing the geometry recalculates this series; unknown depths remain gaps."
+            ),
+        })
+    return panels
+
+
 def build_water_asset_state_report(
     *,
     assets: list[WaterAsset],
@@ -390,7 +494,7 @@ def build_water_asset_state_report(
 
     category_maps = {
         field: _water_asset_category_maps(field=field, assets=assets, history_rows=history_rows)
-        for field in state_fields
+        for field in state_fields if field not in {"capacity_m3", "estimated_volume_m3"}
     }
     state_series_by_asset_id = {}
     summary_rows = []
@@ -415,57 +519,47 @@ def build_water_asset_state_report(
             )
         )
 
+    storage_values = {}
+    if {"capacity_m3", "estimated_volume_m3"}.intersection(state_fields):
+        storage_values = {
+            str(asset.id): _water_asset_storage_values(
+                asset, state_series_by_asset_id[str(asset.id)]["daily_states"],
+                include_volume="estimated_volume_m3" in state_fields and asset.asset_type == "weir",
+            ) for asset in assets
+        }
     panels = []
-    if plot_mode == "asset":
-        for asset in assets:
-            asset_id = str(asset.id)
-            asset_label = _water_asset_label(asset, include_farm_name)
-            daily_states = state_series_by_asset_id[asset_id]["daily_states"]
-            for field in state_fields:
-                category_map = category_maps[field]
-                values = _water_asset_chart_values(
-                    daily_states=daily_states,
-                    field=field,
-                    value_to_index=category_map["value_to_index"],
-                )
-                if not any(value is not None for value in values):
-                    continue
-                panels.append(
-                    _water_asset_chart_panel(
-                        field=field,
-                        title=f"{asset_label} | {WATER_ASSET_STATE_FIELD_LABELS[field]}",
-                        datasets=[{"label": asset_label, "values": values}],
-                        index_to_label=category_map["index_to_label"],
-                    )
-                )
-    else:
-        for field in state_fields:
-            category_map = category_maps[field]
+    for field in state_fields:
+        if field in {"capacity_m3", "estimated_volume_m3"}:
+            panels.extend(_water_storage_panels(field, assets, state_series_by_asset_id, storage_values,
+                                                labels, plot_mode, include_farm_name))
+            continue
+        groups = [(False, assets)]
+        if field == "water_level":
+            groups = [(False, [a for a in assets if any(s and s["water_level"] is not None for s in state_series_by_asset_id[str(a.id)]["daily_states"])]),
+                      (True, [a for a in assets if a.asset_type == "weir" or any(s and s["water_level_percent"] is not None for s in state_series_by_asset_id[str(a.id)]["daily_states"])])]
+        for numeric, group in groups:
             datasets = []
-            for asset in assets:
-                asset_id = str(asset.id)
-                values = _water_asset_chart_values(
-                    daily_states=state_series_by_asset_id[asset_id]["daily_states"],
-                    field=field,
-                    value_to_index=category_map["value_to_index"],
-                )
+            for asset in group:
+                states = state_series_by_asset_id[str(asset.id)]["daily_states"]
+                values = [s["water_level_percent"] if s else None for s in states] if numeric else _water_asset_chart_values(
+                    daily_states=states, field=field, value_to_index=category_maps[field]["value_to_index"])
                 if not any(value is not None for value in values):
                     continue
-                datasets.append(
-                    {
-                        "label": _water_asset_label(asset, include_farm_name),
-                        "values": values,
-                    }
-                )
-            if datasets:
-                panels.append(
-                    _water_asset_chart_panel(
-                        field=field,
-                        title=f"{WATER_ASSET_STATE_FIELD_LABELS[field]} Over Time",
-                        datasets=datasets,
-                        index_to_label=category_map["index_to_label"],
-                    )
-                )
+                series = {"label": _water_asset_label(asset, include_farm_name), "values": values}
+                if numeric:
+                    series["overflowing"] = [bool(s and s["is_overflowing"]) for s in states]
+                datasets.append(series)
+            collections = [[series] for series in datasets] if plot_mode == "asset" else [datasets]
+            for collection in collections:
+                if not collection:
+                    continue
+                heading = "Weir Depth (%)" if numeric else WATER_ASSET_STATE_FIELD_LABELS[field]
+                title = f"{collection[0]['label']} | {heading}" if plot_mode == "asset" else f"{heading} Over Time"
+                panel = _water_asset_chart_panel(field=field, title=title, datasets=collection,
+                                                index_to_label=category_maps[field]["index_to_label"])
+                if numeric:
+                    panel.update(numeric_percentage=True, y_axis_label="Water depth at wall (%)", y_max=100, value_labels={})
+                panels.append(panel)
 
     summary_rows.sort(key=lambda row: (row["asset_name"].lower(), row["asset_type_label"].lower()))
     return {

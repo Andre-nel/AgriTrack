@@ -42,9 +42,11 @@ WATER_ASSET_STATE_FIELD_LABELS = {
     "active": "Active State",
     "status": "Status",
     "water_level": "Water Level",
+    "capacity_m3": "Current Capacity Reference (m³)",
+    "estimated_volume_m3": "Estimated Weir Volume (m³)",
 }
-WATER_ASSET_STATE_FIELD_ORDER = ("active", "status", "water_level")
-WATER_ASSET_STATE_DEFAULT_FIELDS = WATER_ASSET_STATE_FIELD_ORDER
+WATER_ASSET_STATE_DEFAULT_FIELDS = ("active", "status", "water_level")
+WATER_ASSET_STATE_FIELD_ORDER = (*WATER_ASSET_STATE_DEFAULT_FIELDS, "capacity_m3", "estimated_volume_m3")
 WATER_ASSET_ANALYTICS_PLOT_MODES = {
     "overlay": "Overlay Selected Assets",
     "asset": "Separate Plot Per Asset",

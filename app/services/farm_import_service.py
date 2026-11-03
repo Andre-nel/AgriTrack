@@ -20,6 +20,9 @@ from app.services.farm_capacity_service import FarmCapacityService
 from app.services.fence_service import FenceService
 from app.services.gate_service import GateService
 from app.services.water_network_service import WaterNetworkService
+from app.services.polygon_geometry import PlanarGeometry
+from app.services.kml_features import is_weir_polygon
+from app.services.weir_volume_service import validate_polygon
 
 KML_NAMESPACE = "http://www.opengis.net/kml/2.2"
 GX_NAMESPACE = "http://www.google.com/kml/ext/2.2"
@@ -42,7 +45,7 @@ WATER_ASSET_CODE_MAP = {
 }
 
 
-class FarmImportService:
+class FarmImportService(PlanarGeometry):
     MAX_FARM_NAME_LENGTH = 120
 
     @classmethod
@@ -390,236 +393,6 @@ class FarmImportService:
             raise ValueError(f"Unable to calculate area for paddock {paddock_name}")
         return coords
 
-    @staticmethod
-    def _open_ring(coords: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        if len(coords) >= 2 and coords[0] == coords[-1]:
-            return list(coords[:-1])
-        return list(coords)
-
-    @classmethod
-    def _project_lon_lat_points(
-        cls,
-        points: list[tuple[float, float]],
-        lat0: float,
-    ) -> list[tuple[float, float]]:
-        cos_lat0 = cos(radians(lat0))
-        return [
-            (
-                EARTH_RADIUS_M * radians(lon) * cos_lat0,
-                EARTH_RADIUS_M * radians(lat),
-            )
-            for lon, lat in points
-        ]
-
-    @staticmethod
-    def _signed_area(points: list[tuple[float, float]]) -> float:
-        if len(points) < 3:
-            return 0.0
-        area = 0.0
-        for index, point in enumerate(points):
-            next_point = points[(index + 1) % len(points)]
-            area += (point[0] * next_point[1]) - (next_point[0] * point[1])
-        return area / 2.0
-
-    @classmethod
-    def _projected_ring_area_m2(cls, coords: list[tuple[float, float]], paddock_name: str) -> float:
-        open_ring = cls._open_ring(coords)
-        if len(open_ring) < 3:
-            raise ValueError(f"Unable to calculate area for paddock {paddock_name}")
-
-        lat0 = sum(lat for _, lat in open_ring) / len(open_ring)
-        projected = cls._project_lon_lat_points(open_ring, lat0)
-        area = abs(cls._signed_area(projected))
-        if area <= 0:
-            raise ValueError(f"Unable to calculate area for paddock {paddock_name}")
-        return area
-
-    @staticmethod
-    def _points_close(left: tuple[float, float], right: tuple[float, float]) -> bool:
-        return abs(left[0] - right[0]) <= GEOMETRY_EPSILON and abs(left[1] - right[1]) <= GEOMETRY_EPSILON
-
-    @staticmethod
-    def _cross_product(
-        left: tuple[float, float],
-        middle: tuple[float, float],
-        right: tuple[float, float],
-    ) -> float:
-        return ((middle[0] - left[0]) * (right[1] - left[1])) - (
-            (middle[1] - left[1]) * (right[0] - left[0])
-        )
-
-    @classmethod
-    def _clean_projected_ring(cls, points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        if not points:
-            return []
-
-        deduped: list[tuple[float, float]] = []
-        for point in points:
-            if not deduped or not cls._points_close(deduped[-1], point):
-                deduped.append(point)
-        if len(deduped) > 1 and cls._points_close(deduped[0], deduped[-1]):
-            deduped.pop()
-
-        if len(deduped) < 3:
-            return deduped
-
-        cleaned: list[tuple[float, float]] = []
-        total_points = len(deduped)
-        for index, point in enumerate(deduped):
-            previous_point = deduped[index - 1]
-            next_point = deduped[(index + 1) % total_points]
-            cross = cls._cross_product(previous_point, point, next_point)
-            if abs(cross) <= GEOMETRY_EPSILON:
-                continue
-            cleaned.append(point)
-        return cleaned
-
-    @classmethod
-    def _triangle_contains_point(
-        cls,
-        point: tuple[float, float],
-        a: tuple[float, float],
-        b: tuple[float, float],
-        c: tuple[float, float],
-    ) -> bool:
-        d1 = cls._cross_product(point, a, b)
-        d2 = cls._cross_product(point, b, c)
-        d3 = cls._cross_product(point, c, a)
-        has_negative = d1 < -GEOMETRY_EPSILON or d2 < -GEOMETRY_EPSILON or d3 < -GEOMETRY_EPSILON
-        has_positive = d1 > GEOMETRY_EPSILON or d2 > GEOMETRY_EPSILON or d3 > GEOMETRY_EPSILON
-        return not (has_negative and has_positive)
-
-    @classmethod
-    def _triangulate_ring(
-        cls,
-        points: list[tuple[float, float]],
-        paddock_name: str,
-    ) -> list[list[tuple[float, float]]]:
-        ring = cls._clean_projected_ring(points)
-        if len(ring) < 3:
-            raise ValueError(f"Unable to calculate area for paddock {paddock_name}")
-
-        if cls._signed_area(ring) < 0:
-            ring = list(reversed(ring))
-
-        if len(ring) == 3:
-            return [ring]
-
-        indices = list(range(len(ring)))
-        triangles: list[list[tuple[float, float]]] = []
-        guard = 0
-        max_guard = len(ring) * len(ring) * 4
-
-        while len(indices) > 3 and guard <= max_guard:
-            ear_found = False
-            index_count = len(indices)
-            for position in range(index_count):
-                prev_index = indices[(position - 1) % index_count]
-                current_index = indices[position]
-                next_index = indices[(position + 1) % index_count]
-                prev_point = ring[prev_index]
-                current_point = ring[current_index]
-                next_point = ring[next_index]
-
-                if cls._cross_product(prev_point, current_point, next_point) <= GEOMETRY_EPSILON:
-                    continue
-                triangle = [prev_point, current_point, next_point]
-                if abs(cls._signed_area(triangle)) <= GEOMETRY_EPSILON:
-                    continue
-
-                contains_other_vertex = False
-                for candidate_index in indices:
-                    if candidate_index in {prev_index, current_index, next_index}:
-                        continue
-                    if cls._triangle_contains_point(ring[candidate_index], *triangle):
-                        contains_other_vertex = True
-                        break
-                if contains_other_vertex:
-                    continue
-
-                triangles.append(triangle)
-                indices.pop(position)
-                ear_found = True
-                break
-
-            if not ear_found:
-                raise ValueError(f"Unable to calculate area for paddock {paddock_name}")
-            guard += 1
-
-        if len(indices) != 3:
-            raise ValueError(f"Unable to calculate area for paddock {paddock_name}")
-        triangles.append([ring[indices[0]], ring[indices[1]], ring[indices[2]]])
-        return triangles
-
-    @staticmethod
-    def _line_intersection(
-        start: tuple[float, float],
-        end: tuple[float, float],
-        clip_start: tuple[float, float],
-        clip_end: tuple[float, float],
-    ) -> tuple[float, float]:
-        x1, y1 = start
-        x2, y2 = end
-        x3, y3 = clip_start
-        x4, y4 = clip_end
-        denominator = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4))
-        if abs(denominator) <= GEOMETRY_EPSILON:
-            return end
-        determinant_start = (x1 * y2) - (y1 * x2)
-        determinant_clip = (x3 * y4) - (y3 * x4)
-        x = ((determinant_start * (x3 - x4)) - ((x1 - x2) * determinant_clip)) / denominator
-        y = ((determinant_start * (y3 - y4)) - ((y1 - y2) * determinant_clip)) / denominator
-        return (x, y)
-
-    @classmethod
-    def _clip_polygon_to_edge(
-        cls,
-        polygon: list[tuple[float, float]],
-        clip_start: tuple[float, float],
-        clip_end: tuple[float, float],
-    ) -> list[tuple[float, float]]:
-        if not polygon:
-            return []
-
-        clipped: list[tuple[float, float]] = []
-
-        def is_inside(point: tuple[float, float]) -> bool:
-            return cls._cross_product(clip_start, clip_end, point) >= -GEOMETRY_EPSILON
-
-        previous_point = polygon[-1]
-        previous_inside = is_inside(previous_point)
-
-        for current_point in polygon:
-            current_inside = is_inside(current_point)
-            if current_inside:
-                if not previous_inside:
-                    clipped.append(
-                        cls._line_intersection(previous_point, current_point, clip_start, clip_end)
-                    )
-                clipped.append(current_point)
-            elif previous_inside:
-                clipped.append(
-                    cls._line_intersection(previous_point, current_point, clip_start, clip_end)
-                )
-            previous_point = current_point
-            previous_inside = current_inside
-
-        return clipped
-
-    @classmethod
-    def _triangle_intersection_area(
-        cls,
-        left_triangle: list[tuple[float, float]],
-        right_triangle: list[tuple[float, float]],
-    ) -> float:
-        polygon = list(left_triangle)
-        for index, point in enumerate(right_triangle):
-            next_point = right_triangle[(index + 1) % len(right_triangle)]
-            polygon = cls._clip_polygon_to_edge(polygon, point, next_point)
-            if len(polygon) < 3:
-                return 0.0
-        return abs(cls._signed_area(polygon))
-
     @classmethod
     def _simple_polygon_intersection_area_m2(
         cls,
@@ -775,11 +548,13 @@ class FarmImportService:
         return total_overlap_m2 / 10000.0
 
     @classmethod
-    def _parse_kml_paddocks_from_root(cls, *, root, farm_name: str) -> list[dict]:
+    def _parse_kml_paddocks_from_root(cls, *, root, farm_name: str, managed_point_hints=None) -> list[dict]:
         paddocks = []
         seen_paddock_names = set()
         farm_name_key = cls.normalize_name(farm_name).casefold()
         for placemark in root.findall(".//k:Placemark", KML_NAMESPACES):
+            if is_weir_polygon(placemark, managed_point_hints):
+                continue
             placemark_name = (
                 placemark.findtext("k:name", default="", namespaces=KML_NAMESPACES) or ""
             ).strip()
@@ -836,6 +611,8 @@ class FarmImportService:
         managed_point_hints: dict[str, str],
     ) -> list[dict]:
         water_assets = []
+        polygon_weirs = {}
+        weir_points = {}
 
         for placemark in root.findall(".//k:Placemark", KML_NAMESPACES):
             placemark_name = (
@@ -844,7 +621,10 @@ class FarmImportService:
             point_coordinates = cls._parse_point_coordinates(
                 placemark.findtext(".//k:Point/k:coordinates", default="", namespaces=KML_NAMESPACES)
             )
-            if not placemark_name or point_coordinates is None:
+            polygon_weir = is_weir_polygon(placemark, managed_point_hints)
+            if polygon_weir and not placemark_name:
+                raise ValueError("Every WR polygon needs a name to identify its weir")
+            if not placemark_name or (point_coordinates is None and not polygon_weir):
                 continue
 
             style_url = (placemark.findtext("k:styleUrl", default="", namespaces=KML_NAMESPACES) or "").strip()
@@ -856,10 +636,24 @@ class FarmImportService:
                 description_tokens,
                 managed_point_hints,
             )
+            if polygon_weir:
+                asset_type = "weir"
             if not asset_type:
                 continue
 
             validated_name = WaterNetworkService.validate_name(placemark_name)
+            key = cls.normalize_name(validated_name).casefold()
+            polygon = None
+            if polygon_weir:
+                geometries = cls._placemark_geometry(placemark, validated_name)
+                if len(geometries) != 1:
+                    raise ValueError(f"Weir {validated_name} requires one connected polygon")
+                geometry = geometries[0]
+                polygon = validate_polygon({"type": "Polygon", "coordinates": [geometry["outer"], *geometry["inners"]]})
+                if key in polygon_weirs and polygon_weirs[key]["weir_polygon"] != polygon:
+                    raise ValueError(f"Conflicting polygon weirs named {validated_name}")
+                # Boundary anchor is provisional until the user confirms the wall.
+                point_coordinates = point_coordinates or (*polygon["coordinates"][0][0], None)
             containing_paddock_key = cls._containing_paddock_key(
                 (point_coordinates[0], point_coordinates[1]),
                 paddocks,
@@ -870,8 +664,7 @@ class FarmImportService:
                     paddocks,
                     max_distance_m=250.0,
                 )
-            water_assets.append(
-                {
+            water_payload = {
                     "name": validated_name,
                     "asset_type": asset_type,
                     "latitude": point_coordinates[1],
@@ -886,7 +679,24 @@ class FarmImportService:
                     "import_placemark_name": validated_name,
                     "import_style_url": style_url or None,
                 }
-            )
+            if polygon is not None:
+                water_payload["weir_polygon"] = polygon
+                polygon_weirs[key] = water_payload
+            elif asset_type == "weir":
+                previous = weir_points.get(key)
+                if previous and (previous["latitude"], previous["longitude"]) != (water_payload["latitude"], water_payload["longitude"]):
+                    raise ValueError(f"Conflicting point weirs named {validated_name}")
+                weir_points[key] = water_payload
+            else:
+                water_assets.append(water_payload)
+
+        for key, polygon in polygon_weirs.items():
+            point = weir_points.pop(key, None)
+            if point:
+                for field in ("latitude", "longitude", "altitude_m", "location_paddock_key", "served_paddock_keys"):
+                    polygon[field] = point[field]
+            water_assets.append(polygon)
+        water_assets.extend(weir_points.values())
 
         return water_assets
 
@@ -903,11 +713,12 @@ class FarmImportService:
             raise ValueError("Uploaded KML file is empty")
 
         root = cls._parse_root(file_bytes, "Unable to parse the uploaded KML file")
-        paddocks = cls._parse_kml_paddocks_from_root(root=root, farm_name=farm_name)
+        hints = cls._parse_managed_point_hints(managed_point_hints)
+        paddocks = cls._parse_kml_paddocks_from_root(root=root, farm_name=farm_name, managed_point_hints=hints)
         water_assets = cls._parse_kml_water_assets_from_root(
             root=root,
             paddocks=paddocks,
-            managed_point_hints=cls._parse_managed_point_hints(managed_point_hints),
+            managed_point_hints=hints,
         )
         return {"farm_name": farm_name, "paddocks": paddocks, "water_assets": water_assets}
 
@@ -1369,12 +1180,34 @@ class FarmImportService:
                 ],
             }
             existing_asset = imported_water_assets_by_name.get(water_name_key)
+            if water_payload["asset_type"] == "weir":
+                candidates = [candidate for candidate in existing_water_assets
+                              if candidate.asset_type == "weir"
+                              and cls._imported_water_asset_name_key("weir", candidate.import_placemark_name) == water_name_key]
+                if not candidates:
+                    candidates = [candidate for candidate in existing_water_assets
+                                  if candidate.asset_type == "weir"
+                                  and cls._imported_water_asset_name_key("weir", candidate.name) == water_name_key]
+                if len(candidates) > 1:
+                    raise ValueError(f"More than one existing weir matches {water_payload['name']}; resolve the duplicate names first")
+                existing_asset = candidates[0] if candidates else None
+            if "weir_polygon" in water_payload:
+                asset_payload["weir_polygon"] = water_payload["weir_polygon"]
             if existing_asset is None:
-                existing_asset = water_assets_by_location.get(water_location_key)
+                if water_payload["asset_type"] != "weir":
+                    existing_asset = water_assets_by_location.get(water_location_key)
             if existing_asset is None:
                 existing_asset = WaterNetworkService.create_asset(asset_payload, imported=True)
                 water_created_count += 1
             else:
+                if existing_asset.asset_type == "weir":
+                    # A geometry upgrade is not a new operational observation.
+                    for field in ("active", "location_paddock_id", "served_paddock_ids"):
+                        asset_payload.pop(field, None)
+                    if existing_asset.weir_centerline:
+                        # A confirmed wall position takes precedence over a KML hint.
+                        for field in ("latitude", "longitude", "altitude_m"):
+                            asset_payload.pop(field, None)
                 WaterNetworkService.apply_asset_payload(existing_asset, asset_payload, imported=True)
                 water_updated_count += 1
             imported_water_assets_by_name[water_name_key] = existing_asset

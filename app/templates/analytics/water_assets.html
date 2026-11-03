@@ -1,14 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Water Assets | Analytics | AgriTrack{% endblock %}
+{% block title %}{{ focused_asset.name if focused_asset else 'Water Assets' }} | Analytics | AgriTrack{% endblock %}
 {% block content %}
-<a class="btn btn-secondary" href="{{ url_for('web.analytics_landing') }}">Back To Analytics</a>
-<h1>Water Assets</h1>
+{% if focused_asset %}
+<a class="btn btn-secondary" href="{{ url_for('web.water_asset_detail', farm_id=focused_asset.farm_id, asset_id=focused_asset.id) }}">Back to asset</a>
+{% else %}<a class="btn btn-secondary" href="{{ url_for('web.analytics_landing') }}">Back To Analytics</a>{% endif %}
+<h1>{{ focused_asset.name ~ ' Analytics' if focused_asset else 'Water Assets' }}</h1>
 <p class="muted">
-  Review recorded water asset active state, status, and water level history over time.
+  Review recorded water levels and asset states. Storage charts use the current geometry and capacity, with their assumptions shown beside each chart.
 </p>
 
-<section class="card">
-  <h2>Filters</h2>
+<details class="card analytics-section" {% if not focused_asset %}open{% endif %}>
+  <summary><h2>Filters</h2></summary>
   <form method="get" action="{{ url_for('web.analytics_water_assets') }}" class="grid-form">
     <div class="grid-two">
       <label>Farm
@@ -126,29 +128,33 @@
       <a class="btn btn-secondary" href="{{ url_for('web.analytics_water_assets') }}">Clear</a>
     </div>
   </form>
-</section>
+</details>
 
-<section class="card">
-  <h2>Trend Charts</h2>
+<details class="card analytics-section" open>
+  <summary><h2>Trend Charts</h2></summary>
   <p class="muted">Window: {{ start_date }} to {{ end_date }}</p>
   {% if chart_payload.panels and selected_water_asset_ids %}
-  <div class="grazing-chart-grid">
+  <div class="grazing-chart-grid {% if focused_asset %}asset-chart-stack{% endif %}">
     {% for panel in chart_payload.panels %}
-    <article class="grazing-chart-card">
-      <h3>{{ panel.title }}</h3>
+    <details class="grazing-chart-card analytics-section" open>
+      <summary><h3>{{ panel.title }}</h3></summary>
+      {% if panel.description %}<p class="muted">{{ panel.description }}</p>{% endif %}
+      {% for message in panel.messages or [] %}<p class="muted">{{ message }}</p>{% endfor %}
+      {% if panel.datasets %}
       <div class="analytics-chart-wrap">
         <canvas id="waterAssetChart{{ loop.index0 }}" data-panel-index="{{ loop.index0 }}" role="img" aria-label="{{ panel.title }} line graph"></canvas>
       </div>
-    </article>
+      {% endif %}
+    </details>
     {% endfor %}
   </div>
   {% else %}
   <p>No water asset state history is available for the selected filters.</p>
   {% endif %}
-</section>
+</details>
 
-<section class="card">
-  <h2>Asset Statistics</h2>
+<details class="card analytics-section">
+  <summary><h2>Asset Statistics</h2></summary>
   <div class="analytics-table-scroll">
     <table>
       <thead>
@@ -197,7 +203,7 @@
       </tbody>
     </table>
   </div>
-</section>
+</details>
 {% endblock %}
 
 {% block scripts %}

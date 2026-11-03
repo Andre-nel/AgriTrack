@@ -1,0 +1,154 @@
+{% set inline_editor = inline_asset_id is defined %}
+{% set editor_tag = "section" if inline_editor else "dialog" %}
+<{{ editor_tag }}
+  id="water-asset-modal"
+  class="{{ "card" if inline_editor else "entity-edit-modal water-asset-modal" }}"
+  {% if inline_editor %}data-inline-asset-id="{{ inline_asset_id }}"{% endif %}
+  data-asset-api-base="{{ url_for('water_api.list_water_assets') }}"
+  data-update-url-base="{{ url_for('web.create_water_asset_form', farm_id=farm.id) }}/"
+  data-create-connection-url="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}"
+  data-update-connection-url-base="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}/"
+  data-delete-connection-url-base="{{ url_for('web.create_water_connection_form', farm_id=farm.id) }}/"
+>
+  <div class="entity-edit-modal-header">
+    <div>
+      <p class="space-key">Water Asset</p>
+      <h2 data-water-asset-modal-title>Edit Asset</h2>
+      <p class="muted" data-water-asset-modal-subtitle>Load an asset from the map or the list to edit only the fields that apply to that asset type.</p>
+    </div>
+    {% if not inline_editor %}<button type="button" class="btn btn-secondary" data-close-water-asset-modal>Close</button>{% endif %}
+  </div>
+  <p class="muted water-asset-modal-status" data-water-asset-modal-status hidden></p>
+  <form method="post" class="grid-form" data-water-asset-modal-form hidden>
+    {% if inline_editor %}<input type="hidden" name="return_to" value="asset" />{% endif %}
+    <div class="grid-two">
+      <label data-water-asset-field="name">Name
+        <input name="name" maxlength="120" required />
+      </label>
+      <label data-water-asset-field="asset_type">Asset Type
+        <select name="asset_type" required>
+          {% for asset_type in water_asset_types %}
+          <option value="{{ asset_type }}">{{ water_asset_type_labels[asset_type] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="latitude">Latitude
+        <input type="number" step="0.0000001" name="latitude" />
+      </label>
+      <label data-water-asset-field="longitude">Longitude
+        <input type="number" step="0.0000001" name="longitude" />
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="altitude_m">Altitude (m)
+        <input type="number" step="0.01" name="altitude_m" />
+      </label>
+      <label data-water-asset-field="location_paddock_id">Location Paddock
+        <select name="location_paddock_id">
+          <option value="">None</option>
+          {% for paddock in paddocks %}
+          <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="status">Status
+        <select name="status">
+          <option value="">None</option>
+        </select>
+      </label>
+      <label data-water-asset-field="water_level">Water Level
+        <select name="water_level">
+          <option value="">None</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="capacity_m3">Capacity (m3)
+        <input type="number" step="0.01" min="0" name="capacity_m3" />
+      </label>
+      <label data-water-asset-field="material">Material
+        <select name="material">
+          <option value="">None</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="windmill_size_ft">Windmill Size (ft)
+        <select name="windmill_size_ft">
+          <option value="">None</option>
+        </select>
+      </label>
+      <label data-water-asset-field="trough_size">Trough Size
+        <select name="trough_size">
+          <option value="">None</option>
+        </select>
+      </label>
+    </div>
+    <label data-water-asset-field="water_level_percent">Water depth at wall (%)
+      <input type="number" name="water_level_percent" min="0" max="100" step="0.01" placeholder="Unknown" />
+    </label>
+    <label data-water-asset-field="is_overflowing">Overflowing
+      <select name="is_overflowing" data-weir-overflow data-percent-name="water_level_percent"><option value="0">No</option><option value="1">Overflowing (100%)</option></select>
+    </label>
+    <label data-water-asset-field="weir_size">Weir Size
+      <select name="weir_size">
+        <option value="">None</option>
+      </select>
+    </label>
+    <div class="grid-two">
+      <label data-water-asset-field="solar_brand">Solar Brand
+        <input name="solar_brand" />
+      </label>
+      <label data-water-asset-field="source_system">Source System
+        <input name="source_system" />
+      </label>
+    </div>
+    <div class="grid-two">
+      <label data-water-asset-field="solar_kw">Solar kW
+        <input type="number" step="0.01" min="0" name="solar_kw" />
+      </label>
+      <label data-water-asset-field="solar_head_m">Solar Head (m)
+        <input type="number" step="0.01" min="0" name="solar_head_m" />
+      </label>
+    </div>
+    <label data-water-asset-field="served_paddock_ids">Served Paddocks
+      <select name="served_paddock_ids" multiple size="4">
+        {% for paddock in paddocks %}
+        <option value="{{ paddock.id }}">{{ paddock.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="muted water-asset-import-note" data-water-asset-import-note hidden></p>
+    <div class="row-actions">
+      <label class="check-row" data-water-asset-field="active"><input type="checkbox" name="active" value="1" /> Active</label>
+      <label class="check-row" data-water-asset-field="needs_review"><input type="checkbox" name="needs_review" value="1" /> Needs Review</label>
+    </div>
+    <div class="row-actions">
+      <button type="submit" class="btn">Save Asset</button>
+      {% if not inline_editor %}<button type="button" class="btn btn-secondary" data-close-water-asset-modal>Cancel</button>{% endif %}
+    </div>
+  </form>
+  <section class="water-asset-task-panel" data-water-asset-task-panel hidden>
+    <div class="water-asset-connection-panel-header">
+      <h3>Linked Tasks</h3>
+    </div>
+    <div class="row-actions">
+      <a class="btn btn-secondary" href="#" data-water-asset-create-task>Create Task</a>
+    </div>
+    <div class="water-asset-task-list" data-water-asset-task-list></div>
+  </section>
+  <section class="water-asset-connection-panel" data-water-asset-connections hidden>
+    <div class="water-asset-connection-panel-header">
+      <div>
+        <h3>Asset Connections</h3>
+        <p class="muted" data-water-asset-connections-summary>Relevant source, destination, and pump links load here for this asset.</p>
+      </div>
+    </div>
+    <div class="water-asset-connection-add" data-water-asset-connection-add></div>
+    <div class="water-asset-connection-list" data-water-asset-connection-list></div>
+  </section>
+</{{ editor_tag }}>

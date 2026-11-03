@@ -1,6 +1,7 @@
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from math import cos, radians
+from types import SimpleNamespace
 
 from sqlalchemy import or_
 
@@ -8,6 +9,8 @@ from app.extensions import db
 from app.models import Paddock, WaterAsset, WaterAssetServedPaddock, WaterAssetStateHistory, WaterConnection
 from app.models.water import WATER_ASSET_TYPES, WATER_CONNECTION_FLOW_TYPES
 from app.services.paddock_service import PaddockService
+from app.services.water_level import level_label, level_token, parse_legacy_weir_level, parse_percent
+from app.services import weir_volume_service
 
 
 class WaterNetworkService:
@@ -76,7 +79,7 @@ class WaterNetworkService:
     GRAVITY_TROUGH_SOURCE_TYPES = {"cement_dam", "ground_dam", "pit", "tank", "weir"}
     TRANSFER_SOURCE_TYPES = {"borehole", "cement_dam", "ground_dam", "pit", "tank", "weir"}
     TRANSFER_DESTINATION_TYPES = {"borehole", "cement_dam", "pit", "tank"}
-    STATE_HISTORY_FIELDS = ("active", "status", "water_level")
+    STATE_HISTORY_FIELDS = ("active", "status", "water_level", "water_level_percent", "is_overflowing")
 
     @classmethod
     def water_level_options_for_type(cls, asset_type: str) -> tuple[str, ...]:
@@ -123,6 +126,8 @@ class WaterNetworkService:
             "active": bool(asset.active),
             "status": asset.status,
             "water_level": asset.water_level,
+            "water_level_percent": asset.water_level_percent,
+            "is_overflowing": bool(asset.is_overflowing),
         }
 
     @classmethod
@@ -141,9 +146,13 @@ class WaterNetworkService:
             previous_active=previous_state.get("active"),
             previous_status=previous_state.get("status"),
             previous_water_level=previous_state.get("water_level"),
+            previous_water_level_percent=previous_state.get("water_level_percent"),
+            previous_is_overflowing=previous_state.get("is_overflowing"),
             active=bool(asset.active),
             status=asset.status,
             water_level=asset.water_level,
+            water_level_percent=asset.water_level_percent,
+            is_overflowing=bool(asset.is_overflowing),
         )
         db.session.add(row)
         return row
@@ -157,7 +166,10 @@ class WaterNetworkService:
         if value in (None, ""):
             return None
         try:
-            return Decimal(str(value))
+            result = Decimal(str(value))
+            if not result.is_finite():
+                raise ValueError("Non-finite number")
+            return result
         except (InvalidOperation, ValueError) as exc:
             raise ValueError(f"{field_name} must be a valid number") from exc
 
@@ -281,11 +293,11 @@ class WaterNetworkService:
         water_level_options = set(cls.water_level_options_for_type(asset_type))
         if (
             asset is not None
-            and asset.water_level == "overflowing"
-            and asset_type not in cls.OVERFLOWING_ASSET_TYPES
+            and ((asset.water_level == "overflowing" and asset_type not in cls.OVERFLOWING_ASSET_TYPES)
+                 or (asset.asset_type == "weir" and asset_type != "weir"))
             and "water_level" not in payload
         ):
-            raise ValueError("Choose a valid water_level when changing an overflowing asset's type")
+            raise ValueError("Choose a valid water_level when changing a weir or overflowing asset's type")
         windmill_size_options = set(cls.WINDMILL_SIZE_OPTIONS)
         weir_size_options = set(cls.WEIR_SIZE_OPTIONS)
         trough_size_options = set(cls.TROUGH_SIZE_OPTIONS)
@@ -341,7 +353,7 @@ class WaterNetworkService:
             "status",
             allowed=status_options,
         )
-        water_level = cls._coerce_choice(
+        water_level = None if asset_type == "weir" else cls._coerce_choice(
             retained_value(
                 "water_level",
                 asset.water_level if asset else None,
@@ -366,8 +378,6 @@ class WaterNetworkService:
             weir_defaults = cls.DEFAULT_VALUES_BY_TYPE["weir"]
             if status is None:
                 status = weir_defaults["status"]
-            if water_level is None:
-                water_level = weir_defaults["water_level"]
             if weir_size is None:
                 weir_size = weir_defaults["weir_size"]
 
@@ -459,6 +469,12 @@ class WaterNetworkService:
         elif any(paddock_id not in paddocks_by_id for paddock_id in served_paddock_ids):
             raise ValueError("One or more served paddock IDs are invalid for this farm")
 
+        weir_fields = cls._validate_weir_fields(payload, asset=asset, asset_type=asset_type, imported=imported)
+        if asset_type == "weir" and weir_fields["weir_polygon"]:
+            # Polygon geometry owns the existing capacity field. A submitted
+            # manual value must not override it or survive an invalid outline.
+            calculation = weir_volume_service.estimate(SimpleNamespace(asset_type="weir", **weir_fields))
+            capacity_m3 = cls._coerce_optional_decimal(calculation["capacity_m3"], "capacity_m3")
         return {
             "farm_id": farm_id,
             "name": name,
@@ -483,7 +499,66 @@ class WaterNetworkService:
             "import_placemark_name": import_placemark_name,
             "import_style_url": import_style_url,
             "served_paddock_ids": served_paddock_ids,
+            **weir_fields,
         }
+
+    @classmethod
+    def _validate_weir_fields(cls, payload, *, asset, asset_type, imported):
+        previous_weir = asset is not None and asset.asset_type == "weir"
+        if asset_type != "weir":
+            if any(payload.get(key) not in (None, "") for key in (
+                "water_level_percent", "weir_polygon", "weir_centerline", "weir_wall_height_m"
+            )) or ("is_overflowing" in payload and cls._coerce_boolean(payload["is_overflowing"], "is_overflowing")):
+                raise ValueError("Percentage levels and weir geometry are only valid for weirs")
+            return dict(water_level_percent=None, is_overflowing=False, weir_polygon=None,
+                        weir_centerline=None, weir_wall_height_m=None, weir_height_assumed=True,
+                        weir_geometry_review_required=False)
+
+        percent = asset.water_level_percent if previous_weir else Decimal("0")
+        overflowing = bool(asset.is_overflowing) if previous_weir else False
+        # Explicit numeric observations clear overflow unless explicitly selected.
+        if "water_level" in payload:
+            percent, overflowing = parse_legacy_weir_level(payload["water_level"])
+        if "water_level_percent" in payload:
+            numeric = parse_percent(payload["water_level_percent"])
+            if "water_level" in payload and numeric != percent:
+                raise ValueError("water_level and water_level_percent disagree")
+            percent, overflowing = numeric, False
+        if "is_overflowing" in payload:
+            overflowing = cls._coerce_boolean(payload["is_overflowing"], "is_overflowing")
+            if overflowing:
+                if "water_level_percent" in payload and percent != 100:
+                    raise ValueError("Overflowing requires water_level_percent 100")
+                if "water_level" in payload and percent != 100:
+                    raise ValueError("Overflowing requires a full water_level")
+                percent = Decimal("100")
+        if "water_level" in payload and ("water_level_percent" in payload or "is_overflowing" in payload):
+            if parse_legacy_weir_level(payload["water_level"]) != (percent, overflowing):
+                raise ValueError("water_level and percentage/overflow fields disagree")
+
+        polygon = payload.get("weir_polygon", asset.weir_polygon if previous_weir else None)
+        line = payload.get("weir_centerline", asset.weir_centerline if previous_weir else None)
+        height = cls._coerce_optional_decimal(payload.get("weir_wall_height_m", asset.weir_wall_height_m if previous_weir else None), "weir_wall_height_m")
+        assumed = cls._coerce_boolean(payload.get("weir_height_assumed", asset.weir_height_assumed if previous_weir else True), "weir_height_assumed")
+        review = bool(asset.weir_geometry_review_required) if previous_weir else False
+        if polygon is not None:
+            polygon = weir_volume_service.validate_polygon(polygon)
+            changed = previous_weir and asset.weir_polygon is not None and polygon != asset.weir_polygon
+            if changed:
+                review = True
+            if height is None:
+                height, assumed = Decimal("1"), True
+            if line is not None and (not review or "weir_centerline" in payload):
+                line = weir_volume_service.validate_centerline(polygon, line)
+                if "weir_centerline" in payload and not imported:
+                    review = False
+        elif line is not None:
+            raise ValueError("Import a weir polygon before tracing its centreline")
+        if height is not None and (not 0 < height <= Decimal("99999.999") or height != height.quantize(Decimal("0.001"))):
+            raise ValueError("weir_wall_height_m must be positive with at most three decimal places")
+        return dict(water_level_percent=percent, is_overflowing=overflowing, weir_polygon=polygon,
+                    weir_centerline=line, weir_wall_height_m=height, weir_height_assumed=assumed,
+                    weir_geometry_review_required=review)
 
     @classmethod
     def _sync_served_paddocks(cls, asset: WaterAsset, served_paddock_ids: list[str]) -> None:
@@ -731,7 +806,9 @@ class WaterNetworkService:
             return "available"
 
         if asset.asset_type in cls.WATER_LEVEL_TYPES:
-            normalized_level = cls.normalize_choice(asset.water_level)
+            normalized_level = cls.normalize_choice(asset.level_token)
+            if asset.asset_type == "weir" and asset.water_level_percent is not None:
+                return "available" if asset.water_level_percent > 0 else "empty"
             if normalized_level == "empty":
                 return "empty"
             if normalized_level:
@@ -802,6 +879,24 @@ class WaterNetworkService:
                 )
         return paths
 
+    @staticmethod
+    def _has_upstream_weir(asset_id, incoming):
+        # Follow active connections, including unavailable source assets. A dry
+        # source must not erase the last observed water remaining in a trough.
+        pending, visited = [str(asset_id)], set()
+        while pending:
+            current = pending.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            for connection in incoming.get(current, []):
+                if not connection.active:
+                    continue
+                if connection.source_asset.asset_type == "weir":
+                    return True
+                pending.append(str(connection.source_asset_id))
+        return False
+
     @classmethod
     def network_state_for_farm(
         cls,
@@ -827,7 +922,12 @@ class WaterNetworkService:
                 continue
             incoming_connections_by_destination[destination_asset_id].append(connection)
 
-        effective_water_levels = {str(asset.id): asset.water_level for asset in assets}
+        all_active_incoming = defaultdict(list)
+        for connection in connections:
+            if connection.active:
+                all_active_incoming[str(connection.destination_asset_id)].append(connection)
+
+        effective_water_levels = {str(asset.id): asset.level_token for asset in assets}
         asset_warnings: dict[str, str | None] = {str(asset.id): None for asset in assets}
         served_asset_supply_summaries: dict[str, dict] = {}
 
@@ -837,6 +937,9 @@ class WaterNetworkService:
                 continue
 
             incoming_connections = incoming_connections_by_destination.get(asset_id, [])
+            weir_fed_trough = asset.asset_type == "trough" and cls._has_upstream_weir(
+                asset_id, all_active_incoming
+            )
             has_available_upstream_source = False
             has_unknown_upstream_source = False
             unavailable_source_names = []
@@ -858,13 +961,14 @@ class WaterNetworkService:
                 and not has_unknown_upstream_source
                 and unavailable_source_names
             ):
-                effective_water_levels[asset_id] = "empty"
+                if not weir_fed_trough:
+                    effective_water_levels[asset_id] = "empty"
                 source_names = ", ".join(
                     sorted({name for name in unavailable_source_names}, key=lambda value: value.lower())
                 )
                 asset_warnings[asset_id] = f"Upstream source is empty or unavailable: {source_names}."
 
-            if asset.asset_type == "trough" and cls.normalize_choice(asset.status) == "operational":
+            if asset.asset_type == "trough" and not weir_fed_trough and cls.normalize_choice(asset.status) == "operational":
                 source_water_levels = []
                 for connection in incoming_connections:
                     source_asset_id = str(connection.source_asset_id)
@@ -945,6 +1049,8 @@ class WaterNetworkService:
                 has_operational_path = has_operational_path or bool(summary["has_operational_path"])
 
                 effective_water_level = cls._normalized_water_level(summary["effective_water_level"])
+                if service_asset.asset_type == "weir" and service_asset.water_level_percent is not None and service_asset.water_level_percent > 0:
+                    has_available_served_water = True
                 if effective_water_level and effective_water_level != "empty":
                     has_available_served_water = True
 
@@ -1005,6 +1111,9 @@ class WaterNetworkService:
         asset_id = str(asset.id)
         effective_water_levels = (network_state or {}).get("effective_water_levels", {})
         asset_warnings = (network_state or {}).get("asset_warnings", {})
+        storage = weir_volume_service.estimate(asset)
+        if asset.asset_type != "weir" or not asset.weir_polygon:
+            storage["capacity_m3"] = cls._to_float(asset.capacity_m3)
         return {
             "id": asset_id,
             "farm_id": str(asset.farm_id),
@@ -1019,9 +1128,19 @@ class WaterNetworkService:
             "longitude": cls._to_float(asset.longitude),
             "altitude_m": cls._to_float(asset.altitude_m),
             "status": asset.status,
-            "water_level": effective_water_levels.get(asset_id, asset.water_level),
-            "reported_water_level": asset.water_level,
-            "capacity_m3": cls._to_float(asset.capacity_m3),
+            "water_level": effective_water_levels.get(asset_id, asset.level_token),
+            "water_level_label": (level_label(asset) if asset.asset_type == "weir" else (effective_water_levels.get(asset_id, asset.water_level) or "Unknown").replace("_", " ").title()),
+            "water_level_percent": cls._to_float(asset.water_level_percent),
+            "is_overflowing": bool(asset.is_overflowing),
+            "weir_polygon": asset.weir_polygon,
+            "weir_centerline": asset.weir_centerline,
+            "weir_wall_height_m": cls._to_float(asset.weir_wall_height_m),
+            "weir_height_assumed": asset.weir_height_assumed,
+            "weir_geometry_review_required": asset.weir_geometry_review_required,
+            "weir_geometry_url": f"/farms/{asset.farm_id}/water/assets/{asset.id}/geometry" if asset.asset_type == "weir" else None,
+            "asset_detail_url": f"/farms/{asset.farm_id}/water/assets/{asset.id}",
+            **storage,
+            "reported_water_level": asset.level_token,
             "material": asset.material,
             "windmill_size_ft": asset.windmill_size_ft,
             "weir_size": asset.weir_size,
@@ -1050,19 +1169,27 @@ class WaterNetworkService:
             "changed_at": cls._iso_datetime(row.changed_at),
             "previous_active": row.previous_active,
             "previous_status": row.previous_status,
-            "previous_water_level": row.previous_water_level,
+            "previous_water_level": level_token(row, "previous_"),
+            "previous_water_level_percent": cls._to_float(row.previous_water_level_percent),
+            "previous_is_overflowing": row.previous_is_overflowing,
+            "previous_water_level_label": level_label(row, "previous_"),
             "active": row.active,
             "status": row.status,
-            "water_level": row.water_level,
+            "water_level": level_token(row),
+            "water_level_percent": cls._to_float(row.water_level_percent),
+            "is_overflowing": bool(row.is_overflowing),
+            "water_level_label": level_label(row),
         }
 
     @classmethod
-    def state_history_for_asset(cls, asset_id: str) -> list[WaterAssetStateHistory]:
-        return (
+    def state_history_for_asset(cls, asset_id: str, *, limit: int | None = None) -> list[WaterAssetStateHistory]:
+        query = (
             WaterAssetStateHistory.query.filter_by(water_asset_id=asset_id)
             .order_by(WaterAssetStateHistory.changed_at.desc(), WaterAssetStateHistory.id.desc())
-            .all()
         )
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     @classmethod
     def recent_state_history_for_farm(
@@ -1258,13 +1385,13 @@ class WaterNetworkService:
 
     @classmethod
     def asset_map_feature(cls, asset: WaterAsset, *, network_state: dict | None = None) -> dict | None:
-        if not asset.active or asset.latitude is None or asset.longitude is None:
+        if not asset.active or (not asset.weir_polygon and (asset.latitude is None or asset.longitude is None)):
             return None
         properties = cls.serialize_asset(asset, network_state=network_state)
         properties["feature_type"] = "water_asset"
         return {
             "type": "Feature",
-            "geometry": {
+            "geometry": asset.weir_polygon or {
                 "type": "Point",
                 "coordinates": [float(asset.longitude), float(asset.latitude)],
             },

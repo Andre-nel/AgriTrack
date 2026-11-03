@@ -16,9 +16,12 @@ from app.modules.water.forms import (
 from app.services.water_network_service import WaterNetworkService
 from app.services.note_attachment_service import NoteAttachmentService
 from app.services.water_asset_event_service import WaterAssetEventService
+from app.services.weir_volume_service import default_geometry
 
 
 def _farm_water_workspace_redirect_response(farm_id: str, *, open_asset_id: str | None = None):
+    if open_asset_id and request.form.get("return_to") == "asset":
+        return redirect(url_for("web.water_asset_detail", farm_id=farm_id, asset_id=open_asset_id))
     redirect_values = {"farm_id": farm_id}
     if open_asset_id:
         redirect_values["open_asset_id"] = open_asset_id
@@ -36,7 +39,110 @@ def _farm_water_mass_update_redirect_response(
     return redirect(target_url)
 
 
+def _water_asset_editor_config(assets, connections, linked_tasks_by_water_asset_id):
+    return {
+        "assetTypeLabels": WaterNetworkService.ASSET_TYPE_LABELS,
+        "assetRecords": [
+            {
+                "id": str(asset.id),
+                "name": asset.name,
+                "assetType": asset.asset_type,
+                "assetTypeLabel": WaterNetworkService.ASSET_TYPE_LABELS.get(
+                    asset.asset_type, asset.asset_type
+                ),
+                "active": asset.active,
+            }
+            for asset in assets
+        ],
+        "connectionRecords": [
+            WaterNetworkService.serialize_connection(connection) for connection in connections
+        ],
+        "flowTypes": list(WaterNetworkService.FLOW_TYPES),
+        "flowTypeLabels": WaterNetworkService.FLOW_TYPE_LABELS,
+        "statusOptionsByType": {
+            asset_type: sorted(options)
+            for asset_type, options in WaterNetworkService.STATUS_OPTIONS_BY_TYPE.items()
+        },
+        "materialOptionsByType": {
+            asset_type: sorted(options)
+            for asset_type, options in WaterNetworkService.MATERIAL_OPTIONS_BY_TYPE.items()
+        },
+        "waterLevelOptions": list(WaterNetworkService.WATER_LEVEL_OPTIONS),
+        "waterLevelOptionsByType": {
+            asset_type: list(WaterNetworkService.water_level_options_for_type(asset_type))
+            for asset_type in sorted(WaterNetworkService.WATER_LEVEL_TYPES)
+        },
+        "waterLevelTypes": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
+        "capacityTypes": sorted(WaterNetworkService.CAPACITY_TYPES),
+        "windmillSizeOptions": list(WaterNetworkService.WINDMILL_SIZE_OPTIONS),
+        "weirSizeOptions": list(WaterNetworkService.WEIR_SIZE_OPTIONS),
+        "troughSizeOptions": list(WaterNetworkService.TROUGH_SIZE_OPTIONS),
+        "solarFieldTypes": ["solarpump"],
+        "sourceSystemTypes": ["solarpump"],
+        "weirFieldTypes": ["weir"],
+        "troughFieldTypes": ["trough"],
+        "servedPaddockTypes": sorted(WaterNetworkService.SERVED_PADDOCK_TYPES),
+        "locationBoundServedPaddockTypes": sorted(
+            WaterNetworkService.LOCATION_BOUND_SERVED_PADDOCK_TYPES
+        ),
+        "pumpAssetTypes": sorted(WaterNetworkService.PUMP_ASSET_TYPES),
+        "gravityTroughSourceTypes": sorted(WaterNetworkService.GRAVITY_TROUGH_SOURCE_TYPES),
+        "transferSourceTypes": sorted(WaterNetworkService.TRANSFER_SOURCE_TYPES),
+        "transferDestinationTypes": sorted(WaterNetworkService.TRANSFER_DESTINATION_TYPES),
+        "defaultTroughConnection": {
+            "pipeMaterial": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_MATERIAL,
+            "pipeDiameterSpec": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_DIAMETER_SPEC,
+            "pipeClassSpec": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_CLASS_SPEC,
+        },
+        "taskLinksByAssetId": linked_tasks_by_water_asset_id,
+        "newTaskUrl": url_for("tasks.new_task_page"),
+    }
+
+
 def register_legacy_routes(bp) -> None:
+    @bp.get("/farms/<farm_id>/water/assets/<asset_id>")
+    def water_asset_detail(farm_id, asset_id):
+        farm = Farm.query.get_or_404(farm_id)
+        asset = WaterAsset.query.filter_by(id=asset_id, farm_id=farm.id).first_or_404()
+        assets = WaterNetworkService.assets_for_farm(str(farm.id))
+        connections = WaterNetworkService.connections_for_farm(str(farm.id))
+        network = WaterNetworkService.network_state_for_farm(str(farm.id), assets=assets, connections=connections)
+        tasks = linked_task_rows_by_water_asset([str(asset.id)], farm.timezone)
+        events = WaterAssetEvent.query.filter_by(water_asset_id=asset.id, farm_id=farm.id).order_by(
+            WaterAssetEvent.event_at.desc(), WaterAssetEvent.created_at.desc()
+        ).all()
+        asset_events = [{
+            "event_at": event.event_at,
+            "tags": WaterAssetEventService.tags_from_csv(event.tags_csv),
+            "description": event.description,
+            "attachments": sorted(event.attachments, key=lambda attachment: attachment.created_at),
+        } for event in events]
+        state_fields = ["water_level"] if asset.asset_type in WaterNetworkService.WATER_LEVEL_TYPES else ["active", "status"]
+        if asset.asset_type == "weir":
+            state_fields += ["capacity_m3", "estimated_volume_m3"]
+        return render_template(
+            "water/asset_detail.html", farm=farm, asset=asset,
+            info=WaterNetworkService.serialize_asset(asset, network_state=network),
+            inline_asset_id=str(asset.id), asset_events=asset_events,
+            history=WaterNetworkService.state_history_for_asset(str(asset.id), limit=50),
+            paddocks=Paddock.query.filter_by(farm_id=farm.id, status="active").order_by(Paddock.name).all(),
+            water_asset_types=WaterNetworkService.ASSET_TYPES,
+            water_asset_type_labels=WaterNetworkService.ASSET_TYPE_LABELS,
+            water_asset_editor_config=_water_asset_editor_config(assets, connections, tasks),
+            analytics_url=url_for("web.analytics_water_assets", farm_id=farm.id, water_asset_id=asset.id,
+                                  state_field=state_fields, current_active="all"),
+        )
+
+    @bp.get("/farms/<farm_id>/water/assets/<asset_id>/geometry")
+    def weir_geometry_setup(farm_id, asset_id):
+        farm = Farm.query.get_or_404(farm_id)
+        asset = WaterAsset.query.filter_by(id=asset_id, farm_id=farm_id, asset_type="weir").first_or_404()
+        defaults = None
+        if asset.weir_polygon and not asset.weir_centerline:
+            point = [asset.longitude, asset.latitude] if asset.longitude is not None and asset.latitude is not None else None
+            defaults = default_geometry(asset.weir_polygon, point)
+        return render_template("weir_geometry.html", farm=farm, asset=WaterNetworkService.serialize_asset(asset), defaults=defaults)
+
     @bp.get("/farms/<farm_id>/water")
     def farm_water_workspace(farm_id):
         farm = Farm.query.get_or_404(farm_id)
@@ -125,63 +231,7 @@ def register_legacy_routes(bp) -> None:
             ):
                 continue
             filtered_assets.append(asset)
-        water_asset_editor_config = {
-            "assetTypeLabels": WaterNetworkService.ASSET_TYPE_LABELS,
-            "assetRecords": [
-                {
-                    "id": str(asset.id),
-                    "name": asset.name,
-                    "assetType": asset.asset_type,
-                    "assetTypeLabel": WaterNetworkService.ASSET_TYPE_LABELS.get(
-                        asset.asset_type, asset.asset_type
-                    ),
-                    "active": asset.active,
-                }
-                for asset in assets
-            ],
-            "connectionRecords": [
-                WaterNetworkService.serialize_connection(connection) for connection in connections
-            ],
-            "flowTypes": list(WaterNetworkService.FLOW_TYPES),
-            "flowTypeLabels": WaterNetworkService.FLOW_TYPE_LABELS,
-            "statusOptionsByType": {
-                asset_type: sorted(options)
-                for asset_type, options in WaterNetworkService.STATUS_OPTIONS_BY_TYPE.items()
-            },
-            "materialOptionsByType": {
-                asset_type: sorted(options)
-                for asset_type, options in WaterNetworkService.MATERIAL_OPTIONS_BY_TYPE.items()
-            },
-            "waterLevelOptions": list(WaterNetworkService.WATER_LEVEL_OPTIONS),
-            "waterLevelOptionsByType": {
-                asset_type: list(WaterNetworkService.water_level_options_for_type(asset_type))
-                for asset_type in sorted(WaterNetworkService.WATER_LEVEL_TYPES)
-            },
-            "waterLevelTypes": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
-            "capacityTypes": sorted(WaterNetworkService.CAPACITY_TYPES),
-            "windmillSizeOptions": list(WaterNetworkService.WINDMILL_SIZE_OPTIONS),
-            "weirSizeOptions": list(WaterNetworkService.WEIR_SIZE_OPTIONS),
-            "troughSizeOptions": list(WaterNetworkService.TROUGH_SIZE_OPTIONS),
-            "solarFieldTypes": ["solarpump"],
-            "sourceSystemTypes": ["solarpump"],
-            "weirFieldTypes": ["weir"],
-            "troughFieldTypes": ["trough"],
-            "servedPaddockTypes": sorted(WaterNetworkService.SERVED_PADDOCK_TYPES),
-            "locationBoundServedPaddockTypes": sorted(
-                WaterNetworkService.LOCATION_BOUND_SERVED_PADDOCK_TYPES
-            ),
-            "pumpAssetTypes": sorted(WaterNetworkService.PUMP_ASSET_TYPES),
-            "gravityTroughSourceTypes": sorted(WaterNetworkService.GRAVITY_TROUGH_SOURCE_TYPES),
-            "transferSourceTypes": sorted(WaterNetworkService.TRANSFER_SOURCE_TYPES),
-            "transferDestinationTypes": sorted(WaterNetworkService.TRANSFER_DESTINATION_TYPES),
-            "defaultTroughConnection": {
-                "pipeMaterial": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_MATERIAL,
-                "pipeDiameterSpec": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_DIAMETER_SPEC,
-                "pipeClassSpec": WaterNetworkService.DEFAULT_TROUGH_CONNECTION_PIPE_CLASS_SPEC,
-            },
-            "taskLinksByAssetId": linked_tasks_by_water_asset_id,
-            "newTaskUrl": url_for("tasks.new_task_page"),
-        }
+        water_asset_editor_config = _water_asset_editor_config(assets, connections, linked_tasks_by_water_asset_id)
 
         return render_template(
             "farm_water.html",
@@ -225,6 +275,7 @@ def register_legacy_routes(bp) -> None:
             water_asset_editor_config=water_asset_editor_config,
             linked_tasks_by_water_asset_id=linked_tasks_by_water_asset_id,
             water_asset_events_by_asset_id=water_asset_events_by_asset_id,
+            asset_payloads={str(asset.id): WaterNetworkService.serialize_asset(asset) for asset in filtered_assets},
         )
 
     @bp.get("/farms/<farm_id>/water/mass-update")
@@ -288,15 +339,13 @@ def register_legacy_routes(bp) -> None:
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), "error")
-            return redirect(
-                url_for("web.farm_water_workspace", farm_id=farm_id, open_asset_id=asset_id)
-            )
+            return _farm_water_workspace_redirect_response(farm_id, open_asset_id=asset_id)
         except IntegrityError:
             db.session.rollback()
             flash("Unable to update water asset", "error")
-            return redirect(
-                url_for("web.farm_water_workspace", farm_id=farm_id, open_asset_id=asset_id)
-            )
+            return _farm_water_workspace_redirect_response(farm_id, open_asset_id=asset_id)
+        if request.form.get("return_to") == "asset":
+            return _farm_water_workspace_redirect_response(farm_id, open_asset_id=asset_id)
         return redirect(url_for("web.farm_water_workspace", farm_id=farm_id))
 
     @bp.post("/farms/<farm_id>/water/assets/<asset_id>/events")
@@ -331,6 +380,8 @@ def register_legacy_routes(bp) -> None:
             db.session.rollback()
             flash(str(exc), "error")
 
+        if request.form.get("return_to") == "asset":
+            return redirect(url_for("web.water_asset_detail", farm_id=farm_id, asset_id=asset_id, _anchor="asset-notes"))
         return redirect(url_for("web.farm_water_workspace", farm_id=farm_id, _anchor=f"asset-{asset_id}"))
 
     @bp.post("/farms/<farm_id>/water/mass-update")

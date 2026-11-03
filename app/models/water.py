@@ -2,6 +2,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.services.water_level import level_label, level_token
 
 
 WATER_ASSET_TYPES = (
@@ -32,6 +33,13 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     altitude_m = db.Column(db.Numeric(10, 2))
     status = db.Column(db.String(40))
     water_level = db.Column(db.String(30))
+    water_level_percent = db.Column(db.Numeric(5, 2))
+    is_overflowing = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
+    weir_polygon = db.Column(db.JSON)
+    weir_centerline = db.Column(db.JSON)
+    weir_wall_height_m = db.Column(db.Numeric(8, 3))
+    weir_height_assumed = db.Column(db.Boolean, nullable=False, default=True, server_default="1")
+    weir_geometry_review_required = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
     capacity_m3 = db.Column(db.Numeric(12, 2))
     material = db.Column(db.String(20))
     windmill_size_ft = db.Column(db.Integer)
@@ -45,6 +53,15 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     import_style_url = db.Column(db.String(255))
 
     farm = db.relationship("Farm", back_populates="water_assets")
+
+    @property
+    def level_token(self):
+        return level_token(self)
+
+    @property
+    def level_label(self):
+        return level_label(self)
+
     location_paddock = db.relationship("Paddock", back_populates="water_assets")
     events = db.relationship("WaterAssetEvent", back_populates="water_asset", cascade="all, delete-orphan")
     state_history = db.relationship(
@@ -78,6 +95,11 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     )
 
     __table_args__ = (
+        db.CheckConstraint("water_level_percent IS NULL OR (water_level_percent >= 0 AND water_level_percent <= 100)", name="ck_water_asset_percent"),
+        db.CheckConstraint("NOT is_overflowing OR (water_level_percent IS NOT NULL AND water_level_percent = 100)", name="ck_water_asset_overflow_percent"),
+        db.CheckConstraint("weir_wall_height_m IS NULL OR weir_wall_height_m > 0", name="ck_water_asset_wall_height"),
+        db.CheckConstraint("asset_type = 'weir' OR (water_level_percent IS NULL AND NOT is_overflowing)", name="ck_water_asset_percent_type"),
+        db.CheckConstraint("asset_type <> 'weir' OR water_level IS NULL", name="ck_water_asset_weir_canonical_level"),
         db.CheckConstraint(
             "asset_type IN ('borehole', 'pit', 'windmill', 'solarpump', 'cement_dam', "
             "'tank', 'ground_dam', 'weir', 'trough')",
@@ -129,14 +151,30 @@ class WaterAssetStateHistory(UUIDPrimaryKeyMixin, db.Model):
     previous_active = db.Column(db.Boolean)
     previous_status = db.Column(db.String(40))
     previous_water_level = db.Column(db.String(30))
+    previous_water_level_percent = db.Column(db.Numeric(5, 2))
+    previous_is_overflowing = db.Column(db.Boolean)
     active = db.Column(db.Boolean, nullable=False)
     status = db.Column(db.String(40))
     water_level = db.Column(db.String(30))
+    water_level_percent = db.Column(db.Numeric(5, 2))
+    is_overflowing = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
+
+    @property
+    def level_label(self):
+        return level_label(self)
+
+    @property
+    def previous_level_label(self):
+        return level_label(self, "previous_")
 
     water_asset = db.relationship("WaterAsset", back_populates="state_history")
     farm = db.relationship("Farm")
 
     __table_args__ = (
+        db.CheckConstraint("water_level_percent IS NULL OR (water_level_percent >= 0 AND water_level_percent <= 100)", name="ck_water_history_percent"),
+        db.CheckConstraint("previous_water_level_percent IS NULL OR (previous_water_level_percent >= 0 AND previous_water_level_percent <= 100)", name="ck_water_history_previous_percent"),
+        db.CheckConstraint("NOT is_overflowing OR (water_level_percent IS NOT NULL AND water_level_percent = 100)", name="ck_water_history_overflow_percent"),
+        db.CheckConstraint("previous_is_overflowing IS NULL OR NOT previous_is_overflowing OR (previous_water_level_percent IS NOT NULL AND previous_water_level_percent = 100)", name="ck_water_history_previous_overflow_percent"),
         db.CheckConstraint(
             "change_type IN ('baseline', 'created', 'updated')",
             name="ck_water_asset_state_history_change_type",

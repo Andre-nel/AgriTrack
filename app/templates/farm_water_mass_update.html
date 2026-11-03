@@ -78,7 +78,7 @@
           {% for asset in selected_mass_update_assets %}
           <tr>
             <td>
-              <strong>{{ asset.name }}</strong>
+              <strong><a href="{{ url_for('web.farm_water_workspace', farm_id=farm.id, open_asset_id=asset.id) }}">{{ asset.name }}</a></strong>
               <input type="hidden" name="asset_id" value="{{ asset.id }}" />
             </td>
             {% if has_multiple_mass_update_types %}
@@ -89,6 +89,12 @@
             <td>
               {% if not applies %}
               <span class="muted">-</span>
+              {% elif field.name == 'water_level' and asset.asset_type == 'weir' %}
+              <label>Depth (%)<input aria-label="{{ asset.name }} depth percentage" type="number" name="water_level_percent__{{ asset.id }}" min="0" max="100" step="0.01" value="{{ asset.water_level_percent if asset.water_level_percent is not none else '' }}" placeholder="Unknown" /></label>
+              <select aria-label="{{ asset.name }} overflowing" name="is_overflowing__{{ asset.id }}" data-weir-overflow data-percent-name="water_level_percent__{{ asset.id }}">
+                <option value="0" {% if not asset.is_overflowing %}selected{% endif %}>Not overflowing</option>
+                <option value="1" {% if asset.is_overflowing %}selected{% endif %}>Overflowing (100%)</option>
+              </select>
               {% elif field.kind == "checkbox" %}
               <input type="hidden" name="{{ field.name }}__{{ asset.id }}" value="0" />
               <input
@@ -110,6 +116,7 @@
                 value="{{ asset[field.name] if asset[field.name] is not none else '' }}"
                 {% if field.step is defined %}step="{{ field.step }}"{% endif %}
                 {% if field.min is defined %}min="{{ field.min }}"{% endif %}
+                {% if field.name == 'capacity_m3' and asset.asset_type == 'weir' and asset.weir_polygon %}readonly title="Calculated from the weir geometry"{% endif %}
               />
               {% elif field.kind == "select" %}
               <select name="{{ field.name }}__{{ asset.id }}">
@@ -160,5 +167,6 @@
 {% endif %}
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='weir_level_inputs.js') }}"></script>
 <script src="{{ url_for('static', filename='farm_water_mass_update.js') }}"></script>
 {% endblock %}

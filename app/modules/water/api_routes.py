@@ -1,12 +1,29 @@
+from types import SimpleNamespace
+
 from flask import Blueprint, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import WaterAsset, WaterConnection
+from app.services import weir_volume_service
 from app.services.water_network_service import WaterNetworkService
 
 
 bp = Blueprint("water_api", __name__)
+
+
+@bp.post("/water-assets/<asset_id>/volume-preview")
+def preview_weir_volume(asset_id):
+    asset = WaterAsset.query.filter_by(id=asset_id, asset_type="weir").first_or_404()
+    try:
+        payload = request.get_json() or {}
+        fields = WaterNetworkService._validate_weir_fields(payload, asset=asset, asset_type="weir", imported=False)
+        return jsonify(weir_volume_service.estimate(
+            SimpleNamespace(asset_type="weir", **fields),
+            include_water_fill=payload.get("include_water_fill") is True,
+        ))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @bp.get("/water-assets")

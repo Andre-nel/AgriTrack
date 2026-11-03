@@ -913,10 +913,39 @@ private fun applyWaterAssetStatus(json: JSONObject, payload: JSONObject): Boolea
     if (payload.has("status")) {
         asset.putOptional("status", payload.optionalString("status"))
     }
-    if (payload.has("water_level")) {
+    val levelChanged = payload.has("water_level") || payload.has("water_level_percent") || payload.has("is_overflowing")
+    if (asset.optString("asset_type") == "weir" && levelChanged) {
+        val legacy = payload.optionalString("water_level")
+        val legacyPercent = mapOf("empty" to 0.0, "low" to 25.0, "half" to 50.0, "high" to 75.0, "full" to 100.0, "overflowing" to 100.0)
+        val overflowing = if (payload.has("is_overflowing")) payload.optBoolean("is_overflowing") else legacy == "overflowing"
+        val percent = when {
+            overflowing -> 100.0
+            payload.has("water_level_percent") -> if (payload.isNull("water_level_percent")) null else payload.optDouble("water_level_percent")
+            payload.has("water_level") -> legacyPercent[legacy] ?: legacy?.toDoubleOrNull()
+            else -> if (asset.isNull("water_level_percent")) null else asset.optDouble("water_level_percent")
+        }
+        val token = if (overflowing) "overflowing" else percent?.let { java.math.BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() }
+        asset.put("water_level_percent", percent ?: JSONObject.NULL)
+        asset.put("is_overflowing", overflowing)
+        asset.putOptional("water_level", token)
+        asset.putOptional("reported_water_level", token)
+        asset.put("water_level_label", if (overflowing) "Overflowing (100%)" else token?.let { "$it%" } ?: "Unknown")
+        asset.put("estimated_volume_m3", JSONObject.NULL)
+        asset.put("volume_estimate_status", "pending_sync")
+    } else if (payload.has("water_level")) {
         asset.putOptional("water_level", payload.optionalString("water_level"))
+        asset.put("water_level_label", payload.optionalString("water_level") ?: "Unknown")
     }
     asset.put("pending_sync", true)
+    val features = json.optJSONArray("map_features") ?: JSONArray()
+    for (index in 0 until features.length()) {
+        val props = features.optJSONObject(index)?.optJSONObject("properties") ?: continue
+        if (props.optString("feature_type") == "water_asset" && props.optString("id") == asset.optString("id")) {
+            for (key in listOf("active", "status", "water_level", "reported_water_level", "water_level_label", "water_level_percent", "is_overflowing", "estimated_volume_m3", "volume_estimate_status", "pending_sync")) {
+                if (asset.has(key)) props.put(key, asset.opt(key))
+            }
+        }
+    }
     return true
 }
 

@@ -88,3 +88,42 @@ migrations, and after a heavy field-work day.
 - Keep the LAN server on trusted farm networks only.
 - Move to Postgres only when you need regular remote access, multiple concurrent
   users, or heavier reporting.
+
+## Polygon weir rollout
+
+1. Schedule a short backend maintenance window and stop writes/sync. Keep queued
+   Android commands on their devices. Back up with
+   `.\.venv\Scripts\python scripts/backup_agritrack.py --no-prune` and retain the
+   archive outside the application directory as part of normal farm backups.
+2. Restore that archive to an isolated instance. Run `flask db upgrade` against
+   its database, checking revision `b8d4f0a2c613`, ID/timestamp preservation,
+   percentage mappings, `PRAGMA foreign_key_check` and `PRAGMA integrity_check`.
+   Import the proposed KML twice there; verify stable weir IDs/history, no weir
+   paddock, no duplicate water asset and expected full-farm import effects.
+3. Deploy backend code and run `flask db upgrade` on the backed-up live database.
+   Check integrity before resuming writes. If validation fails, keep writes
+   stopped and restore the database and associated instance files from the
+   archive together with the previous backend code. Do not use downgrade or
+   reset Alembic revisions; percentage observations cannot be downgraded safely.
+4. Install the corresponding Android build after backend migration. Confirm
+   bootstrap advertises percentage weirs, record a fractional level and an
+   overflow transition, and sync an older queued categorical command. Older
+   commands remain valid; older displays should be upgraded to show percentages.
+5. Import the reviewed KML. From the water workspace, configure each polygon's
+   wall and upstream centreline. The default 1 m depth remains visibly preliminary
+   until measured. Confirm estimates and weir-fed trough readings before ending
+   the rollout. No historical basin shape or historical measured volume is inferred.
+
+For installations already at `a7c3e9f1b502`, the follow-up `b8d4f0a2c613` backfills
+polygon weirs' existing capacity field from the configured geometry. Make a fresh
+backup first. The atomic SQLite backfill holds a write lock, preserves timestamps
+and reading history, and leaves point-only weirs and other assets unchanged.
+
+The 2026-10-31 restored-copy rehearsal converted 36 weirs and 156 history rows,
+preserving every existing non-level column and all non-weirs. Huiskamp Boonste
+Weir retained its ID and eight history rows across two full KML imports. There
+were 41 paddock polygons and no new water assets. The first import also added
+one genuine paddock, two gates and one fence under existing full-farm import
+behavior; inspect these changes before a live KML import. Both database integrity
+checks passed. Private backup/rehearsal artifacts are under ignored `backups/`
+and `sandbox/`; this record does not mean production has been migrated.

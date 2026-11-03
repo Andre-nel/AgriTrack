@@ -213,21 +213,19 @@ Important response fields:
     "water_status_options_by_type": {},
     "water_level_asset_types": [],
     "water_level_options": [],
-    "water_level_options_by_type": {}
+    "water_level_options_by_type": {},
+    "percentage_water_level_types": ["weir"]
   }
 }
 ```
 
 ## Farm Snapshot
 
-Water editors should use `form_options.water_level_options_by_type[asset_type]`,
-whose entries have the existing `{ "value": "...", "label": "..." } shape.
-Weirs and ground dams include `{ "value": "overflowing", "label": "Overflowing" }`
-after Full. Other asset types cannot record Overflowing. For older servers that
-omit the type-specific entry, fall back to `water_level_options`; this legacy
-field retains Empty, Low, Half, High, and Full for older clients. The
-`water_asset_status.update` command uses the same server-side restrictions.
-Supplied troughs display Full when their source is Overflowing.
+Water editors use numeric input plus an overflowing choice for asset types in
+`form_options.percentage_water_level_types`. Other types use
+`water_level_options_by_type[asset_type]`, falling back to `water_level_options`
+when the type entry is absent. Ground dams support Overflowing; non-weir troughs
+retain source mirroring. Weir-fed troughs display their own reported level.
 
 `GET /api/mobile/v1/farms/<farm_id>/snapshot`
 
@@ -512,3 +510,54 @@ Common codes:
 7. Mark commands as applied or failed based on the server result.
 8. Refresh cached snapshots for every farm that had applied commands; update
    the visible dashboard immediately when the selected farm was refreshed.
+
+## Weir percentages and storage
+
+Deploy the migrated backend before Android. Bootstrap advertises
+`form_options.percentage_water_level_types: ["weir"]`; Android uses this to select
+the percentage editor. Existing categorical weir commands, including queued old
+commands, remain accepted through the same translation as web/API edits.
+
+`water_asset_status.update` accepts `water_level_percent` (number or null) and
+`is_overflowing` (boolean). Percentages are finite, 0–100, at most two decimals.
+A numeric observation clears overflow unless explicitly selected. Overflow=true
+requires 100%; supplying only the flag sets 100. Null clears the level to unknown.
+Conflicting legacy `water_level` and typed fields are rejected. Example payload:
+
+```json
+{"water_asset_id":"weir-id","water_level_percent":37.25,"is_overflowing":false}
+```
+
+Assets and map properties expose `water_level_percent`, `is_overflowing`,
+`water_level_label`, plus the existing derived `water_level` string (`"37.25"`,
+`"overflowing"` or null). History includes the same typed fields and
+`previous_water_level_percent`, `previous_is_overflowing`,
+`previous_water_level_label`. Other assets retain categorical fields.
+
+For polygon weirs, `capacity_m3` is the calculated full-water capacity. It is
+managed by the server from geometry and replaces any previously entered capacity.
+Submitted capacity values cannot override it. Point-only weirs and other assets
+retain manual capacity entry. There is no separate estimated-capacity attribute.
+
+Read-only estimate fields are `estimated_volume_m3`,
+`weir_area_m2`, `volume_model_version`, `volume_estimate_status` and
+`volume_estimate_message`. Status is `not_applicable`, `missing_polygon`,
+`setup_required`, `review_required`, `preliminary`, `ready` or `unavailable`.
+Missing estimates and unavailable polygon capacity are null. Android clears
+current volume on pending offline weir-level changes and uses `pending_sync`
+locally until a fresh server snapshot supplies a recalculated value.
+
+Existing web asset POST/PATCH endpoints accept `weir_polygon` (GeoJSON Polygon),
+`weir_centerline` (GeoJSON LineString), `weir_wall_height_m` and
+`weir_height_assumed`. `weir_geometry_review_required` is server-managed.
+`POST /api/water-assets/<id>/volume-preview` accepts proposed configuration and
+an optional percentage, returning estimates without recording an observation.
+The optional `include_water_fill: true` adds display polygons in `water_fill`;
+clients must clip them to the full outline, including holes. This field is
+omitted from normal asset responses; see the water module for rendering details.
+`weir_geometry_url` links to the web setup screen. Polygon features replace the
+point geometry for configured weirs; holes remain in the GeoJSON.
+
+See the [water module](../app/modules/water/README.md) for the inferred-bed model,
+convergence limits and historical migration. Old clients can keep sending
+categories, but should be upgraded to render numeric readings correctly.

@@ -42,6 +42,7 @@ from app.modules.analytics.services import (
 )
 from app.modules.analytics.stock_tracking import build_stock_tracking_report
 from app.services.water_network_service import WaterNetworkService
+from app.services.water_level import parse_percent
 
 
 def _choice_filter_label(value: str) -> str:
@@ -199,9 +200,18 @@ def register_legacy_routes(bp) -> None:
         if selected_filters["current_status"]:
             asset_query = asset_query.filter(WaterAsset.status == selected_filters["current_status"])
         if selected_filters["current_water_level"]:
-            asset_query = asset_query.filter(
-                WaterAsset.water_level == selected_filters["current_water_level"]
-            )
+            requested_level = selected_filters["current_water_level"]
+            if requested_level == "overflowing":
+                asset_query = asset_query.filter((WaterAsset.water_level == requested_level) | WaterAsset.is_overflowing.is_(True))
+            elif requested_level in WaterNetworkService.LEGACY_WATER_LEVEL_OPTIONS:
+                asset_query = asset_query.filter(WaterAsset.water_level == requested_level)
+            else:
+                try:
+                    percent = parse_percent(requested_level)
+                except ValueError:
+                    flash("Invalid water depth percentage filter", "error")
+                    return redirect(url_for("web.analytics_water_assets"))
+                asset_query = asset_query.filter(WaterAsset.water_level_percent == percent, WaterAsset.is_overflowing.is_(False))
 
         scope_assets = asset_query.all()
         valid_scope_ids = {str(asset.id) for asset in scope_assets}
@@ -211,12 +221,11 @@ def register_legacy_routes(bp) -> None:
                 for asset in scope_assets
                 if str(asset.id) in requested_water_asset_ids & valid_scope_ids
             ]
-            if not selected_assets:
-                selected_assets = scope_assets
         else:
             selected_assets = scope_assets
 
         selected_water_asset_ids = [str(asset.id) for asset in selected_assets]
+        focused_asset = selected_assets[0] if len(selected_assets) == 1 and len(requested_water_asset_ids) == 1 else None
         include_farm_name = len({str(asset.farm_id) for asset in scope_assets}) > 1
         report = build_water_asset_state_report(
             assets=selected_assets,
@@ -263,7 +272,8 @@ def register_legacy_routes(bp) -> None:
             "water_levels": [
                 {"value": value, "label": _choice_filter_label(value)}
                 for value in WaterNetworkService.WATER_LEVEL_OPTIONS
-            ],
+            ] + [{"value": format(value, "f"), "label": f"{value:g}% (weir depth)"}
+                 for (value,) in db.session.query(WaterAsset.water_level_percent).filter(WaterAsset.water_level_percent.isnot(None)).distinct().order_by(WaterAsset.water_level_percent)],
             "state_fields": [
                 {"value": value, "label": WATER_ASSET_STATE_FIELD_LABELS[value]}
                 for value in WATER_ASSET_STATE_FIELD_ORDER
@@ -276,6 +286,7 @@ def register_legacy_routes(bp) -> None:
 
         return render_template(
             "analytics/water_assets.html",
+            focused_asset=focused_asset,
             filter_options=filter_options,
             selected_filters=selected_filters,
             selected_asset_types=selected_asset_types,

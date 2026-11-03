@@ -574,7 +574,7 @@ def test_mobile_decision_feed_ignores_weir_water_level(client, app):
             asset_type="weir",
             active=True,
             status="operational",
-            water_level="empty",
+            water_level_percent=0,
         )
         db.session.add(weir)
         db.session.flush()

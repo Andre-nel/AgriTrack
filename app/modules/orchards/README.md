@@ -156,6 +156,11 @@ Downgrading `e8a1c3d5f709` removes orchard records. Restore a backup
 when orchard data must be retained. Do not downgrade the earlier weir-history
 migration as part of orchard rollback.
 
+After polygon-weir revision `a7c3e9f1b502`, database downgrade is blocked to avoid
+losing percentage readings and geometry. Use the pre-deployment backup for a
+whole-application rollback; the orchard migration round-trip tests deliberately
+stop at `f9b2d4e6a810`. See the [water rollout procedure](../../../docs/private_farm_ops.md#polygon-weir-rollout).
+
 ## Verification
 
 - `python -m pytest tests/integration/test_orchards.py -q` covers the import,

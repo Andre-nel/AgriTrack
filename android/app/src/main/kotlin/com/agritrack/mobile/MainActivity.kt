@@ -2241,6 +2241,9 @@ private fun satelliteFarmMapHtml(featureCollectionJson: String): String {
 
               function styleFeature(feature) {
                 const props = feature.properties || {};
+                if (props.feature_type === "water_asset") {
+                  return { color: "#167B99", weight: 2.5, fillColor: "#3B9FC4", fillOpacity: 0.3 };
+                }
                 if (props.feature_type === "water_connection") {
                   return { color: "#2C7FB8", weight: 4, opacity: 0.9 };
                 }
@@ -3534,7 +3537,7 @@ private fun PaddockDetailScreen(
             water.assets.forEach { asset ->
                 ClickableEntityCard(
                     title = asset.name,
-                    detail = "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevel ?: "unknown"}",
+                    detail = "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevelLabel ?: asset.waterLevel ?: "unknown"}",
                 ) {
                     onWaterAssetSelected(asset.id)
                     onOpenScreen(AppScreen.WaterAssetDetail)
@@ -3642,7 +3645,7 @@ private fun WaterAssetsScreen(
         filteredAssets.forEach { asset ->
             ClickableEntityCard(
                 title = asset.name,
-                detail = "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevel ?: "unknown"}",
+                detail = "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevelLabel ?: asset.waterLevel ?: "unknown"}",
             ) {
                 onWaterAssetSelected(asset.id)
                 onOpenScreen(AppScreen.WaterAssetDetail)
@@ -3665,16 +3668,24 @@ private fun WaterAssetDetailScreen(
     FormScaffold("Water Asset Detail", onBackToList) {
         val snapshot = state.snapshot ?: return@FormScaffold
         val asset = selectedWaterAsset(state) ?: return@FormScaffold
-        EntityCard(asset.name, "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevel ?: "unknown"}")
+        EntityCard(asset.name, "${asset.assetTypeLabel} | ${asset.status ?: "unknown"} | level ${asset.waterLevelLabel ?: asset.waterLevel ?: "unknown"}")
         MetricRows(
             listOf(
                 "Type" to asset.assetTypeLabel,
                 "Active" to if (asset.active) "Yes" else "No",
                 "Status" to (asset.status ?: "unknown"),
-                "Water level" to (asset.waterLevel ?: "unknown"),
+                "Water level" to (asset.waterLevelLabel ?: asset.waterLevel ?: "unknown"),
                 "Location" to (asset.locationPaddockName ?: asset.locationPaddockId ?: "Unlocated"),
             )
         )
+        if (asset.assetType == "weir") {
+            SectionCard("Estimated Storage") {
+                Text("Capacity: ${asset.capacityM3?.let { "$it m³" } ?: "Unavailable"}")
+                Text("Current volume: ${asset.estimatedVolumeM3?.let { "$it m³" } ?: "Unknown"}")
+                Text(if (asset.volumeEstimateStatus == "pending_sync") "Volume awaiting sync" else (asset.volumeEstimateStatus ?: "Setup required").replace('_', ' '))
+                Text("Water level measures depth at the wall, not percentage of stored volume.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
         SectionCard("Served Paddocks") {
             val servedNames = servedPaddockNames(snapshot, asset)
             if (servedNames.isEmpty()) {
@@ -4749,7 +4760,23 @@ private fun WaterEditScreen(
         }
         val statusOptions = state.formOptions.waterStatusOptionsByType[asset?.assetType.orEmpty()].orEmpty()
         OptionPicker("Status", state.waterStatus, statusOptions, onWaterStatusChange)
-        if (asset?.assetType in state.formOptions.waterLevelAssetTypes) {
+        if (asset?.assetType in state.formOptions.percentageWaterLevelTypes) {
+            val overflowing = state.waterLevel == "overflowing"
+            OutlinedTextField(
+                value = if (overflowing) "100" else state.waterLevel,
+                onValueChange = onWaterLevelChange,
+                label = { Text("Water depth at wall (%)") },
+                placeholder = { Text("Unknown") },
+                enabled = !overflowing,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = overflowing, onCheckedChange = { onWaterLevelChange(if (it) "overflowing" else "100") })
+                Text("Overflowing (100%)")
+            }
+            Text("0–100; depth at the wall, not percentage of stored volume.", style = MaterialTheme.typography.bodySmall)
+        } else if (asset?.assetType in state.formOptions.waterLevelAssetTypes) {
             OptionPicker("Water level", state.waterLevel, state.formOptions.waterLevelOptionsForType(asset?.assetType.orEmpty()), onWaterLevelChange)
         }
         Button(onClick = onQueueWaterUpdate, enabled = state.selectedWaterAssetId.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
@@ -6043,7 +6070,12 @@ private fun queueWaterUpdate(state: FieldUiState, repo: MobileRepository): Field
     if (state.selectedWaterAssetId.isBlank()) return state.copy(statusMessage = "Choose a water asset.")
     val asset = selectedWaterAsset(state)
     val waterLevel = if (asset?.assetType in state.formOptions.waterLevelAssetTypes) state.waterLevel else ""
-    repo.queueWaterStatus(farm.id, state.selectedWaterAssetId, state.waterStatus, waterLevel, state.waterActive)
+    try {
+        repo.queueWaterStatus(farm.id, state.selectedWaterAssetId, state.waterStatus, waterLevel, state.waterActive,
+            percentageLevel = asset?.assetType in state.formOptions.percentageWaterLevelTypes)
+    } catch (error: IllegalArgumentException) {
+        return state.copy(statusMessage = error.message ?: "Invalid water percentage.")
+    }
     return state.copy(currentScreen = AppScreen.Home, statusMessage = "Queued water update.")
 }
 
@@ -6569,6 +6601,7 @@ private fun defaultMobileFormOptions(): MobileFormOptions {
             "trough" to options("operational", "leaking", "damaged"),
         ),
         waterLevelAssetTypes = setOf("pit", "cement_dam", "tank", "ground_dam", "weir", "trough"),
+        percentageWaterLevelTypes = setOf("weir"),
         waterLevelOptions = waterLevels,
         waterLevelOptionsByType = mapOf(
             "weir" to (waterLevels + MobileOption("overflowing", "Overflowing")),

@@ -471,7 +471,8 @@ def test_import_farm_applies_weir_defaults_when_missing(client, app, tmp_path):
         assert weir is not None
         assert weir.asset_type == "weir"
         assert weir.status == "operational"
-        assert weir.water_level == "empty"
+        assert weir.water_level is None
+        assert weir.water_level_percent == 0
         assert weir.weir_size == "medium"
         assert weir.location_paddock_id == paddock.id
         assert [link.paddock_id for link in weir.served_paddock_links] == [paddock.id]
@@ -532,7 +533,8 @@ def test_water_asset_and_connection_api_validation(client, app):
     assert response.status_code == 201
     weir_payload = response.get_json()
     assert weir_payload["status"] == "operational"
-    assert weir_payload["water_level"] == "empty"
+    assert weir_payload["water_level"] == "0"
+    assert weir_payload["water_level_percent"] == 0
     assert weir_payload["weir_size"] == "medium"
 
     response = client.post(
@@ -810,7 +812,7 @@ def test_update_water_asset_type_change_clears_hidden_windmill_fields(client, ap
     assert payload["trough_size"] == "medium"
 
 
-def test_weir_defaults_apply_when_blank_on_update(client, app):
+def test_weir_blank_level_is_unknown_while_other_defaults_apply(client, app):
     with app.app_context():
         farm = Farm(name="Weir Default Update Farm", timezone="SAST")
         db.session.add(farm)
@@ -821,7 +823,7 @@ def test_weir_defaults_apply_when_blank_on_update(client, app):
             asset_type="weir",
             active=True,
             status="damaged",
-            water_level="high",
+            water_level_percent=75,
             weir_size="large",
         )
         db.session.add(asset)
@@ -842,7 +844,8 @@ def test_weir_defaults_apply_when_blank_on_update(client, app):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["status"] == "operational"
-    assert payload["water_level"] == "empty"
+    assert payload["water_level"] is None
+    assert payload["water_level_percent"] is None
     assert payload["weir_size"] == "medium"
 
 
@@ -1401,7 +1404,7 @@ def test_farm_map_data_does_not_mark_paddock_empty_when_served_weir_has_water(cl
             asset_type="weir",
             active=True,
             status="operational",
-            water_level="high",
+            water_level_percent=75,
             latitude=-32.0012,
             longitude=25.0012,
             location_paddock_id=paddock.id,
@@ -1497,7 +1500,7 @@ def test_farm_map_data_counts_served_ground_dams_and_weirs_for_paddock_water(cli
             name="Weir A",
             asset_type="weir",
             active=True,
-            water_level="high",
+            water_level_percent=75,
             latitude=-32.0012,
             longitude=25.0012,
         )
@@ -1632,7 +1635,7 @@ def test_farm_water_workspace_collapses_create_forms_and_filters_water_assets(cl
     assert "Weir Review" not in water_assets_section
 
 
-def test_farm_water_workspace_renders_asset_modal_launchers(client, app):
+def test_farm_water_workspace_links_assets_to_detail_and_keeps_legacy_editor(client, app):
     with app.app_context():
         farm = Farm(name="Modal Water Farm", timezone="SAST")
         db.session.add(farm)
@@ -1656,7 +1659,8 @@ def test_farm_water_workspace_renders_asset_modal_launchers(client, app):
     assert response.status_code == 200
     body = response.data.decode("utf-8")
     assert 'id="water-asset-modal"' in body
-    assert f'data-open-water-asset-modal="{asset_id}"' in body
+    assert f'href="/farms/{farm_id}/water/assets/{asset_id}"' in body
+    assert f'data-open-water-asset-modal="{asset_id}"' not in body
     assert 'data-asset-api-base="/api/water-assets"' in body
     assert 'data-create-connection-url="/farms/' in body
     assert 'data-water-asset-connections' in body
@@ -1864,7 +1868,7 @@ def test_farm_water_mass_update_updates_weirs(client, app):
             asset_type="weir",
             active=True,
             status="operational",
-            water_level="empty",
+            water_level_percent=0,
             weir_size="medium",
             location_paddock_id=north.id,
         )
@@ -1874,7 +1878,7 @@ def test_farm_water_mass_update_updates_weirs(client, app):
             asset_type="weir",
             active=True,
             status="silted",
-            water_level="low",
+            water_level_percent=25,
             weir_size="small",
             location_paddock_id=south.id,
         )
@@ -1927,7 +1931,8 @@ def test_farm_water_mass_update_updates_weirs(client, app):
         assert round(float(first_weir.longitude), 4) == 25.1
         assert round(float(first_weir.altitude_m), 2) == 123.45
         assert first_weir.status == "operational"
-        assert first_weir.water_level == "empty"
+        assert first_weir.water_level is None
+        assert first_weir.water_level_percent is None
         assert first_weir.weir_size == "medium"
         assert [link.paddock_id for link in first_weir.served_paddock_links] == [south_id]
 
@@ -1940,7 +1945,8 @@ def test_farm_water_mass_update_updates_weirs(client, app):
         assert round(float(second_weir.longitude), 4) == 25.2
         assert round(float(second_weir.altitude_m), 2) == 140.0
         assert second_weir.status == "damaged"
-        assert second_weir.water_level == "half"
+        assert second_weir.water_level is None
+        assert second_weir.water_level_percent == 50
         assert second_weir.weir_size == "large"
         assert [link.paddock_id for link in second_weir.served_paddock_links] == [north_id]
 

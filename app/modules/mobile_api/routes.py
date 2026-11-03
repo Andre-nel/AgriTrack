@@ -776,7 +776,7 @@ def _decision_feed(
         )
 
     for asset in water_assets:
-        level = (asset.water_level or "").strip().lower()
+        level = (asset.level_token or "").strip().lower()
         status = (asset.status or "").strip().lower()
         is_damaged_empty_asset = status == "damaged" and level == "empty"
         level_requires_attention = (
@@ -791,7 +791,7 @@ def _decision_feed(
                     "severity": "high" if level_requires_attention and level == "empty" else "medium",
                     "category": "water",
                     "title": f"Check {asset.name}",
-                    "detail": f"{asset.asset_type} status {asset.status or 'unknown'}, level {asset.water_level or 'unknown'}",
+                    "detail": f"{asset.asset_type} status {asset.status or 'unknown'}, level {asset.level_label}",
                     "entity_type": "water_asset",
                     "entity_id": str(asset.id),
                 }
@@ -1012,6 +1012,7 @@ def bootstrap():
                     for asset_type, options in WaterNetworkService.STATUS_OPTIONS_BY_TYPE.items()
                 },
                 "water_level_asset_types": sorted(WaterNetworkService.WATER_LEVEL_TYPES),
+                "percentage_water_level_types": ["weir"],
                 "water_level_options": [
                     {"value": option, "label": option.replace("_", " ").title()}
                     for option in WaterNetworkService.LEGACY_WATER_LEVEL_OPTIONS
@@ -2243,10 +2244,10 @@ def _handle_water_asset_status_update(farm: Farm, payload: dict) -> dict:
     if asset is None:
         raise MobileApiError("not_found", "Water asset not found for this farm", 404)
 
-    allowed_fields = {"active", "status", "water_level"}
+    allowed_fields = {"active", "status", "water_level", "water_level_percent", "is_overflowing"}
     update_payload = {field: payload[field] for field in allowed_fields if field in payload}
     if not update_payload:
-        raise ValueError("At least one of active, status, or water_level is required")
+        raise ValueError("At least one of active, status, water_level, water_level_percent, or is_overflowing is required")
     WaterNetworkService.update_asset(asset, update_payload)
     db.session.flush()
     network_state = WaterNetworkService.network_state_for_farm(str(farm.id))
