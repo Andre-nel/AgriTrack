@@ -46,6 +46,17 @@ class WeirLevelsTest {
         val feature = JSONObject(snapshot.mapFeatures.single().propertiesJson)
         assertTrue(feature.isNull("estimated_volume_m3"))
         assertEquals("37.25%", feature.getString("water_level_label"))
+
+        val underflow = MobileCommand.waterAssetStatus("farm", "weir", "operational", "37.25", percentageLevel = true, underflowing = true)
+        assertTrue(underflow.payload.getBoolean("is_underflowing"))
+        assertEquals("damaged", underflow.payload.getString("status"))
+        val damaged = FarmSnapshot.fromJson(json).withOptimisticCommands(JSONArray().put(underflow.toJson()))
+        val reading = damaged.waterAssets.single()
+        assertEquals("underflowing", reading.waterLevel)
+        assertEquals("37.25", reading.editableLevel)
+        assertEquals("Under flowing (37.25%)", reading.waterLevelLabel)
+        assertEquals("damaged", reading.status)
+        assertTrue(JSONObject(damaged.mapFeatures.single().propertiesJson).getBoolean("is_underflowing"))
     }
 
     @Test

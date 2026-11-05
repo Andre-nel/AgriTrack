@@ -91,8 +91,9 @@
     <label data-water-asset-field="water_level_percent">Water depth at wall (%)
       <input type="number" name="water_level_percent" min="0" max="100" step="0.01" placeholder="Unknown" />
     </label>
-    <label data-water-asset-field="is_overflowing">Overflowing
-      <select name="is_overflowing" data-weir-overflow data-percent-name="water_level_percent"><option value="0">No</option><option value="1">Overflowing (100%)</option></select>
+    {% from "water/_weir_flow.html" import flow_select %}
+    <label data-water-asset-field="weir_flow">Flow condition
+      {{ flow_select() }}
     </label>
     <label data-water-asset-field="weir_size">Weir Size
       <select name="weir_size">

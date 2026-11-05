@@ -269,11 +269,11 @@
 
     const showWaterLevel = waterLevelTypes.has(assetType) && assetType !== "weir";
     setFieldVisibility("water_level_percent", assetType === "weir");
-    setFieldVisibility("is_overflowing", assetType === "weir");
-    if (assetType === "weir" && fieldControls.is_overflowing.value !== "1") {
-      fieldControls.is_overflowing.value = "0";
-      fieldControls.is_overflowing.dispatchEvent(new Event("change", { bubbles: true }));
+    setFieldVisibility("weir_flow", assetType === "weir");
+    if (assetType === "weir" && !fieldControls.weir_flow.value) {
+      fieldControls.weir_flow.value = "normal";
     }
+    fieldControls.weir_flow.dispatchEvent(new Event("change", { bubbles: true }));
     setFieldVisibility("water_level", showWaterLevel);
     if (showWaterLevel) {
       rebuildSingleSelect(
@@ -452,6 +452,8 @@
     fieldControls.active.checked = Boolean(asset.active);
     fieldControls.needs_review.checked = Boolean(asset.needs_review);
     setMultiSelectValue(fieldControls.served_paddock_ids, asset.served_paddock_ids || []);
+    fieldControls.water_level_percent.value = valueOrBlank(asset.water_level_percent);
+    fieldControls.weir_flow.value = asset.is_underflowing ? "underflowing" : asset.is_overflowing ? "overflowing" : "normal";
     syncTypeSpecificFields({
       status: asset.status,
       water_level: asset.water_level,
@@ -461,9 +463,6 @@
       trough_size: asset.trough_size,
       served_paddock_ids: asset.served_paddock_ids || [],
     });
-    fieldControls.water_level_percent.value = valueOrBlank(asset.water_level_percent);
-    fieldControls.is_overflowing.value = asset.is_overflowing ? "1" : "0";
-    fieldControls.is_overflowing.dispatchEvent(new Event("change", { bubbles: true }));
     updateImportNote(asset);
     setStatus("", "");
     form.hidden = false;
@@ -558,6 +557,7 @@
       const group = createForm.querySelector("[data-create-weir-level]");
       group.hidden = !isWeir;
       group.querySelectorAll("input,select").forEach(control => { control.disabled = !isWeir; });
+      group.querySelector("[data-weir-flow]").dispatchEvent(new Event("change", { bubbles: true }));
     };
     createType.addEventListener("change", syncCreateWaterLevel);
     syncCreateWaterLevel();

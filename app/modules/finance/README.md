@@ -40,6 +40,30 @@ If you change anything after preview, preview again before saving. The server al
 checks a signed, one-hour preview token so bypassing the disabled button cannot
 save different, unreviewed values.
 
+Saved trade details and calculated import previews include an **Individual weights
+by group** scatter plot for trades priced by weight. The horizontal axis is the
+animal's position in its group's recorded weight list (starting at 1, not an animal
+ID); the vertical axis is kg. Each group has its own colour and numbered label,
+including when group labels repeat. Repeated weights remain separate animals.
+Hover or tap a point for its group, animal number and weight to three decimal
+places. Overlapping points show the matching groups together. The group
+checkboxes support touch and keyboard use; hiding a group rescales the axes to
+the visible data and does not change the trade or invalidate confirmation.
+
+Each group beside the plot shows its mean weight (kg), mean price per animal
+excluding VAT, and price per kg excluding VAT. These summaries use the existing
+server-calculated group statistics, including their rounding rules, and remain
+visible when a group is hidden or the chart cannot load. Mean price per animal is
+the group's VAT-exclusive subtotal divided by its head count.
+
+The chart uses normalized, rounded weights from the same server validation as
+the statistics. Editing a preview marks the plot and group summaries as stale;
+**Preview changes** refreshes them before saving. Invalid weights produce no partial chart. Per-head
+trades explain that individual weights are not recorded. The existing weight
+lists/editor remain available if JavaScript or the shared Chart.js CDN is
+unavailable. This reuses the app's pinned Chart.js 4.4.1 dependency without adding
+a chart library, API endpoint or database migration.
+
 ### Version 1 format
 
 One document represents one sale or purchase, one species (`Cattle`, `Sheep`, or
@@ -205,6 +229,21 @@ upgrades, round trips, unchanged cashflow, foreign keys and lossy-downgrade refu
 Import tests cover mixed prices/sexes, per-head trades, group VAT rounding, invalid
 input, read-only preview, rollback, duplicate/concurrent submissions, authentication,
 and preservation of 210 weights through editing.
+
+Chart browser checks use an isolated in-memory Flask database. With Playwright
+available through `NODE_PATH`, cache the same pinned bundle used by the app and run:
+
+```powershell
+New-Item -ItemType Directory -Force sandbox/livestock-trade-evidence/vendor
+Invoke-WebRequest https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js -OutFile sandbox/livestock-trade-evidence/vendor/chart.umd.min.js
+node tests/browser/livestock_trade.cjs
+```
+
+Alternatively, set `CHART_JS_TEST_PATH` to an existing cached 4.4.1 bundle. The test
+blocks external requests and checks ordered/duplicate weights, overlapping-point
+tooltips, group means and VAT-exclusive prices, keyboard group filters, preview invalidation and refresh, saving, mobile
+touch/layout, single-animal groups and CDN failure. Screenshots are saved under
+`sandbox/livestock-trade-evidence`. It never connects to the farm database.
 
 This documents application behavior, not agricultural or veterinary claims.
 

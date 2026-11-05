@@ -35,20 +35,28 @@ def parse_legacy_weir_level(value):
     return parse_percent(text), False
 
 
+def _percent_text(percent):
+    return format(Decimal(str(percent)).normalize(), "f")
+
+
 def level_token(row, prefix=""):
     percent = getattr(row, prefix + "water_level_percent", None)
+    if getattr(row, prefix + "is_underflowing", False):
+        return "underflowing"
     overflowing = getattr(row, prefix + "is_overflowing", False)
     if overflowing:
         return "overflowing"
     if percent is not None:
-        return format(Decimal(str(percent)).normalize(), "f")
+        return _percent_text(percent)
     return getattr(row, prefix + "water_level", None)
 
 
 def level_label(row, prefix=""):
+    percent = getattr(row, prefix + "water_level_percent", None)
+    if getattr(row, prefix + "is_underflowing", False):
+        return "Under flowing" if percent is None else f"Under flowing ({_percent_text(percent)}%)"
     if getattr(row, prefix + "is_overflowing", False):
         return "Overflowing (100%)"
-    percent = getattr(row, prefix + "water_level_percent", None)
     if percent is not None:
         return level_token(row, prefix) + "%"
     return (getattr(row, prefix + "water_level", None) or "Unknown").replace("_", " ").title()

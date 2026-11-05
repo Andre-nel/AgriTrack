@@ -216,7 +216,10 @@ data class WaterAssetSummary(
     val capacityM3: Double? = null,
     val estimatedVolumeM3: Double? = null,
     val volumeEstimateStatus: String? = null,
-)
+) {
+    val isUnderflowing get() = assetType == "weir" && waterLevel == "underflowing"
+    val editableLevel get() = if (isUnderflowing) waterLevelPercent?.toString().orEmpty() else waterLevel.orEmpty()
+}
 
 data class GateSummary(
     val id: String,

@@ -327,6 +327,7 @@ data class MobileCommand(
             waterLevel: String,
             active: Boolean = true,
             percentageLevel: Boolean = false,
+            underflowing: Boolean = false,
         ): MobileCommand {
             val payload = JSONObject()
                 .put("water_asset_id", waterAssetId)
@@ -337,6 +338,7 @@ data class MobileCommand(
             if (percentageLevel) {
                 val reading = waterLevel.trim()
                 val overflowing = reading.equals("overflowing", ignoreCase = true)
+                require(!underflowing || !overflowing) { "Choose one weir flow condition." }
                 val percent = when {
                     overflowing -> java.math.BigDecimal("100")
                     reading.isBlank() -> null
@@ -348,6 +350,8 @@ data class MobileCommand(
                 }
                 payload.put("water_level_percent", percent?.toDouble() ?: JSONObject.NULL)
                 payload.put("is_overflowing", overflowing)
+                payload.put("is_underflowing", underflowing)
+                if (underflowing) payload.put("status", "damaged")
             } else if (waterLevel.isNotBlank()) {
                 payload.put("water_level", waterLevel.trim())
             }

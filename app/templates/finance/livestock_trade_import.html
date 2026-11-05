@@ -3,6 +3,7 @@
 {% from "finance/_livestock_trade_form.html" import livestock_trade_form with context %}
 {% from "finance/_trade_statistics.html" import statistics_table with context %}
 {% from "finance/_trade_images.html" import trade_image_uploads %}
+{% from "finance/_trade_weight_chart.html" import weight_scatter with context %}
 {% block title %}Import Livestock Trade | AgriTrack{% endblock %}
 {% block content %}
 <section class="hero cash-flow-hero">
@@ -20,6 +21,7 @@
   <section class="card"><h2>Calculated preview</h2>
     {{ statistics_table(preview_rows, trade_document.pricing_model) }}
   </section>
+  {{ weight_scatter(preview_weight_groups, trade_document.pricing_model, preview_mode=True) }}
   {% endif %}
   <section class="card"><h2>Review and complete details</h2>
     <p>Nothing has been saved. Verify every group and weight, and complete any missing details.</p>
@@ -50,4 +52,7 @@
   </section>
 {% endif %}
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='livestock_trades.js') }}"></script>{% endblock %}
+{% block scripts %}
+{% if preview and trade_document.pricing_model == 'weight' %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>{% endif %}
+<script src="{{ url_for('static', filename='livestock_trades.js') }}"></script>
+{% endblock %}

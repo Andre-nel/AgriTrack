@@ -46,7 +46,10 @@ sections. Charts initialize only when visible and resize when reopened.
 
 The existing UTC daily state series carries the last known observation forward,
 with gaps before the first observation and for explicitly unknown depths.
-Weir depth retains its numeric 0–100% axis and overflow markers. Other assets
+Weir depth uses a numeric 0–100% axis. Triangles mark Overflowing and circles
+mark Under flowing at the measured depth. The tooltip identifies the condition.
+An Under flowing reading with unknown depth appears in the summary without a
+plotted depth. Other assets
 keep their categorical water-level/state charts.
 
 Two optional tracked fields support storage comparisons:

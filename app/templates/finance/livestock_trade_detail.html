@@ -3,6 +3,7 @@
 {% from "finance/_livestock_trade_form.html" import livestock_trade_form with context %}
 {% from "finance/_trade_statistics.html" import statistics_table with context %}
 {% from "finance/_trade_images.html" import trade_image_gallery %}
+{% from "finance/_trade_weight_chart.html" import weight_scatter with context %}
 {% block title %}{{ trade.trade_type_label }} {{ trade.animal_mode_label }} | Cash Flow | AgriTrack{% endblock %}
 {% block content %}
 <section class="hero cash-flow-hero">
@@ -73,6 +74,7 @@
   <h2>Group and Combined Statistics</h2>
   {{ statistics_table(trade.stat_rows, trade.pricing_model) }}
 </section>
+{{ weight_scatter(trade.groups, trade.pricing_model) }}
 {% for group in trade.groups %}
 <section class="card">
   <h2>{{ group.label or group.animal_type_label }}</h2>
@@ -105,5 +107,6 @@
 {% endblock %}
 
 {% block scripts %}
+{% if trade.pricing_model == 'weight' %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>{% endif %}
 <script src="{{ url_for('static', filename='livestock_trades.js') }}"></script>
 {% endblock %}

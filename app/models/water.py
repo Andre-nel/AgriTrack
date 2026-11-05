@@ -35,6 +35,10 @@ class WaterAsset(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     water_level = db.Column(db.String(30))
     water_level_percent = db.Column(db.Numeric(5, 2))
     is_overflowing = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
+    is_underflowing = db.Column(db.Boolean, db.CheckConstraint(
+        "NOT is_underflowing OR (asset_type = 'weir' AND NOT is_overflowing AND status IS NOT NULL AND status = 'damaged')",
+        name="ck_water_asset_underflow",
+    ), nullable=False, default=False, server_default="0")
     weir_polygon = db.Column(db.JSON)
     weir_centerline = db.Column(db.JSON)
     weir_wall_height_m = db.Column(db.Numeric(8, 3))
@@ -153,11 +157,19 @@ class WaterAssetStateHistory(UUIDPrimaryKeyMixin, db.Model):
     previous_water_level = db.Column(db.String(30))
     previous_water_level_percent = db.Column(db.Numeric(5, 2))
     previous_is_overflowing = db.Column(db.Boolean)
+    previous_is_underflowing = db.Column(db.Boolean, db.CheckConstraint(
+        "NOT previous_is_underflowing OR (previous_is_overflowing IS FALSE AND previous_status IS NOT NULL AND previous_status = 'damaged')",
+        name="ck_water_history_previous_underflow",
+    ))
     active = db.Column(db.Boolean, nullable=False)
     status = db.Column(db.String(40))
     water_level = db.Column(db.String(30))
     water_level_percent = db.Column(db.Numeric(5, 2))
     is_overflowing = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
+    is_underflowing = db.Column(db.Boolean, db.CheckConstraint(
+        "NOT is_underflowing OR (NOT is_overflowing AND status IS NOT NULL AND status = 'damaged')",
+        name="ck_water_history_underflow",
+    ), nullable=False, default=False, server_default="0")
 
     @property
     def level_label(self):

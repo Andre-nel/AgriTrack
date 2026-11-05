@@ -109,6 +109,7 @@ def _water_asset_state_from_row(row: WaterAssetStateHistory) -> dict:
         "water_level": row.water_level,
         "water_level_percent": float(row.water_level_percent) if row.water_level_percent is not None else None,
         "is_overflowing": bool(row.is_overflowing),
+        "is_underflowing": bool(row.is_underflowing),
         "water_level_label": level_label(row),
     }
 
@@ -323,15 +324,17 @@ def _water_asset_summary_row(
 
     if asset.asset_type == "weir":
         observed = [state for state in daily_states if state and state.get("water_level_percent") is not None]
-        counts = defaultdict(int)
-        for state in observed:
-            counts[(state["water_level_percent"], state["is_overflowing"])] += 1
-        dominant = max(counts, key=lambda key: (counts[key], key)) if counts else None
+        readings = [state for state in daily_states if state and state["water_level_label"] != "Unknown"]
+        counts = _state_value_counts(readings, "water_level_label")
+        dominant = max(readings, default=None, key=lambda s: (
+            counts[s["water_level_label"]], s["water_level_percent"] if s["water_level_percent"] is not None else -1,
+            s["is_overflowing"], s["is_underflowing"],
+        ))
         result.update(
             latest_water_level_label=latest_state["water_level_label"] if latest_state else "Unknown",
-            dominant_water_level_label=("Overflowing (100%)" if dominant[1] else f"{dominant[0]:g}%") if dominant else "Unknown",
+            dominant_water_level_label=dominant["water_level_label"] if dominant else "Unknown",
             water_level_change_count=sum(
-                (row.previous_water_level_percent, bool(row.previous_is_overflowing)) != (row.water_level_percent, bool(row.is_overflowing))
+                row.previous_level_label != row.level_label
                 for row in in_range_rows if row.change_type == "updated"
             ),
             empty_low_days=sum(state["water_level_percent"] <= 25 for state in observed),
@@ -438,6 +441,7 @@ def _water_storage_panels(field, assets, state_series, storage_values, labels, p
                 series = {"label": label, "values": values, "reference": capacity_reference}
                 if not capacity_reference:
                     series["overflowing"] = [bool(s and s["is_overflowing"]) for s in state_series[str(asset.id)]["daily_states"]]
+                    series["underflowing"] = [bool(s and s["is_underflowing"]) for s in state_series[str(asset.id)]["daily_states"]]
                 datasets.append(series)
                 if not capacity_reference and storage["message"]:
                     messages.append(f"{label}: {storage['message']}")
@@ -548,6 +552,7 @@ def build_water_asset_state_report(
                 series = {"label": _water_asset_label(asset, include_farm_name), "values": values}
                 if numeric:
                     series["overflowing"] = [bool(s and s["is_overflowing"]) for s in states]
+                    series["underflowing"] = [bool(s and s["is_underflowing"]) for s in states]
                 datasets.append(series)
             collections = [[series] for series in datasets] if plot_mode == "asset" else [datasets]
             for collection in collections:

@@ -61,6 +61,115 @@ def token_from(response):
     return html.unescape(match[1])
 
 
+def weight_chart_from(response):
+    body = response.get_data(as_text=True)
+    match = re.search(r'<script id="tradeWeightChartData" type="application/json">(.*?)</script>', body, re.S)
+    assert match, body
+    return json.loads(match[1])
+
+
+def weight_summaries_from(response):
+    summaries = re.findall(r'<dl class="trade-weight-group-stats">(.*?)</dl>', response.get_data(as_text=True), re.S)
+    return [[html.unescape(value) for value in re.findall(r'<dd>(.*?)</dd>', summary)] for summary in summaries]
+
+
+@pytest.mark.parametrize("vat_percent", [0, 15])
+def test_weight_group_summaries_show_mean_weight_and_vat_exclusive_prices(client, farm_id, vat_percent):
+    doc = document()
+    doc["vat_percent"] = vat_percent
+    # Mean price uses the rounded group subtotal, not the displayed rounded mean kg.
+    doc["groups"].append({**doc["groups"][0], "label": "Small weights",
+                          "weights_kg": ["0.001", "0.002"], "price_per_kg": "33.3333"})
+    expected = [
+        ["255.000 kg", "R10 200,00", "R40,0000"],
+        ["290.000 kg", "R13 050,00", "R45,0000"],
+        ["0.002 kg", "R0,05", "R33,3333"],
+    ]
+    preview = client.post(BASE + "/import/preview", data=form(doc, farm_id))
+    assert preview.status_code == 200
+    assert weight_summaries_from(preview) == expected
+    saved = client.post(BASE + "/import/confirm", data=form(doc, farm_id, token_from(preview)))
+    assert saved.status_code == 302
+    detail = client.get(saved.headers["Location"])
+    assert detail.status_code == 200
+    assert weight_summaries_from(detail) == expected
+
+
+def test_weight_chart_preserves_order_duplicates_precision_and_safe_labels(client, app, farm_id):
+    doc = document()
+    label = 'Heifers </script><script>alert("test")</script> & calves'
+    doc["groups"][0].update(label=label, weights_kg=["260.1235", 250, 250])
+    doc["groups"][1].update(label=label, weights_kg=["280.001"] * 210)
+    doc["groups"].append({**doc["groups"][0], "label": "", "weights_kg": [190]})
+    response = client.post(BASE + "/import/preview", data=form(doc, farm_id))
+    assert response.status_code == 200
+    expected = [
+        {"label": "Group 1: " + label, "weights": ["260.124", "250.000", "250.000"]},
+        {"label": "Group 2: " + label, "weights": ["280.001"] * 210},
+        {"label": "Group 3", "weights": ["190.000"]},
+    ]
+    assert weight_chart_from(response) == expected
+    assert label not in response.get_data(as_text=True)
+    with app.app_context():
+        assert LivestockTrade.query.count() == CashTransaction.query.count() == 0
+    saved = client.post(BASE + "/import/confirm", data=form(doc, farm_id, token_from(response)))
+    assert saved.status_code == 302
+    detail_url = saved.headers["Location"]
+    assert weight_chart_from(client.get(detail_url)) == expected
+
+    doc["groups"][0]["weights_kg"] = [300, 200]
+    edited = client.post(detail_url + "/edit", data=form(doc, farm_id), follow_redirects=True)
+    assert edited.status_code == 200
+    expected[0]["weights"] = ["300.000", "200.000"]
+    assert weight_chart_from(edited) == expected
+    # A rejected edit must continue to chart the saved trade, not invalid inputs.
+    doc["groups"][0]["weights_kg"] = [None]
+    rejected = client.post(detail_url + "/edit", data=form(doc, farm_id))
+    assert rejected.status_code == 400
+    assert weight_chart_from(rejected) == expected
+
+
+def test_weight_chart_single_animal_and_incomplete_metadata(client, app):
+    doc = document()
+    doc["groups"] = [{**doc["groups"][0], "label": None, "breed": None, "sex": None,
+                      "age_class": None, "weights_kg": ["0.001"]}]
+    response = client.post(BASE + "/import/preview", data={"trade_json": json.dumps(doc)})
+    assert response.status_code == 200
+    assert weight_chart_from(response) == [{"label": "Group 1", "weights": ["0.001"]}]
+    assert 'name="preview_token"' not in response.get_data(as_text=True)
+    with app.app_context():
+        assert LivestockTrade.query.count() == AnimalGroupType.query.count() == 0
+
+
+@pytest.mark.parametrize("bad_weights", [[None], [], [0], ["NaN"], [250, -1]])
+def test_invalid_preview_never_charts_partial_weights(client, farm_id, bad_weights):
+    doc = document()
+    doc["groups"][1]["weights_kg"] = bad_weights
+    response = client.post(BASE + "/import/preview", data=form(doc, farm_id))
+    assert b'tradeWeightChartData' not in response.data
+    assert b'chart.umd.min.js' not in response.data
+
+
+def test_head_trade_and_empty_import_do_not_load_weight_chart(client, farm_id):
+    empty = client.get(BASE + "/import")
+    assert b'tradeWeightChartData' not in empty.data
+    assert b'chart.umd.min.js' not in empty.data
+    doc = document()
+    doc["pricing_model"] = "head"
+    for group in doc["groups"]:
+        group.pop("weights_kg")
+        group.pop("price_per_kg")
+        group.update(head_count=3, price_per_head=1000)
+    preview = client.post(BASE + "/import/preview", data=form(doc, farm_id))
+    saved = client.post(BASE + "/import/confirm", data=form(doc, farm_id, token_from(preview)))
+    assert saved.status_code == 302
+    for response in (preview, client.get(saved.headers["Location"])):
+        assert response.status_code == 200
+        assert b'Individual weights are not recorded for per-head trades.' in response.data
+        assert b'tradeWeightChartData' not in response.data
+        assert b'chart.umd.min.js' not in response.data
+
+
 def test_large_pasted_document_preview_and_changed_import_identity(client, app, farm_id):
     doc = document()
     # Formatting alone can exceed Werkzeug's default 500 KB form-field limit.

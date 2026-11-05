@@ -1,0 +1,39 @@
+{% macro weight_scatter(groups, pricing_model, preview_mode=False) %}
+<section class="card" data-trade-weight-chart>
+  <h2>Individual weights by group</h2>
+  {% if pricing_model == 'weight' %}
+  <p id="trade-weight-chart-help">Each point is one animal. Animal numbers follow the recorded order within each group, starting at 1; they are not animal IDs. Hover or tap to see the group, animal number and exact weight. Use the group controls to show or hide points.</p>
+  {% if preview_mode %}<p class="muted" data-weight-preview-status role="status">Showing weights and prices from this preview.</p>{% endif %}
+  <p data-weight-chart-fallback>The interactive plot is unavailable. All individual weights are available below.</p>
+  <div class="trade-weight-chart-wrap" hidden>
+    <canvas id="tradeWeightChart" role="img" aria-label="Scatter plot of individual animal weights by group" aria-describedby="trade-weight-chart-help">Individual weights are available in the groups below.</canvas>
+  </div>
+  <fieldset class="trade-weight-legend">
+    <legend>Groups</legend>
+    <div data-weight-chart-controls>
+      {% for group in groups %}
+      <div class="trade-weight-group" data-weight-chart-group>
+        <label class="check-row">
+          <input type="checkbox" checked hidden aria-controls="tradeWeightChart" />
+          <span class="trade-weight-swatch" aria-hidden="true" hidden></span>
+          <strong>{{ 'Group ' ~ loop.index ~ (': ' ~ group.label if group.label else '') }} ({{ group.stats.count }})</strong>
+        </label>
+        <dl class="trade-weight-group-stats">
+          <div><dt>Mean weight</dt><dd>{{ format_number(group.stats.average_weight, 3) }} kg</dd></div>
+          <div><dt>Mean price/animal excl VAT</dt><dd>{{ format_currency(group.stats.average_price_per_animal) }}</dd></div>
+          <div><dt>Price/kg excl VAT</dt><dd>{{ format_rate(group.stats.unit_price) }}</dd></div>
+        </dl>
+      </div>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <script id="tradeWeightChartData" type="application/json">[
+    {% for group in groups %}
+    {"label": {{ ('Group ' ~ loop.index ~ (': ' ~ group.label if group.label else ''))|tojson }}, "weights": {{ group.weights|tojson }}}{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ]</script>
+  {% else %}
+  <p>Individual weights are not recorded for per-head trades.</p>
+  {% endif %}
+</section>
+{% endmacro %}

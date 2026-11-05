@@ -49,6 +49,8 @@
 
     const datasets = (panel.datasets || []).map((series, seriesIndex) => {
       const color = colors[seriesIndex % colors.length];
+      const flowLabels = (series.overflowing || []).map((overflow, i) =>
+        overflow ? "Overflowing" : series.underflowing?.[i] ? "Under flowing" : "");
       return {
         label: series.label,
         data: series.values || [],
@@ -56,9 +58,9 @@
         backgroundColor: color,
         borderWidth: 2,
         borderDash: series.reference ? [6, 4] : [],
-        overflowing: series.overflowing || [],
-        pointRadius: series.reference ? 0 : (series.overflowing || []).map(value => value ? 4 : 0),
-        pointStyle: (series.overflowing || []).map(value => value ? "triangle" : "circle"),
+        flowLabels,
+        pointRadius: series.reference ? 0 : flowLabels.map(label => label ? 4 : 0),
+        pointStyle: flowLabels.map(label => label === "Overflowing" ? "triangle" : "circle"),
         pointHoverRadius: 4,
         stepped: true,
         spanGaps: false,
@@ -87,7 +89,8 @@
             callbacks: {
               label: function (context) {
                 const seriesLabel = context.dataset.label || "";
-                return seriesLabel + ": " + valueLabel(panel, context.parsed.y) + (context.dataset.overflowing[context.dataIndex] ? " — Overflowing" : "");
+                const flow = context.dataset.flowLabels[context.dataIndex];
+                return seriesLabel + ": " + valueLabel(panel, context.parsed.y) + (flow ? " — " + flow : "");
               },
             },
           },

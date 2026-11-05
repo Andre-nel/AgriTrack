@@ -234,8 +234,9 @@ class MobileRepository(
         waterLevel: String,
         active: Boolean,
         percentageLevel: Boolean = false,
+        underflowing: Boolean = false,
     ) {
-        fieldStore.enqueue(MobileCommand.waterAssetStatus(farmId, waterAssetId, status, waterLevel, active, percentageLevel))
+        fieldStore.enqueue(MobileCommand.waterAssetStatus(farmId, waterAssetId, status, waterLevel, active, percentageLevel, underflowing))
     }
 
     fun queueFenceUpdate(

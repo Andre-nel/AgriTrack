@@ -1,0 +1,10 @@
+{% macro flow_select(asset=none, disabled=false) -%}
+{% set suffix = '__' ~ asset.id if asset else '' %}
+<select name="weir_flow{{ suffix }}" data-weir-flow data-percent-name="water_level_percent{{ suffix }}"
+        data-status-name="status{{ suffix }}" {% if asset %}aria-label="{{ asset.name }} flow condition"{% endif %}
+        {% if disabled %}disabled{% endif %}>
+  <option value="normal">Not overflowing</option>
+  <option value="overflowing" {% if asset and asset.is_overflowing %}selected{% endif %}>Overflowing (100%)</option>
+  <option value="underflowing" {% if asset and asset.is_underflowing %}selected{% endif %}>Under flowing</option>
+</select>
+{%- endmacro %}

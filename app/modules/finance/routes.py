@@ -231,11 +231,16 @@ def _import_source():
 def _render_import(document=None, *, images=(), error=None, status=200, allow_confirmation=True):
     selected = request.form.getlist("farm_ids")
     preview, rows, token = None, [], None
+    weight_groups = []
     if document is not None:
         try:
             payload = normalize_document(document, selected, require_details=False)
             document["species"] = payload["species"]
             preview = payload_statistics(payload)
+            weight_groups = [
+                {**group, "stats": stats}
+                for group, stats in zip(payload["groups"], preview["groups"])
+            ]
             rows = [(group["label"] or f"Group {index}", stats) for index, (group, stats) in enumerate(zip(payload["groups"], preview["groups"]), 1)]
             rows.append(("Combined trade", preview["stats"]))
             complete = normalize_document(document, selected)
@@ -251,6 +256,7 @@ def _render_import(document=None, *, images=(), error=None, status=200, allow_co
     return render_template(
         "finance/livestock_trade_import.html", trade_document=document, selected_farm_ids=selected,
         error=error, preview=preview, preview_rows=rows, preview_token=token,
+        preview_weight_groups=weight_groups,
         import_images=images,
         raw_json=request.form.get("trade_json", ""), **_livestock_trade_context(),
     ), status

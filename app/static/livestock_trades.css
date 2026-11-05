@@ -4,6 +4,67 @@
   font-variant-numeric: tabular-nums;
 }
 
+.trade-weight-chart-wrap {
+  position: relative;
+  height: 24rem;
+  min-width: 0;
+}
+
+.trade-weight-legend {
+  margin: 1rem 0 0;
+  padding: 0.75rem;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+[data-weight-chart-controls] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 0.75rem 1.5rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+[data-weight-chart-controls] label {
+  overflow-wrap: anywhere;
+}
+
+[data-weight-chart-controls] label:has(input:not([hidden])) {
+  cursor: pointer;
+}
+
+.trade-weight-group {
+  min-width: 0;
+}
+
+.trade-weight-group-stats {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+.trade-weight-group-stats > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.3rem;
+}
+
+.trade-weight-group-stats dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-weight-swatch {
+  display: inline-block;
+  flex: 0 0 0.75rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+}
+
 .livestock-statistics-table th {
   text-align: right;
 }

@@ -773,7 +773,7 @@
 
   function storageWaterAssetSvg(props, code) {
     const markerId = "water-asset-level-" + String((waterAssetMarkerSequence += 1));
-    const levelVisual = waterAssetLevelVisual(props.water_level);
+    const levelVisual = waterAssetLevelVisual(props.is_underflowing ? props.water_level_percent : props.water_level);
     const outlineColor = waterAssetOutlineColor(props.asset_type, props.status, props.water_level);
     const fillRatio = levelVisual ? levelVisual.ratio : 0;
     const dropletTop = 9;

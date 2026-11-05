@@ -190,7 +190,7 @@ async function main() {
     await page.evaluate(() => window.scrollTo(0,0));
     await page.screenshot({path:path.join(evidence,'asset-detail-desktop.png'),fullPage:true});
     await modal.locator('[name=water_level_percent]').fill('42.75');
-    await modal.locator('[name=is_overflowing]').selectOption('1');
+    await modal.locator('[name=weir_flow]').selectOption('overflowing');
     assert.equal(await modal.locator('[name=water_level_percent]').inputValue(),'100');
     assert.equal(await modal.locator('[name=capacity_m3]').inputValue(),'1000');
     assert.equal(await modal.locator('[name=capacity_m3]').evaluate(input => input.readOnly),true);
@@ -222,12 +222,45 @@ async function main() {
     await page.setViewportSize({width:1280,height:1000});
     await page.goto(host+`/farms/${info.farm}/water/mass-update?filters_applied=1&asset_type=weir`);
     assert.equal(await page.locator(`[name="capacity_m3__${info.id}"]`).evaluate(input => input.readOnly),true);
-    await page.locator(`[name="is_overflowing__${info.id}"]`).selectOption('0');
+    const flow = page.locator(`[name="weir_flow__${info.id}"]`);
+    const status = page.locator(`[name="status__${info.id}"]`);
+    for (const heading of ['Latitude','Longitude']) {
+      assert.equal(await page.getByRole('columnheader', {name:heading, exact:true}).count(),0);
+    }
+    assert.equal(await page.getByRole('columnheader',{name:'Altitude (m)',exact:true}).count(),1);
+    assert.equal(await page.locator('[name^="altitude_m__"]').count(),0);
+    await flow.selectOption('underflowing');
+    assert.equal(await status.inputValue(),'damaged');
+    assert.equal(await status.isDisabled(),true);
     await page.locator(`[name="water_level_percent__${info.id}"]`).fill('37.25');
     await page.getByRole('button',{name:'Save Mass Update',exact:true}).click();
     await page.waitForLoadState('networkidle');
     assert.equal((await read()).water_level_percent,37.25);
     assert.equal((await read()).is_overflowing,false);
+    assert.equal((await read()).is_underflowing,true);
+    assert.equal((await read()).status,'damaged');
+    assert.equal(await flow.inputValue(),'underflowing');
+    await flow.selectOption('normal');
+    assert.equal(await status.isEnabled(),true);
+    assert.equal(await status.inputValue(),'damaged');
+    await page.goto(host+detailPath);
+    await modal.locator('[data-water-asset-modal-form]').waitFor({state:'visible'});
+    assert.equal(await modal.locator('[name=weir_flow]').inputValue(),'underflowing');
+    assert.equal(await modal.locator('[name=status]').inputValue(),'damaged');
+    await page.goto(host+`/farms/${info.farm}/water`);
+    await page.locator('#add-water-asset-panel summary').click();
+    const create = page.locator('#add-water-asset-panel form');
+    await create.locator('[name=asset_type]').selectOption('weir');
+    await create.locator('[name=name]').fill('New underflow test weir');
+    await create.locator('[name=water_level_percent]').fill('');
+    await create.locator('[name=weir_flow]').selectOption('underflowing');
+    assert.equal(await create.locator('[name=status]').inputValue(),'damaged');
+    await create.getByRole('button',{name:'Create Asset'}).click();
+    await page.waitForLoadState('networkidle');
+    const assets = await (await context.request.get(host+`/api/water-assets?farm_id=${info.farm}`)).json();
+    const created = assets.find(asset => asset.name === 'New underflow test weir');
+    assert.ok(created && created.is_underflowing && created.status === 'damaged');
+    assert.equal(created.water_level_percent,null);
     assert.deepEqual(errors,[]);
     console.log('Weir browser acceptance passed; screenshots: '+evidence);
   } finally {

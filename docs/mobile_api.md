@@ -221,8 +221,9 @@ Important response fields:
 
 ## Farm Snapshot
 
-Water editors use numeric input plus an overflowing choice for asset types in
-`form_options.percentage_water_level_types`. Other types use
+Water editors use numeric input and a flow condition for asset types in
+`form_options.percentage_water_level_types`. Android offers Under flowing when
+`water_level_options_by_type.weir` includes `underflowing`. Other types use
 `water_level_options_by_type[asset_type]`, falling back to `water_level_options`
 when the type entry is absent. Ground dams support Overflowing; non-weir troughs
 retain source mirroring. Weir-fed troughs display their own reported level.
@@ -440,7 +441,7 @@ Supported command types:
 - `task.comment.create`: `task_id`, `body`.
 - `paddock.update`: `paddock_id`, optional `status`, optional `notes`, optional `tags`.
 - `gate.update`: `gate_id`, `status` (`open` or `closed`), optional `event_time`, and optional `closure_choices` rows shaped as `{ "mob_id": "...", "component_paddock_id": "..." }` when closing a gate that splits a mob across disconnected camp groups.
-- `water_asset_status.update`: `water_asset_id`, and at least one of `active`, `status`, `water_level`.
+- `water_asset_status.update` requires `water_asset_id` and at least one of `active`, `status`, `water_level`, `water_level_percent`, `is_overflowing` or `is_underflowing`.
 - `fence_section.update`: `fence_section_id`, and at least one editable fence field such as `condition`, `notes`, `electric_wire`, build fields, or suitability ratings.
 
 Android should keep these commands in a durable outbox until the backend returns
@@ -519,19 +520,23 @@ the percentage editor. Existing categorical weir commands, including queued old
 commands, remain accepted through the same translation as web/API edits.
 
 `water_asset_status.update` accepts `water_level_percent` (number or null) and
-`is_overflowing` (boolean). Percentages are finite, 0–100, at most two decimals.
+`is_overflowing` and `is_underflowing` (booleans). Percentages are finite, 0–100, at most two decimals.
 A numeric observation clears overflow unless explicitly selected. Overflow=true
 requires 100%; supplying only the flag sets 100. Null clears the level to unknown.
+Under flowing applies only to weirs. It accepts any depth or null and sets status
+to `damaged`. Setting either flow flag to true clears the other. Supplying both as
+true is invalid. A numeric depth update alone preserves Under flowing. To clear
+it explicitly send `is_underflowing: false`. Status stays Damaged until changed.
 Conflicting legacy `water_level` and typed fields are rejected. Example payload:
 
 ```json
 {"water_asset_id":"weir-id","water_level_percent":37.25,"is_overflowing":false}
 ```
 
-Assets and map properties expose `water_level_percent`, `is_overflowing`,
+Assets and map properties expose `water_level_percent`, `is_overflowing`, `is_underflowing`,
 `water_level_label`, plus the existing derived `water_level` string (`"37.25"`,
-`"overflowing"` or null). History includes the same typed fields and
-`previous_water_level_percent`, `previous_is_overflowing`,
+`"overflowing"`, `"underflowing"` or null). History includes the same typed fields and
+`previous_water_level_percent`, `previous_is_overflowing`, `previous_is_underflowing`,
 `previous_water_level_label`. Other assets retain categorical fields.
 
 For polygon weirs, `capacity_m3` is the calculated full-water capacity. It is

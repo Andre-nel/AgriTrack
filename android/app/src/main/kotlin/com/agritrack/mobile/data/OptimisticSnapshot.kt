@@ -913,23 +913,41 @@ private fun applyWaterAssetStatus(json: JSONObject, payload: JSONObject): Boolea
     if (payload.has("status")) {
         asset.putOptional("status", payload.optionalString("status"))
     }
-    val levelChanged = payload.has("water_level") || payload.has("water_level_percent") || payload.has("is_overflowing")
+    val levelChanged = payload.has("water_level") || payload.has("water_level_percent") ||
+        payload.has("is_overflowing") || payload.has("is_underflowing")
     if (asset.optString("asset_type") == "weir" && levelChanged) {
         val legacy = payload.optionalString("water_level")
         val legacyPercent = mapOf("empty" to 0.0, "low" to 25.0, "half" to 50.0, "high" to 75.0, "full" to 100.0, "overflowing" to 100.0)
-        val overflowing = if (payload.has("is_overflowing")) payload.optBoolean("is_overflowing") else legacy == "overflowing"
+        val overflowing = when {
+            payload.has("is_overflowing") -> payload.optBoolean("is_overflowing")
+            payload.has("water_level") -> legacy == "overflowing"
+            payload.has("water_level_percent") || payload.optBoolean("is_underflowing") -> false
+            else -> asset.optBoolean("is_overflowing")
+        }
+        val underflowing = when {
+            payload.has("is_underflowing") -> payload.optBoolean("is_underflowing")
+            payload.has("water_level") -> legacy == "underflowing"
+            else -> !overflowing && asset.optBoolean("is_underflowing")
+        }
         val percent = when {
             overflowing -> 100.0
             payload.has("water_level_percent") -> if (payload.isNull("water_level_percent")) null else payload.optDouble("water_level_percent")
-            payload.has("water_level") -> legacyPercent[legacy] ?: legacy?.toDoubleOrNull()
+            payload.has("water_level") && legacy != "underflowing" -> legacyPercent[legacy] ?: legacy?.toDoubleOrNull()
             else -> if (asset.isNull("water_level_percent")) null else asset.optDouble("water_level_percent")
         }
-        val token = if (overflowing) "overflowing" else percent?.let { java.math.BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() }
+        val depth = percent?.let { java.math.BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() }
+        val token = if (overflowing) "overflowing" else if (underflowing) "underflowing" else depth
         asset.put("water_level_percent", percent ?: JSONObject.NULL)
         asset.put("is_overflowing", overflowing)
+        asset.put("is_underflowing", underflowing)
         asset.putOptional("water_level", token)
         asset.putOptional("reported_water_level", token)
-        asset.put("water_level_label", if (overflowing) "Overflowing (100%)" else token?.let { "$it%" } ?: "Unknown")
+        val label = when {
+            overflowing -> "Overflowing (100%)"
+            underflowing -> depth?.let { "Under flowing ($it%)" } ?: "Under flowing"
+            else -> depth?.let { "$it%" } ?: "Unknown"
+        }
+        asset.put("water_level_label", label)
         asset.put("estimated_volume_m3", JSONObject.NULL)
         asset.put("volume_estimate_status", "pending_sync")
     } else if (payload.has("water_level")) {
@@ -937,11 +955,12 @@ private fun applyWaterAssetStatus(json: JSONObject, payload: JSONObject): Boolea
         asset.put("water_level_label", payload.optionalString("water_level") ?: "Unknown")
     }
     asset.put("pending_sync", true)
+    if (asset.optBoolean("is_underflowing")) asset.put("status", "damaged")
     val features = json.optJSONArray("map_features") ?: JSONArray()
     for (index in 0 until features.length()) {
         val props = features.optJSONObject(index)?.optJSONObject("properties") ?: continue
         if (props.optString("feature_type") == "water_asset" && props.optString("id") == asset.optString("id")) {
-            for (key in listOf("active", "status", "water_level", "reported_water_level", "water_level_label", "water_level_percent", "is_overflowing", "estimated_volume_m3", "volume_estimate_status", "pending_sync")) {
+            for (key in listOf("active", "status", "water_level", "reported_water_level", "water_level_label", "water_level_percent", "is_overflowing", "is_underflowing", "estimated_volume_m3", "volume_estimate_status", "pending_sync")) {
                 if (asset.has(key)) props.put(key, asset.opt(key))
             }
         }

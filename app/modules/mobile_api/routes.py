@@ -1019,7 +1019,7 @@ def bootstrap():
                 ],
                 "water_level_options_by_type": {
                     asset_type: [
-                        {"value": option, "label": option.replace("_", " ").title()}
+                        {"value": option, "label": "Under flowing" if option == "underflowing" else option.replace("_", " ").title()}
                         for option in WaterNetworkService.water_level_options_for_type(asset_type)
                     ]
                     for asset_type in sorted(WaterNetworkService.WATER_LEVEL_TYPES)
@@ -2244,10 +2244,10 @@ def _handle_water_asset_status_update(farm: Farm, payload: dict) -> dict:
     if asset is None:
         raise MobileApiError("not_found", "Water asset not found for this farm", 404)
 
-    allowed_fields = {"active", "status", "water_level", "water_level_percent", "is_overflowing"}
+    allowed_fields = {"active", "status", "water_level", "water_level_percent", "is_overflowing", "is_underflowing"}
     update_payload = {field: payload[field] for field in allowed_fields if field in payload}
     if not update_payload:
-        raise ValueError("At least one of active, status, water_level, water_level_percent, or is_overflowing is required")
+        raise ValueError("A water asset status update needs an active flag, status, water level or flow condition")
     WaterNetworkService.update_asset(asset, update_payload)
     db.session.flush()
     network_state = WaterNetworkService.network_state_for_farm(str(farm.id))

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "water/_weir_flow.html" import flow_select %}
 {% block title %}{{ farm.name }} Water Mass Update | AgriTrack{% endblock %}
 {% block content %}
 <section class="paddock-page-header">
@@ -91,10 +92,9 @@
               <span class="muted">-</span>
               {% elif field.name == 'water_level' and asset.asset_type == 'weir' %}
               <label>Depth (%)<input aria-label="{{ asset.name }} depth percentage" type="number" name="water_level_percent__{{ asset.id }}" min="0" max="100" step="0.01" value="{{ asset.water_level_percent if asset.water_level_percent is not none else '' }}" placeholder="Unknown" /></label>
-              <select aria-label="{{ asset.name }} overflowing" name="is_overflowing__{{ asset.id }}" data-weir-overflow data-percent-name="water_level_percent__{{ asset.id }}">
-                <option value="0" {% if not asset.is_overflowing %}selected{% endif %}>Not overflowing</option>
-                <option value="1" {% if asset.is_overflowing %}selected{% endif %}>Overflowing (100%)</option>
-              </select>
+              {{ flow_select(asset) }}
+              {% elif field.kind == "readonly" %}
+              {{ asset[field.name] if asset[field.name] is not none else '—' }}
               {% elif field.kind == "checkbox" %}
               <input type="hidden" name="{{ field.name }}__{{ asset.id }}" value="0" />
               <input

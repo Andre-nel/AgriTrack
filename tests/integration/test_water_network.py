@@ -1869,6 +1869,7 @@ def test_farm_water_mass_update_updates_weirs(client, app):
             active=True,
             status="operational",
             water_level_percent=0,
+            latitude=-32.4, longitude=25.4, altitude_m=151.75,
             weir_size="medium",
             location_paddock_id=north.id,
         )
@@ -1912,8 +1913,9 @@ def test_farm_water_mass_update_updates_weirs(client, app):
             f"latitude__{second_weir_id}": "-32.2000",
             f"longitude__{second_weir_id}": "25.2000",
             f"altitude_m__{second_weir_id}": "140.00",
-            f"status__{second_weir_id}": "damaged",
-            f"water_level__{second_weir_id}": "half",
+            f"status__{second_weir_id}": "operational",
+            f"weir_flow__{second_weir_id}": "underflowing",
+            f"water_level_percent__{second_weir_id}": "50",
             f"weir_size__{second_weir_id}": "large",
         },
     )
@@ -1927,10 +1929,11 @@ def test_farm_water_mass_update_updates_weirs(client, app):
         assert first_weir.name == "Weir Alpha Updated"
         assert first_weir.needs_review is True
         assert first_weir.location_paddock_id == south_id
-        assert round(float(first_weir.latitude), 4) == -32.1
-        assert round(float(first_weir.longitude), 4) == 25.1
-        assert round(float(first_weir.altitude_m), 2) == 123.45
+        assert float(first_weir.latitude) == -32.4
+        assert float(first_weir.longitude) == 25.4
+        assert float(first_weir.altitude_m) == 151.75
         assert first_weir.status == "operational"
+        assert not first_weir.is_underflowing
         assert first_weir.water_level is None
         assert first_weir.water_level_percent is None
         assert first_weir.weir_size == "medium"
@@ -1941,14 +1944,17 @@ def test_farm_water_mass_update_updates_weirs(client, app):
         assert second_weir.active is False
         assert second_weir.needs_review is False
         assert second_weir.location_paddock_id == north_id
-        assert round(float(second_weir.latitude), 4) == -32.2
-        assert round(float(second_weir.longitude), 4) == 25.2
-        assert round(float(second_weir.altitude_m), 2) == 140.0
+        assert second_weir.latitude is second_weir.longitude is second_weir.altitude_m is None
         assert second_weir.status == "damaged"
+        assert second_weir.is_underflowing
         assert second_weir.water_level is None
         assert second_weir.water_level_percent == 50
         assert second_weir.weir_size == "large"
         assert [link.paddock_id for link in second_weir.served_paddock_links] == [north_id]
+
+    table = client.get(response.headers["Location"]).get_data(as_text=True)
+    assert "151.75" in table
+    assert 'value="underflowing" selected' in table
 
 
 def test_paddock_detail_shows_local_assets_and_serving_water_points(client, app):

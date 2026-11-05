@@ -203,6 +203,8 @@ def register_legacy_routes(bp) -> None:
             requested_level = selected_filters["current_water_level"]
             if requested_level == "overflowing":
                 asset_query = asset_query.filter((WaterAsset.water_level == requested_level) | WaterAsset.is_overflowing.is_(True))
+            elif requested_level == "underflowing":
+                asset_query = asset_query.filter(WaterAsset.is_underflowing.is_(True))
             elif requested_level in WaterNetworkService.LEGACY_WATER_LEVEL_OPTIONS:
                 asset_query = asset_query.filter(WaterAsset.water_level == requested_level)
             else:
@@ -211,7 +213,7 @@ def register_legacy_routes(bp) -> None:
                 except ValueError:
                     flash("Invalid water depth percentage filter", "error")
                     return redirect(url_for("web.analytics_water_assets"))
-                asset_query = asset_query.filter(WaterAsset.water_level_percent == percent, WaterAsset.is_overflowing.is_(False))
+                asset_query = asset_query.filter(WaterAsset.water_level_percent == percent, WaterAsset.is_overflowing.is_(False), WaterAsset.is_underflowing.is_(False))
 
         scope_assets = asset_query.all()
         valid_scope_ids = {str(asset.id) for asset in scope_assets}
@@ -272,7 +274,7 @@ def register_legacy_routes(bp) -> None:
             "water_levels": [
                 {"value": value, "label": _choice_filter_label(value)}
                 for value in WaterNetworkService.WATER_LEVEL_OPTIONS
-            ] + [{"value": format(value, "f"), "label": f"{value:g}% (weir depth)"}
+            ] + [{"value": "underflowing", "label": "Under flowing"}] + [{"value": format(value, "f"), "label": f"{value:g}% (weir depth)"}
                  for (value,) in db.session.query(WaterAsset.water_level_percent).filter(WaterAsset.water_level_percent.isnot(None)).distinct().order_by(WaterAsset.water_level_percent)],
             "state_fields": [
                 {"value": value, "label": WATER_ASSET_STATE_FIELD_LABELS[value]}

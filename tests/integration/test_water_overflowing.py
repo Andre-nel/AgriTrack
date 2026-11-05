@@ -69,10 +69,12 @@ def test_web_create_edit_and_bulk_options(client, farm_id, asset_type):
     bulk_page = client.get(f"/farms/{farm_id}/water/mass-update?filters_applied=1&asset_type={asset_type}").get_data(as_text=True)
     if asset_type == "weir":
         assert f'name="water_level_percent__{asset_id}"' in bulk_page
-        assert f'name="is_overflowing__{asset_id}"' in bulk_page
+        assert f'name="weir_flow__{asset_id}"' in bulk_page
+        assert "Under flowing" in bulk_page
     else:
         options = re.search(rf'<select name="water_level__{asset_id}">(.*?)</select>', bulk_page, re.S)[1]
         assert ('value="overflowing"' in options) == valid
+        assert "underflowing" not in options
     for endpoint, data in [
         (f"/farms/{farm_id}/water/assets/{asset_id}", {
             "name": "Source", "asset_type": asset_type, "active": "1", "water_level": "overflowing",
@@ -144,3 +146,62 @@ def test_analytics_marks_overflowing_at_100_percent(farm_id):
     assert panel["y_max"] == 100
     assert panel["datasets"][0]["values"] == [100, 100]
     assert panel["datasets"][0]["overflowing"] == [True, True]
+
+
+def test_underflow_preserves_depth_and_records_damage_in_one_change(client, farm_id):
+    asset = WaterNetworkService.create_asset(dict(farm_id=farm_id, name="Weir", asset_type="weir",
+        status="operational", water_level_percent=42.75))
+    db.session.commit()
+    endpoint = f"/api/water-assets/{asset.id}"
+    result = client.patch(endpoint, json={"water_level": "underflowing", "status": "silted"})
+    assert result.status_code == 200
+    assert result.json["water_level_label"] == "Under flowing (42.75%)"
+    assert result.json["water_level"] == "underflowing" and result.json["status"] == "damaged"
+    assert result.json["is_underflowing"] and not result.json["is_overflowing"]
+    row = WaterAssetStateHistory.query.filter_by(change_type="updated").one()
+    assert (row.previous_status, row.previous_level_label) == ("operational", "42.75%")
+    assert (row.status, row.level_label) == ("damaged", "Under flowing (42.75%)")
+    assert client.patch(endpoint, json={"status": "operational"}).json["status"] == "damaged"
+    assert WaterAssetStateHistory.query.count() == 2
+    for invalid in ({"is_underflowing": True, "is_overflowing": True},
+                    {"water_level": "full", "is_underflowing": True}):
+        assert client.patch(endpoint, json=invalid).status_code == 400
+    assert WaterAssetStateHistory.query.count() == 2
+    unknown = client.patch(endpoint, json={"water_level_percent": None}).json
+    assert unknown["water_level_label"] == "Under flowing" and unknown["water_level_percent"] is None
+    assert WaterNetworkService._asset_supply_state(asset) == "unknown"
+    cleared = client.patch(endpoint, json={"is_underflowing": False}).json
+    assert not cleared["is_underflowing"] and cleared["status"] == "damaged"
+    assert cleared["water_level_label"] == "Unknown"
+    assert client.patch(endpoint, json={"status": "operational"}).json["status"] == "operational"
+
+
+def test_underflow_can_replace_overflow_and_is_weir_only(client, farm_id):
+    asset = WaterNetworkService.create_asset(dict(farm_id=farm_id, name="Weir", asset_type="weir",
+        water_level="overflowing"))
+    db.session.commit()
+    endpoint = f"/api/water-assets/{asset.id}"
+    change = client.patch(endpoint, json={"is_underflowing": True}).json
+    assert change["is_underflowing"] and not change["is_overflowing"] and change["water_level_percent"] == 100
+    change = client.patch(endpoint, json={"is_overflowing": True}).json
+    assert change["is_overflowing"] and not change["is_underflowing"] and change["status"] == "damaged"
+    for reading in ({"water_level": "underflowing"}, {"is_underflowing": True}):
+        assert client.post("/api/water-assets", json=dict(farm_id=farm_id, name="Dam", asset_type="ground_dam", **reading)).status_code == 400
+    assert WaterAsset.query.count() == 1
+
+
+def test_underflow_report_tracks_flow_changes_at_the_same_depth(farm_id):
+    asset = WaterNetworkService.create_asset(dict(farm_id=farm_id, name="Weir", asset_type="weir",
+        water_level_percent=42.75, status="damaged"))
+    WaterAssetStateHistory.query.one().changed_at = datetime(2025, 1, 1)
+    WaterNetworkService.update_asset(asset, {"is_underflowing": True})
+    WaterAssetStateHistory.query.filter_by(change_type="updated").one().changed_at = datetime(2025, 1, 2)
+    db.session.commit()
+    report = build_water_asset_state_report(assets=[asset], start_date=date(2025, 1, 1),
+        end_date=date(2025, 1, 3), state_fields=["water_level"], plot_mode="overlay", include_farm_name=False)
+    row = report["summary_rows"][0]
+    assert row["water_level_change_count"] == 1
+    assert row["latest_water_level_label"] == row["dominant_water_level_label"] == "Under flowing (42.75%)"
+    series = report["chart_payload"]["panels"][0]["datasets"][0]
+    assert series["values"] == [42.75] * 3
+    assert series["underflowing"] == [False, True, True]

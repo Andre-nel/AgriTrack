@@ -319,14 +319,16 @@ def test_mobile_typed_levels_old_queue_and_snapshot(client, farm):
     headers = {"Authorization": f"Bearer {token}"}
     assert client.get("/api/mobile/v1/bootstrap", headers=headers).json["form_options"]["percentage_water_level_types"] == ["weir"]
     payloads = [{"water_level_percent": 37.25, "is_overflowing": False}, {"water_level": "overflowing"},
-                {"water_level": "half"}, {"water_level_percent": 101}]
+                {"water_level": "half"}, {"water_level_percent": 101},
+                {"water_level_percent": 50, "is_underflowing": True, "status": "operational"}]
     commands = [{"client_command_id": f"weir-{index}", "farm_id": farm.id, "type": "water_asset_status.update",
                  "payload": {"water_asset_id": asset.id, **payload}} for index, payload in enumerate(payloads)]
     response = client.post("/api/mobile/v1/sync/commands", headers=headers, json={"commands": commands})
-    assert [row["status"] for row in response.json["results"]] == ["applied", "applied", "applied", "failed"]
+    assert [row["status"] for row in response.json["results"]] == ["applied", "applied", "applied", "failed", "applied"]
     snapshot = client.get(f"/api/mobile/v1/farms/{farm.id}/snapshot", headers=headers).json
     current = snapshot["water_assets"][0]
-    assert current["water_level_percent"] == 50 and current["water_level"] == "50"
+    assert current["water_level_percent"] == 50 and current["water_level"] == "underflowing"
+    assert current["is_underflowing"] and current["status"] == "damaged"
     assert current["estimated_volume_m3"] is None
     history = snapshot["water_asset_state_history"]
     assert any(row["water_level_percent"] == 37.25 for row in history)

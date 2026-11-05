@@ -501,6 +501,17 @@ class MainActivity : ComponentActivity() {
                     onPaddockTagsChange = { uiState = uiState.copy(paddockTags = it) },
                     onWaterStatusChange = { uiState = uiState.copy(waterStatus = it) },
                     onWaterLevelChange = { uiState = uiState.copy(waterLevel = it) },
+                    onWeirFlowChange = { flow ->
+                        uiState = uiState.copy(
+                            waterUnderflowing = flow == "underflowing",
+                            waterStatus = if (flow == "underflowing") "damaged" else uiState.waterStatus,
+                            waterLevel = when {
+                                flow == "overflowing" -> "overflowing"
+                                uiState.waterLevel == "overflowing" -> "100"
+                                else -> uiState.waterLevel
+                            },
+                        )
+                    },
                     onWaterActiveChange = { uiState = uiState.copy(waterActive = it) },
                     onFenceConditionChange = { uiState = uiState.copy(fenceCondition = it) },
                     onFenceNotesChange = { uiState = uiState.copy(fenceNotes = it) },
@@ -779,6 +790,7 @@ private data class FieldUiState(
     val paddockTags: String = "",
     val waterStatus: String = "",
     val waterLevel: String = "",
+    val waterUnderflowing: Boolean = false,
     val waterActive: Boolean = true,
     val fenceCondition: String = "",
     val fenceNotes: String = "",
@@ -875,7 +887,8 @@ private data class FieldUiState(
                 paddockNotes = firstPaddock?.notes.orEmpty(),
                 paddockTags = firstPaddock?.tagLabel.orEmpty(),
                 waterStatus = firstWater?.status.orEmpty(),
-                waterLevel = firstWater?.waterLevel.orEmpty(),
+                waterLevel = firstWater?.editableLevel.orEmpty(),
+                waterUnderflowing = firstWater?.isUnderflowing == true,
                 waterActive = firstWater?.active ?: true,
                 fenceCondition = firstFence?.condition.orEmpty(),
                 fenceNotes = firstFence?.notes.orEmpty(),
@@ -1045,6 +1058,7 @@ private fun AgriTrackApp(
     onPaddockTagsChange: (String) -> Unit,
     onWaterStatusChange: (String) -> Unit,
     onWaterLevelChange: (String) -> Unit,
+    onWeirFlowChange: (String) -> Unit,
     onWaterActiveChange: (Boolean) -> Unit,
     onFenceConditionChange: (String) -> Unit,
     onFenceNotesChange: (String) -> Unit,
@@ -1414,6 +1428,7 @@ private fun AgriTrackApp(
                     onBackHome,
                     onWaterStatusChange,
                     onWaterLevelChange,
+                    onWeirFlowChange,
                     onWaterActiveChange,
                     onQueueWaterUpdate,
                 )
@@ -4748,6 +4763,7 @@ private fun WaterEditScreen(
     onBackHome: () -> Unit,
     onWaterStatusChange: (String) -> Unit,
     onWaterLevelChange: (String) -> Unit,
+    onWeirFlowChange: (String) -> Unit,
     onWaterActiveChange: (Boolean) -> Unit,
     onQueueWaterUpdate: () -> Unit,
 ) {
@@ -4759,7 +4775,8 @@ private fun WaterEditScreen(
             Text("Active")
         }
         val statusOptions = state.formOptions.waterStatusOptionsByType[asset?.assetType.orEmpty()].orEmpty()
-        OptionPicker("Status", state.waterStatus, statusOptions, onWaterStatusChange)
+        if (state.waterUnderflowing) Text("Status: Damaged")
+        else OptionPicker("Status", state.waterStatus, statusOptions, onWaterStatusChange)
         if (asset?.assetType in state.formOptions.percentageWaterLevelTypes) {
             val overflowing = state.waterLevel == "overflowing"
             OutlinedTextField(
@@ -4771,10 +4788,15 @@ private fun WaterEditScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth(),
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = overflowing, onCheckedChange = { onWaterLevelChange(if (it) "overflowing" else "100") })
-                Text("Overflowing (100%)")
+            val flowOptions = buildList {
+                add(MobileOption("normal", "Not overflowing"))
+                add(MobileOption("overflowing", "Overflowing (100%)"))
+                if (state.formOptions.waterLevelOptionsForType("weir").any { it.value == "underflowing" }) {
+                    add(MobileOption("underflowing", "Under flowing"))
+                }
             }
+            val flow = if (overflowing) "overflowing" else if (state.waterUnderflowing) "underflowing" else "normal"
+            OptionPicker("Flow condition", flow, flowOptions, onWeirFlowChange)
             Text("0–100; depth at the wall, not percentage of stored volume.", style = MaterialTheme.typography.bodySmall)
         } else if (asset?.assetType in state.formOptions.waterLevelAssetTypes) {
             OptionPicker("Water level", state.waterLevel, state.formOptions.waterLevelOptionsForType(asset?.assetType.orEmpty()), onWaterLevelChange)
@@ -5514,7 +5536,8 @@ private fun selectWaterAsset(state: FieldUiState, assetId: String): FieldUiState
     return state.copy(
         selectedWaterAssetId = assetId,
         waterStatus = asset?.status.orEmpty(),
-        waterLevel = asset?.waterLevel.orEmpty(),
+        waterLevel = asset?.editableLevel.orEmpty(),
+        waterUnderflowing = asset?.isUnderflowing == true,
         waterActive = asset?.active ?: true,
         entityNote = "",
         entityNoteTags = "",
@@ -6072,7 +6095,8 @@ private fun queueWaterUpdate(state: FieldUiState, repo: MobileRepository): Field
     val waterLevel = if (asset?.assetType in state.formOptions.waterLevelAssetTypes) state.waterLevel else ""
     try {
         repo.queueWaterStatus(farm.id, state.selectedWaterAssetId, state.waterStatus, waterLevel, state.waterActive,
-            percentageLevel = asset?.assetType in state.formOptions.percentageWaterLevelTypes)
+            percentageLevel = asset?.assetType in state.formOptions.percentageWaterLevelTypes,
+            underflowing = state.waterUnderflowing)
     } catch (error: IllegalArgumentException) {
         return state.copy(statusMessage = error.message ?: "Invalid water percentage.")
     }
@@ -6604,7 +6628,7 @@ private fun defaultMobileFormOptions(): MobileFormOptions {
         percentageWaterLevelTypes = setOf("weir"),
         waterLevelOptions = waterLevels,
         waterLevelOptionsByType = mapOf(
-            "weir" to (waterLevels + MobileOption("overflowing", "Overflowing")),
+            "weir" to (waterLevels + listOf(MobileOption("overflowing", "Overflowing"), MobileOption("underflowing", "Under flowing"))),
             "ground_dam" to (waterLevels + MobileOption("overflowing", "Overflowing")),
         ),
     )

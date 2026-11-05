@@ -96,7 +96,7 @@ migrations, and after a heavy field-work day.
    `.\.venv\Scripts\python scripts/backup_agritrack.py --no-prune` and retain the
    archive outside the application directory as part of normal farm backups.
 2. Restore that archive to an isolated instance. Run `flask db upgrade` against
-   its database, checking revision `b8d4f0a2c613`, ID/timestamp preservation,
+   its database, checking revision `c9e5a1b3d724`, ID/timestamp preservation,
    percentage mappings, `PRAGMA foreign_key_check` and `PRAGMA integrity_check`.
    Import the proposed KML twice there; verify stable weir IDs/history, no weir
    paddock, no duplicate water asset and expected full-farm import effects.
@@ -107,7 +107,7 @@ migrations, and after a heavy field-work day.
    reset Alembic revisions; percentage observations cannot be downgraded safely.
 4. Install the corresponding Android build after backend migration. Confirm
    bootstrap advertises percentage weirs, record a fractional level and an
-   overflow transition, and sync an older queued categorical command. Older
+   overflow transition, record Under flowing and verify Damaged, and sync an older queued categorical command. Older
    commands remain valid; older displays should be upgraded to show percentages.
 5. Import the reviewed KML. From the water workspace, configure each polygon's
    wall and upstream centreline. The default 1 m depth remains visibly preliminary
@@ -118,6 +118,10 @@ For installations already at `a7c3e9f1b502`, the follow-up `b8d4f0a2c613` backfi
 polygon weirs' existing capacity field from the configured geometry. Make a fresh
 backup first. The atomic SQLite backfill holds a write lock, preserves timestamps
 and reading history, and leaves point-only weirs and other assets unchanged.
+
+Revision `c9e5a1b3d724` adds underflow to current and historical readings.
+Existing readings retain their recorded depth, flow and status. Once an
+underflow has been recorded, downgrade requires restoring the pre-upgrade backup.
 
 The 2026-10-31 restored-copy rehearsal converted 36 weirs and 156 history rows,
 preserving every existing non-level column and all non-weirs. Huiskamp Boonste

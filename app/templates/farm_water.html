@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "water/_weir_flow.html" import flow_select %}
 {% block title %}{{ farm.name }} Water | AgriTrack{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
@@ -200,7 +201,7 @@
       </div>
       <div data-create-weir-level hidden>
         <label>Water depth at wall (%)<input type="number" name="water_level_percent" min="0" max="100" step="0.01" value="0" disabled /></label>
-        <label>Overflowing<select name="is_overflowing" data-weir-overflow data-percent-name="water_level_percent" disabled><option value="0">No</option><option value="1">Overflowing (100%)</option></select></label>
+        <label>Flow condition{{ flow_select(disabled=true) }}</label>
       </div>
       <button type="submit" class="btn">Create Asset</button>
     </form>

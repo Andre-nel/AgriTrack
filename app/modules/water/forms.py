@@ -3,6 +3,15 @@ from app.services.water_network_service import WaterNetworkService
 
 def _level_fields(form, suffix=""):
     if "water_level_percent" + suffix in form:
+        if "weir_flow" + suffix in form:
+            flow = form["weir_flow" + suffix]
+            if flow not in {"normal", "overflowing", "underflowing"}:
+                raise ValueError("Choose a valid weir flow condition")
+            return {
+                "water_level_percent": form.get("water_level_percent" + suffix),
+                "is_overflowing": flow == "overflowing",
+                "is_underflowing": flow == "underflowing",
+            }
         overflow = form.get("is_overflowing" + suffix, "0")
         return {"water_level_percent": form.get("water_level_percent" + suffix), "is_overflowing": overflow}
     if "water_level" + suffix in form:
@@ -72,9 +81,6 @@ def water_asset_mass_update_form_payload(form, *, farm_id: str, asset_id: str) -
         "location_paddock_id": water_asset_mass_update_form_value(
             form, "location_paddock_id", asset_id
         ),
-        "latitude": water_asset_mass_update_form_value(form, "latitude", asset_id),
-        "longitude": water_asset_mass_update_form_value(form, "longitude", asset_id),
-        "altitude_m": water_asset_mass_update_form_value(form, "altitude_m", asset_id),
         "status": water_asset_mass_update_form_value(form, "status", asset_id),
         **_level_fields(form, f"__{asset_id}"),
         "capacity_m3": water_asset_mass_update_form_value(form, "capacity_m3", asset_id),
@@ -138,25 +144,10 @@ def water_mass_update_field_specs(selected_asset_types: list[str]) -> list[dict]
             "option_source": "paddocks",
         },
         {
-            "name": "latitude",
-            "label": "Latitude",
-            "kind": "number",
-            "asset_types": list(all_types),
-            "step": "0.0000001",
-        },
-        {
-            "name": "longitude",
-            "label": "Longitude",
-            "kind": "number",
-            "asset_types": list(all_types),
-            "step": "0.0000001",
-        },
-        {
             "name": "altitude_m",
             "label": "Altitude (m)",
-            "kind": "number",
+            "kind": "readonly",
             "asset_types": list(all_types),
-            "step": "0.01",
         },
         {
             "name": "status",

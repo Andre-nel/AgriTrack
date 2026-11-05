@@ -55,7 +55,11 @@
       const species = form.querySelector('[data-trade-species]');
       const confirm = form.querySelector('[data-confirm-import]');
       function invalidatePreview() {
-        if (confirm) confirm.disabled = true;
+        if (confirm) {
+          confirm.disabled = true;
+          const status = document.querySelector('[data-weight-preview-status]');
+          if (status) status.textContent = 'Details changed. Select Preview changes to refresh these weights and prices before saving.';
+        }
       }
       function refreshGroups() {
         const groups = container.querySelectorAll('[data-trade-group]');
@@ -316,8 +320,88 @@
     });
   }
 
+  function setupWeightScatter() {
+    const payloadEl = document.getElementById('tradeWeightChartData');
+    if (!payloadEl || !window.Chart) return;
+
+    const groups = JSON.parse(payloadEl.textContent);
+    const section = payloadEl.closest('[data-trade-weight-chart]');
+    const canvas = section.querySelector('canvas');
+    const colors = ['#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#17becf', '#e377c2'];
+    const shapes = ['circle', 'triangle', 'rect', 'rectRot'];
+    const datasets = groups.map(function (group, index) {
+      return {
+        label: group.label,
+        // Preserve input order and repeated weights; x is local to each group.
+        data: group.weights.map(function (weight, animalIndex) {
+          return { x: animalIndex + 1, y: Number(weight) };
+        }),
+        borderColor: colors[index % colors.length],
+        backgroundColor: colors[index % colors.length],
+        pointStyle: shapes[index % shapes.length],
+        pointRadius: 4,
+        pointHoverRadius: 7,
+        pointHitRadius: 8,
+      };
+    });
+    section.querySelector('.trade-weight-chart-wrap').hidden = false;
+    const chart = new Chart(canvas, {
+      type: 'scatter',
+      data: { datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'nearest', axis: 'xy', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: function () { return ''; },
+              label: function (context) {
+                // Bound long group labels so tooltips fit on narrow screens.
+                const lines = context.dataset.label.match(/.{1,30}/gu) || [];
+                lines.push('Animal ' + context.parsed.x + ': ' + formatValue('kg', context.parsed.y));
+                return lines;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            min: 1,
+            suggestedMax: 2,
+            offset: true,
+            title: { display: true, text: 'Animal number within group' },
+            ticks: { precision: 0, maxTicksLimit: 12 },
+          },
+          y: {
+            grace: '5%',
+            title: { display: true, text: 'Weight (kg)' },
+            ticks: { callback: function (value) { return numberFormat(value, 0, 3); } },
+          },
+        },
+      },
+    });
+
+    // Native controls work with touch and keyboard, unlike a canvas-only legend.
+    section.querySelectorAll('[data-weight-chart-group]').forEach(function (group, index) {
+      const checkbox = group.querySelector('input');
+      const swatch = group.querySelector('.trade-weight-swatch');
+      checkbox.hidden = false;
+      swatch.hidden = false;
+      swatch.style.backgroundColor = datasets[index].backgroundColor;
+      checkbox.addEventListener('change', function () {
+        chart.setDatasetVisibility(index, checkbox.checked);
+        chart.update('none');
+      });
+    });
+    section.querySelector('[data-weight-chart-fallback]').hidden = true;
+  }
+
   setupImportIdGenerator();
   setupTradeForms();
   setupGroupedForms();
   setupCharts();
+  setupWeightScatter();
 })();

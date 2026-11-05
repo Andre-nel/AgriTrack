@@ -29,13 +29,19 @@ for the historical-estimate basis and its limitations.
 
 ## Water levels and trough supply
 
-Weirs store `water_level_percent` (0–100, at most two decimal places) and
-`is_overflowing`. Overflowing requires 100%. Null is unknown, never empty.
+Weirs store `water_level_percent` (0–100, at most two decimal places) separately
+from the flow condition. Overflowing requires 100%. Under flowing accepts any
+measured depth, including unknown, and automatically sets the weir's status to
+Damaged. Clearing Under flowing allows the operator to change status again.
 The percentage measures maximum water depth at the wall, not stored volume.
 Other asset types keep categorical levels; ground dams still support Overflowing.
 Legacy weir categories and queued mobile commands pass through
 `app/services/water_level.py`. API `water_level` remains a derived numeric string
-or `overflowing`; `water_level_label` supplies the display text.
+or a flow token (`overflowing` or `underflowing`). `water_level_label` supplies the display text.
+
+Mass Update displays altitude in metres as a read-only value. Latitude and
+longitude are available in the individual asset editor. Mass Update ignores
+all three location measurements in submitted forms.
 
 A trough with any active upstream connection path containing a weir displays its
 own reported reading, even when that source is dry or inactive. Supply warnings
